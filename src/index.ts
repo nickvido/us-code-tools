@@ -40,26 +40,66 @@ async function runBackfillCommand(args: string[]): Promise<number> {
 }
 
 function parseBackfillArgs(args: string[]): { ok: true; value: { phase: 'constitution'; target: string } } | { ok: false; error: string } {
-  const phaseIndex = args.indexOf('--phase');
-  const targetIndex = args.indexOf('--target');
+  let phase: string | null = null;
+  let target: string | null = null;
 
-  if (phaseIndex === -1 || !args[phaseIndex + 1]) {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === '--phase') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --phase flag' };
+      }
+
+      if (phase !== null) {
+        return { ok: false, error: 'Duplicate --phase flag' };
+      }
+
+      phase = value;
+      index += 1;
+      continue;
+    }
+
+    if (token === '--target') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --target flag' };
+      }
+
+      if (target !== null) {
+        return { ok: false, error: 'Duplicate --target flag' };
+      }
+
+      target = value;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith('--')) {
+      return { ok: false, error: `Unknown flag '${token}'` };
+    }
+
+    return { ok: false, error: `Unknown argument '${token}'` };
+  }
+
+  if (phase === null) {
     return { ok: false, error: 'Missing required --phase flag' };
   }
 
-  if (targetIndex === -1 || !args[targetIndex + 1]) {
+  if (target === null) {
     return { ok: false, error: 'Missing required --target flag' };
   }
 
-  if (args[phaseIndex + 1] !== 'constitution') {
-    return { ok: false, error: `Unsupported --phase '${args[phaseIndex + 1]}'; expected 'constitution'` };
+  if (phase !== 'constitution') {
+    return { ok: false, error: `Unsupported --phase '${phase}'; expected 'constitution'` };
   }
 
   return {
     ok: true,
     value: {
       phase: 'constitution',
-      target: resolve(args[targetIndex + 1]),
+      target: resolve(target),
     },
   };
 }
