@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 function cliPath() {
@@ -43,6 +43,72 @@ describe('backfill CLI argument validation', () => {
     expect(result.status).not.toBe(0);
     const output = `${result.stdout}${result.stderr}`;
     expect(output).toContain('Unsupported --phase');
+  });
+
+  it('rejects unknown flags before any side effects', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'us-code-tools-test-'));
+    const target = resolve(root, 'target-repo');
+
+    const result = runBackfill([
+      '--phase',
+      'constitution',
+      '--target',
+      target,
+      '--bogus',
+      '--another',
+      'ignored',
+    ]);
+
+    expect(result.status).not.toBe(0);
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).toContain('Usage: backfill');
+    expect(existsSync(target)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects duplicate --phase flags', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'us-code-tools-test-'));
+    const target = resolve(root, 'target-repo');
+
+    const result = runBackfill([
+      '--phase',
+      'constitution',
+      '--target',
+      target,
+      '--phase',
+      'constitution',
+    ]);
+
+    expect(result.status).not.toBe(0);
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).toContain('Usage: backfill');
+    expect(existsSync(target)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects duplicate --target flags', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'us-code-tools-test-'));
+    const target1 = resolve(root, 'target-repo-1');
+    const target2 = resolve(root, 'target-repo-2');
+
+    const result = runBackfill([
+      '--phase',
+      'constitution',
+      '--target',
+      target1,
+      '--target',
+      target2,
+    ]);
+
+    expect(result.status).not.toBe(0);
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).toContain('Usage: backfill');
+    expect(existsSync(target1)).toBe(false);
+    expect(existsSync(target2)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('rejects a file path target', () => {
