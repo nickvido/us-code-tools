@@ -1,10 +1,10 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { resolveCurrentCongressScope, type CurrentCongressResolution } from '../utils/fetch-config.js';
 import { getCachePaths } from '../utils/cache.js';
 import { createRateLimitState, isRateLimitExhausted, markRateLimitUse } from '../utils/rate-limit.js';
 import { readManifest, writeManifest, type CongressRunState, type FetchManifest } from '../utils/manifest.js';
+import { evaluateCongressMemberSnapshotFreshness } from './congress-member-snapshot.js';
 
 export interface FetchInvocation {
   force: boolean;
@@ -210,7 +210,7 @@ async function ensureMemberSnapshot(args: {
     }
 > {
   const snapshot = args.manifest.sources.congress.member_snapshot;
-  const snapshotFreshness = await evaluateMemberSnapshotFreshness(snapshot, args.sourceDirectory);
+  const snapshotFreshness = await evaluateCongressMemberSnapshotFreshness(snapshot, args.sourceDirectory);
 
   if (!args.force && snapshotFreshness.isReusable) {
     return {
@@ -277,41 +277,6 @@ async function ensureMemberSnapshot(args: {
       member_details: memberDetailCount,
     },
   };
-}
-
-async function evaluateMemberSnapshotFreshness(
-  snapshot: FetchManifest['sources']['congress']['member_snapshot'],
-  sourceDirectory: string,
-): Promise<{ isReusable: boolean; rebuildStatus: 'missing' | 'incomplete' | 'stale' }> {
-  if (snapshot.status !== 'complete') {
-    return {
-      isReusable: false,
-      rebuildStatus: snapshot.status === 'incomplete' ? 'incomplete' : snapshot.status === 'missing' ? 'missing' : 'stale',
-    };
-  }
-
-  if (snapshot.snapshot_completed_at === null || snapshot.cache_ttl_ms === null) {
-    return { isReusable: false, rebuildStatus: 'stale' };
-  }
-
-  const completedAt = Date.parse(snapshot.snapshot_completed_at);
-  if (!Number.isFinite(completedAt) || (completedAt + snapshot.cache_ttl_ms) <= Date.now()) {
-    return { isReusable: false, rebuildStatus: 'stale' };
-  }
-
-  if (snapshot.artifacts.length === 0) {
-    return { isReusable: false, rebuildStatus: 'stale' };
-  }
-
-  for (const artifact of snapshot.artifacts) {
-    try {
-      await access(resolve(sourceDirectory, artifact), fsConstants.F_OK);
-    } catch {
-      return { isReusable: false, rebuildStatus: 'stale' };
-    }
-  }
-
-  return { isReusable: true, rebuildStatus: 'stale' };
 }
 
 function resolveRequestedCongresses(

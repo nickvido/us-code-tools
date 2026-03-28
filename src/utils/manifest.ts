@@ -97,8 +97,15 @@ export interface LegislatorsCrossReferenceState {
   updated_at: string | null;
 }
 
+export interface DownloadedFileManifestEntry {
+  path: string;
+  byte_count: number;
+  checksum_sha256: string;
+  fetched_at: string;
+}
+
 export interface LegislatorsManifestState extends SourceStatusSummary {
-  files: Record<string, unknown>;
+  files: Record<string, DownloadedFileManifestEntry>;
   cross_reference: LegislatorsCrossReferenceState;
 }
 
@@ -288,7 +295,7 @@ function normalizeLegislatorsState(value: unknown): LegislatorsManifestState {
 
   return {
     ...base,
-    files: isObject(candidate?.files) ? candidate.files : {},
+    files: normalizeDownloadedFiles(candidate?.files),
     cross_reference: normalizeCrossReference(candidate?.cross_reference),
   };
 }
@@ -434,6 +441,35 @@ function normalizeGovInfoCheckpoints(value: unknown): Record<string, GovInfoChec
       retained_not_finalized: toStringArray(entry.retained_not_finalized),
       finalized_package_ids: toStringArray(entry.finalized_package_ids),
       updated_at: typeof entry.updated_at === 'string' ? entry.updated_at : new Date(0).toISOString(),
+    };
+  }
+
+  return normalized;
+}
+
+function normalizeDownloadedFiles(value: unknown): Record<string, DownloadedFileManifestEntry> {
+  if (!isObject(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, DownloadedFileManifestEntry> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!isObject(entry)) {
+      continue;
+    }
+
+    const path = typeof entry.path === 'string' ? entry.path : null;
+    const checksum = typeof entry.checksum_sha256 === 'string' ? entry.checksum_sha256 : null;
+    const fetchedAt = typeof entry.fetched_at === 'string' ? entry.fetched_at : null;
+    if (path === null || checksum === null || fetchedAt === null) {
+      continue;
+    }
+
+    normalized[key] = {
+      path,
+      byte_count: toNonNegativeInteger(entry.byte_count),
+      checksum_sha256: checksum,
+      fetched_at: fetchedAt,
     };
   }
 
