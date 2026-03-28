@@ -22,8 +22,8 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: CLI dispatcher, existing transform tests -->
 - [ ] The CLI rejects each invalid invocation with a non-zero exit code and a deterministic error message: missing `--phase`, missing `--target`, unsupported `--phase`, and `--target` resolving to a non-directory path.  
   <!-- Touches: CLI parser/validator, CLI tests -->
-- [ ] The CLI accepts both an existing local git repository path and a non-existent target path that can be created or cloned for use by the backfill workflow.  
-  <!-- Touches: repository opener/cloner adapter, integration tests -->
+- [ ] The CLI accepts either: (a) an existing local git repository whose history is empty or already matches a prefix of the 28-event Constitution plan, or (b) a non-existent target path that the workflow can create as a new git repository before backfilling. It must reject a target repository containing unrelated pre-existing commits with a deterministic non-zero exit and error message, rather than appending Constitution history after unrelated commits.  
+  <!-- Touches: repository opener/precondition validator, integration tests -->
 
 ### 2. Static Constitution Dataset
 - [ ] Commit a static Constitution dataset in this repository containing exactly 7 articles and 27 amendments, each with: `type`, `number`, `heading`, `proposed`, `ratified`, `proposing_body`, `source`, and full markdown-ready text content.  
@@ -54,7 +54,7 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: planner, unit tests -->
 
 ### 5. Commit Authoring and Messages
-- [ ] Each historical commit is created with both `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the ratification date for that event in `YYYY-MM-DDT00:00:00` local time or an equivalently deterministic full-date format accepted by git.  
+- [ ] Each historical commit is created with both `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to exactly `YYYY-MM-DDT00:00:00+0000` for that event’s ratification date (for example, Amendment XXVII must use `1992-05-07T00:00:00+0000` for both variables).  
   <!-- Touches: git commit adapter, unit/integration tests -->
 - [ ] The commit author name and email are derived from the proposing body for the event and are deterministic for all 28 events, including `Constitutional Convention <convention@constitution.gov>` for the original Constitution and congress-specific identities for amendments proposed by Congress.  
   <!-- Touches: author mapping logic, planner/commit tests -->
@@ -80,7 +80,7 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: commit message formatter, snapshot tests -->
 
 ### 6. Repository Orchestration and Idempotency
-- [ ] ⚡ Implement repository orchestration that can open or prepare the target repository, apply planned file writes, create commits, and invoke a push step through a repository adapter that is mockable in tests.  
+- [ ] ⚡ Implement repository orchestration that can open or prepare the target repository, apply planned file writes, create commits, and invoke a push step through a repository adapter that is mockable in tests. The success contract is explicit: the command exits `0` only after all 28 planned local commits have been created (or found already present on a re-run) and the adapter’s push step reports success; any push error must make the command exit non-zero after local history creation completes.  
   <!-- Touches: repository adapter, backfill orchestrator, integration tests -->
 - [ ] Running Constitution backfill against an empty temp git repository creates exactly 28 commits on the current branch, leaves all 34 Constitution markdown files present in the working tree, and leaves the working tree clean at process exit.  
   <!-- Touches: orchestrator, git adapter, integration tests -->
@@ -96,7 +96,7 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: new `tests/` suites -->
 - [ ] Add snapshot tests for at least: Article I markdown, Amendment I markdown, Amendment XIV commit message, and the Constitution commit message.  
   <!-- Touches: snapshot fixtures/tests -->
-- [ ] Add an integration test that runs Constitution backfill against a temporary git repository and verifies all of the following mechanically: 34 rendered files exist, `git rev-list --count HEAD` equals `28`, `git log --reverse --format="%ai %s"` starts on `1788-06-21`, ends on `1992-05-07`, and never decreases by date, and a second run leaves commit count unchanged.  
+- [ ] Add an integration test that runs Constitution backfill against a temporary git repository and verifies all of the following mechanically: 34 rendered files exist, `git rev-list --count HEAD` equals `28`, `git log --reverse --format="%ai %s"` starts with `1788-06-21 00:00:00 +0000`, ends with `1992-05-07 00:00:00 +0000`, never decreases by date, and a second run leaves commit count unchanged.  
   <!-- Touches: end-to-end integration tests -->
 - [ ] `npm test` and `npm run build` both exit `0` after implementation.  
   <!-- Touches: package scripts, TypeScript config, all new code -->
@@ -123,15 +123,16 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 5. Verify `constitution/article-I.md` through `constitution/article-VII.md` and `constitution/amendment-01.md` through `constitution/amendment-27.md` exist in the target repo.
 6. Parse frontmatter from several files and verify required keys plus expected ratified/proposed/source values.
 7. Run `git rev-list --count HEAD` in the target repo; expect `28`.
-8. Run `git log --reverse --format="%ai %s"`; verify the first entry is dated `1788-06-21`, the last entry is dated `1992-05-07`, Amendments I–X appear in numeric order on `1791-12-15`, and dates never decrease.
+8. Run `git log --reverse --format="%ai %s"`; verify the first entry begins `1788-06-21 00:00:00 +0000`, the last begins `1992-05-07 00:00:00 +0000`, Amendments I–X appear in numeric order on `1791-12-15`, and dates never decrease.
 9. Re-run `npx us-code-tools backfill --phase=constitution --target <temp-repo>`; verify commit count remains `28`.
 10. Simulate a partial repo by resetting to an early Constitution commit or preparing a repo with only the first N planned events; rerun backfill and verify only missing later events are added.
-11. Simulate a push failure in tests via the repository adapter and verify local commits remain intact while the command exits non-zero.
-12. Run `npm test`; expect unit, snapshot, and integration suites to pass.
+11. Simulate a target repo with unrelated pre-existing commits; verify the command exits non-zero with the documented error and does not append Constitution commits after that history.
+12. Simulate a push failure in tests via the repository adapter and verify local commits remain intact while the command exits non-zero.
+13. Run `npm test`; expect unit, snapshot, and integration suites to pass.
 
 ## Edge Case Catalog
 - Missing CLI args, unsupported `--phase`, empty `--target`, repeated flags, extra unknown flags, and `--target` pointing at a regular file instead of a directory
-- Non-existent target path, existing empty directory, existing git repo, existing non-git directory, detached HEAD target repo, and target repo with unrelated commits already present
+- Non-existent target path, existing empty directory, existing git repo with a Constitution-history prefix, existing non-git directory, detached HEAD target repo, and target repo with unrelated commits already present (must be rejected, not appended to)
 - Partial-progress repositories where some Constitution commits already exist, including gaps after the Constitution commit or within the Bill of Rights sequence
 - Duplicate dataset records, missing article/amendment numbers, malformed dates, empty headings, missing source URLs, truncated text, BOM-prefixed text, or invalid UTF-8 in static source assets
 - Deterministic ordering for same-day ratifications, especially Amendments I–X on `1791-12-15`
