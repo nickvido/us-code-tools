@@ -17,7 +17,7 @@
 - `tests/cli/fetch.test.ts` — fetch CLI validation, `--status`, source ordering, bulk scope behavior.
 - `tests/utils/fetch-config.test.ts` — current Congress override/live/fallback behavior.
 - `tests/utils/manifest.test.ts` — manifest normalization/defaulting and atomic write expectations.
-- `tests/utils/rate-limit.test.ts` — limiter arithmetic and exhaustion timing.
+- `tests/utils/rate-limit.test.ts` — limiter arithmetic and exhaustion timing for the shared helper primitives.
 - `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures.
 - `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
 - `tests/adversary-round1-issue3.test.ts` — configured remote without upstream must still push current branch explicitly.
@@ -59,6 +59,7 @@
 - The adversary regression creates a local bare remote and confirms remote HEAD matches the local branch after `git push --set-upstream <remote> <branch>`.
 - Issue #5 tests assume offline-by-default behavior; `src/commands/fetch.ts` has a VITEST/live-test shortcut path for `--all` CLI tests.
 - The round-9 adversary regression asserts that a later skipped legislators run must remove any pre-existing `data/cache/legislators/bioguide-crosswalk.json` rather than only updating manifest state.
+- The current branch does **not** yet have regression coverage proving a single shared in-process limiter across Congress/GovInfo modules or `Retry-After` header translation into `rate_limit_exhausted`/`next_request_at`; the latest adversary review rejected the branch on those two gaps.
 - Full suite still depends on a built `dist/index.js` because transform/backfill/fetch CLI tests execute the compiled entrypoint.
 
 ## Phase 1 Scope (Current)

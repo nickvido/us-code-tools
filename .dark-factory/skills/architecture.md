@@ -25,7 +25,7 @@
 - `src/utils/manifest.ts` — manifest schema normalization, empty-manifest defaults, atomic manifest writes.
 - `src/utils/fetch-config.ts` — current Congress resolution (`override`/`live`/`fallback`) and fallback warning path.
 - `src/utils/logger.ts` — structured network logging with `api_key` redaction.
-- `src/utils/rate-limit.ts` — sliding-window limiter helpers used by Congress/GovInfo.
+- `src/utils/rate-limit.ts` — sliding-window limiter helpers used by Congress/GovInfo; currently exports primitives only, and the branch still instantiates separate per-module limiter state in `src/sources/congress.ts` and `src/sources/govinfo.ts`.
 - `src/transforms/` — USLM parsing, markdown rendering, and output writing for `transform`.
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
@@ -119,6 +119,8 @@
   - structured logs redact `api_key` query params via `src/utils/logger.ts`
   - Congress/GovInfo stop immediately on limiter exhaustion and return `next_request_at` instead of sleeping until the next window
   - legislators skip states must not leave a stale `data/cache/legislators/bioguide-crosswalk.json` on disk
+  - open adversary gap on this branch: Congress and GovInfo still do **not** share one in-process limiter singleton; each source creates its own module-local state, so the combined budget can exceed the single-key contract until implementation is centralized
+  - open adversary gap on this branch: `Retry-After` headers from Congress.gov/GovInfo are not yet translated into the machine-readable `rate_limit_exhausted`/`next_request_at` terminal path
 
 ## Things Future Agents Should Notice
 - `docs/architecture/3-architecture.md` proposes an `authors.ts` split, but the current implementation keeps author identity inside `src/backfill/constitution/dataset.ts`; do not assume a separate author module exists.

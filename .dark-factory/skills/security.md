@@ -34,6 +34,7 @@
 - `src/utils/rate-limit.ts`
   - enforces sliding-window exhaustion with a machine-readable `nextRequestAt`
   - interactive runs stop on exhaustion instead of waiting for the next hour
+  - currently provides shared primitives, but the branch has not yet centralized Congress/GovInfo onto one singleton limiter instance
 - `src/sources/congress-member-snapshot.ts`
   - treats the Congress member snapshot as reusable only when status is `complete`, `snapshot_completed_at + cache_ttl_ms` is still fresh, and every referenced artifact still exists on disk
 - `src/sources/unitedstates.ts`
@@ -101,7 +102,8 @@
 - Rejection of non-prefix history is intentional; this phase does not repair or rewrite history.
 - Local-only repos with no remote are valid success cases (`pushResult: skipped-local-only`).
 - `git fast-import` is intentional for historical author/date control; do not replace it casually with ordinary `git commit` without revalidating exact-history guarantees.
-- Congress and GovInfo each instantiate a same-shaped module-local limiter rather than importing one shared singleton; document/adjust carefully instead of assuming cross-module coordination already exists.
+- Congress and GovInfo each instantiate a same-shaped module-local limiter rather than importing one shared singleton; this is an active spec violation on the current branch, not an intentional long-term design.
+- Congress and GovInfo currently collapse upstream throttle responses into generic request failures; `Retry-After` is not yet honored as a machine-readable exhaustion horizon, which remains an active adversary finding.
 - VoteView indexing is currently in-memory only; lack of on-disk index files is an implementation choice, not accidental data loss.
 - The fallback current-congress path is expected to mark runs degraded/operator-review-required; that warning path is part of the contract.
 

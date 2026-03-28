@@ -119,6 +119,20 @@
 - **Consequence:** Manifest state and filesystem artifacts stay consistent; future skip-path changes must preserve this cleanup behavior.
 - **Feature:** #5 Data Acquisition
 
+### ADR-018: Congress/GovInfo must share one in-process limiter singleton
+- **Status:** Proposed / not yet implemented on current branch
+- **Context:** The spec and architecture bind Congress.gov and GovInfo to one `API_DATA_GOV_KEY` budget, but the current branch creates separate `sharedLimiter` instances inside `src/sources/congress.ts` and `src/sources/govinfo.ts`.
+- **Decision:** Centralize limiter state in shared infrastructure (expected under `src/utils/rate-limit.ts` or a sibling shared module) and have both sources consult/mutate that same singleton before request dispatch.
+- **Consequence:** Until this lands, the branch can oversubscribe the single-key hourly budget across the two sources and remains adversary-rejected.
+- **Feature:** #5 Data Acquisition
+
+### ADR-019: Upstream `Retry-After` must map to the fetch exhaustion contract
+- **Status:** Proposed / not yet implemented on current branch
+- **Context:** The spec requires honoring `Retry-After`, but current Congress/GovInfo response handling turns throttle responses into generic `upstream_request_failed` errors.
+- **Decision:** Parse `Retry-After` in shared retry/rate-limit infrastructure and surface it as `error.code="rate_limit_exhausted"` plus `next_request_at` instead of dropping the server-provided retry horizon.
+- **Consequence:** Until this lands, operators cannot reliably resume from upstream-directed throttle windows and the branch remains out of spec.
+- **Feature:** #5 Data Acquisition
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - transform ADRs for issue #1
