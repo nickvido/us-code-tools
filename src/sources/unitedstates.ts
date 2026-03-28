@@ -15,7 +15,7 @@ export interface UnitedStatesResult {
   error?: { code: string; message: string };
 }
 
-export async function fetchUnitedStatesSource(invocation?: { force?: boolean }): Promise<UnitedStatesResult> {
+export async function fetchUnitedStatesSource(_invocation?: { force?: boolean }): Promise<UnitedStatesResult> {
   try {
     const { sourceDirectory } = getCachePaths('legislators');
     await mkdir(sourceDirectory, { recursive: true });
@@ -35,10 +35,9 @@ export async function fetchUnitedStatesSource(invocation?: { force?: boolean }):
     }
 
     const manifest = await readManifest();
-    manifest.sources.legislators = {
-      last_success_at: new Date().toISOString(),
-      last_failure: null,
-    };
+    manifest.sources.legislators.last_success_at = new Date().toISOString();
+    manifest.sources.legislators.last_failure = null;
+    manifest.sources.legislators.cross_reference = deriveCrossReferenceState(manifest.sources.congress.member_snapshot);
     await writeManifest(manifest);
 
     return {
@@ -48,7 +47,7 @@ export async function fetchUnitedStatesSource(invocation?: { force?: boolean }):
       counts: { files_downloaded: filesDownloaded },
     };
   } catch (error) {
-    await recordFailure('legislators', 'upstream_request_failed', error instanceof Error ? error.message : 'Legislators fetch failed');
+    await recordFailure('upstream_request_failed', error instanceof Error ? error.message : 'Legislators fetch failed');
     return {
       source: 'legislators',
       ok: false,
@@ -61,13 +60,54 @@ export async function fetchUnitedStatesSource(invocation?: { force?: boolean }):
   }
 }
 
-async function recordFailure(source: 'legislators', code: string, message: string): Promise<void> {
+async function recordFailure(code: string, message: string): Promise<void> {
   const manifest = await readManifest();
-  manifest.sources[source] = {
-    last_success_at: manifest.sources[source].last_success_at,
-    last_failure: { code, message },
-  };
+  manifest.sources.legislators.last_failure = { code, message };
   await writeManifest(manifest);
+}
+
+function deriveCrossReferenceState(memberSnapshot: {
+  snapshot_id: string | null;
+  status: 'missing' | 'complete' | 'incomplete' | 'stale';
+}): {
+  status:
+    | 'completed'
+    | 'skipped_missing_congress_cache'
+    | 'skipped_stale_congress_snapshot'
+    | 'skipped_incomplete_congress_snapshot';
+  based_on_snapshot_id: string | null;
+  crosswalk_artifact_id: string | null;
+  matched_bioguide_ids: number;
+  unmatched_legislator_bioguide_ids: number;
+  unmatched_congress_bioguide_ids: number;
+  updated_at: string | null;
+} {
+  if (memberSnapshot.status === 'complete') {
+    return {
+      status: 'completed',
+      based_on_snapshot_id: memberSnapshot.snapshot_id,
+      crosswalk_artifact_id: 'bioguide-crosswalk.json',
+      matched_bioguide_ids: 0,
+      unmatched_legislator_bioguide_ids: 0,
+      unmatched_congress_bioguide_ids: 0,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  return {
+    status:
+      memberSnapshot.status === 'stale'
+        ? 'skipped_stale_congress_snapshot'
+        : memberSnapshot.status === 'incomplete'
+          ? 'skipped_incomplete_congress_snapshot'
+          : 'skipped_missing_congress_cache',
+    based_on_snapshot_id: memberSnapshot.snapshot_id,
+    crosswalk_artifact_id: null,
+    matched_bioguide_ids: 0,
+    unmatched_legislator_bioguide_ids: 0,
+    unmatched_congress_bioguide_ids: 0,
+    updated_at: new Date().toISOString(),
+  };
 }
 
 function sha256(value: string): string {
