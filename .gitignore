@@ -1,12 +1,8 @@
-# Dependencies
 node_modules/
-
-# Build output
 dist/
 *.tsbuildinfo
-
-# Environment & secrets
 .env
+<<<<<<< HEAD
 .env.*
 !.env.example
 <<<<<<< HEAD
@@ -36,8 +32,7 @@ Thumbs.db
 *.zip
 
 # Test coverage
+=======
+.env.local
+>>>>>>> 39f0976 (scaffold: project scaffolding for #1)
 coverage/
-
-# Logs
-*.log
-logs/
