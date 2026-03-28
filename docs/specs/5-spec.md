@@ -174,8 +174,10 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
   <!-- Touches: src/index.ts, tests/cli/fetch.test.ts -->
 - [ ] `fetch --all --congress=<n>` narrows only the congress-scoped sources: Congress.gov to congress `<n>` and GovInfo to the congress-filtered PLAW mode for `<n>`; OLRC, VoteView, and legislators keep their normal full-source behavior.
   <!-- Touches: src/index.ts, tests/cli/fetch.test.ts -->
-- [ ] In `fetch --all`, a per-source failure for Congress.gov or GovInfo caused by missing credentials, rejected credentials, rate-limit exhaustion, or upstream request failure does not prevent the remaining sources from running; the overall command exits `1` if any source fails.
+- [ ] In `fetch --all`, each source (`olrc`, `congress`, `govinfo`, `voteview`, `legislators`) is fail-open with respect to the remaining sources: if any one source returns a source-scoped failure result, the command still attempts every later source in deterministic order, emits one top-level JSON result object for every source whether successful or failed, and exits `1` iff one or more source results are failures.
   <!-- Touches: src/index.ts, tests/cli/fetch.test.ts -->
+- [ ] Source-scoped `fetch --all` failures for OLRC, Congress.gov, GovInfo, VoteView, and legislators must preserve the same per-source artifact/manifest safety rules that apply to their standalone commands; later sources are not marked `skipped` solely because an earlier source failed.
+  <!-- Touches: src/index.ts, src/utils/manifest.ts, tests/cli/fetch.test.ts -->
 - [ ] `fetch --status` prints a single JSON object to stdout describing manifest state for all five sources, including last-success timestamps and the most recent recorded failure (if any) per source.
   <!-- Touches: src/index.ts, src/utils/manifest.ts, tests/cli/fetch-status.test.ts -->
 - [ ] `.gitignore` excludes `data/` so fetched raw artifacts and manifest state are not committed.
@@ -213,9 +215,10 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
 13. Run `npx us-code-tools fetch --source=legislators` without cached Congress member data. Verify the YAML files are cached and the manifest records `cross_reference_status: "skipped_missing_congress_cache"`.
 14. Populate Congress member cache, then re-run `npx us-code-tools fetch --source=legislators`. Verify `data/cache/legislators/bioguide-crosswalk.json` is written and manifest crosswalk counts match fixture expectations.
 15. Run `npx us-code-tools fetch --all` with `CURRENT_CONGRESS_OVERRIDE=119`. Verify source order is `olrc`, `congress`, `govinfo`, `voteview`, `legislators`; Congress.gov covers congresses `93..119`; the global Congress member snapshot runs at most once for the whole command; GovInfo runs in unfiltered mode; and the JSON summary publishes `bulk_scope.congress.start=93` and `bulk_scope.congress.current=119`.
-16. Run `npx us-code-tools fetch --all --congress=118`. Verify Congress.gov and GovInfo are narrowed to congress `118`, while OLRC/VoteView/legislators still run their full-source behavior.
-17. Start two concurrent fetches targeting the same source/cache path using fixtures. Verify the final manifest remains valid JSON and references only complete artifacts; if one command loses, it fails with the deterministic conflict/runtime error rather than corrupting state.
-18. Run `npm test` in default mode. Verify the suite passes without live-network access. Enable the live-test env flag and verify one real call per source is exercised, gated so CI can skip it.
+16. Run `npx us-code-tools fetch --all --congress=118` with a fixture setup that forces OLRC failure while the other four sources can succeed. Verify the command still invokes `congress`, `govinfo`, `voteview`, and `legislators` in order; stdout includes five top-level source result objects; OLRC is reported as failed; later sources are not reported as skipped solely because OLRC failed; and the overall exit code is `1`.
+17. Run `npx us-code-tools fetch --all --congress=118` with a fixture setup that forces a late-source failure (for example `legislators`) after earlier sources succeed. Verify the command still emits five source result objects, preserves the earlier successful artifacts/manifest entries, reports the late source as failed, and exits `1`.
+18. Start two concurrent fetches targeting the same source/cache path using fixtures. Verify the final manifest remains valid JSON and references only complete artifacts; if one command loses, it fails with the deterministic conflict/runtime error rather than corrupting state.
+19. Run `npm test` in default mode. Verify the suite passes without live-network access. Enable the live-test env flag and verify one real call per source is exercised, gated so CI can skip it.
 
 ## Edge Case Catalog
 - Invalid CLI combinations, unknown sources, malformed congress values, empty strings, and numbers outside `Number.isSafeInteger`
