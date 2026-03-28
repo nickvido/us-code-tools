@@ -119,18 +119,18 @@
 - **Consequence:** Manifest state and filesystem artifacts stay consistent; future skip-path changes must preserve this cleanup behavior.
 - **Feature:** #5 Data Acquisition
 
-### ADR-018: Congress/GovInfo must share one in-process limiter singleton
-- **Status:** Proposed / not yet implemented on current branch
-- **Context:** The spec and architecture bind Congress.gov and GovInfo to one `API_DATA_GOV_KEY` budget. `src/utils/rate-limit.ts` now exports `getSharedApiDataGovLimiter()`, but the current branch still creates separate module-local `sharedLimiter` instances inside `src/sources/congress.ts` and `src/sources/govinfo.ts` instead of using that helper.
-- **Decision:** Wire both sources to the existing shared infrastructure in `src/utils/rate-limit.ts` (or an equivalent shared limiter module) and have both request paths consult/mutate that same singleton before request dispatch.
-- **Consequence:** Until the sources actually switch over, the branch can oversubscribe the single-key hourly budget across the two sources and remains adversary-rejected.
+### ADR-018: Congress/GovInfo share one in-process limiter singleton
+- **Status:** Active
+- **Context:** The spec and architecture bind Congress.gov and GovInfo to one `API_DATA_GOV_KEY` budget.
+- **Decision:** Both `src/sources/congress.ts` and `src/sources/govinfo.ts` call `getSharedApiDataGovLimiter()` from `src/utils/rate-limit.ts` before dispatching requests and update that same singleton with `markRateLimitUse()`.
+- **Consequence:** One process now enforces a single rolling-window budget across both sources; tests should mock the shared helper module rather than assuming per-source limiter state.
 - **Feature:** #5 Data Acquisition
 
-### ADR-019: Upstream `Retry-After` must map to the fetch exhaustion contract
-- **Status:** Proposed / not yet implemented on current branch
-- **Context:** The spec requires honoring `Retry-After`, but current Congress/GovInfo response handling turns throttle responses into generic `upstream_request_failed` errors.
-- **Decision:** Parse `Retry-After` in shared retry/rate-limit infrastructure and surface it as `error.code="rate_limit_exhausted"` plus `next_request_at` instead of dropping the server-provided retry horizon.
-- **Consequence:** Until this lands, operators cannot reliably resume from upstream-directed throttle windows and the branch remains out of spec.
+### ADR-019: Upstream `Retry-After` must stay numeric until result normalization
+- **Status:** Proposed / partially implemented on current branch
+- **Context:** Congress/GovInfo now parse `Retry-After` via `parseRetryAfter()`, but their `429` branches still throw `nextRequestAt` as an ISO string. `normalizeError()` in both modules only serializes numeric timestamps into the public `next_request_at` field.
+- **Decision:** Keep `nextRequestAt` as `number | null` when throwing `rate_limit_exhausted` errors from the source modules, and convert to ISO only once inside the source-level normalizer that emits the public result shape.
+- **Consequence:** Until this numeric-through-normalization contract is fixed, real upstream `429 Retry-After` responses can still produce `rate_limit_exhausted: true` with `next_request_at: null`, leaving the branch adversary-rejected.
 - **Feature:** #5 Data Acquisition
 
 ## Phase 1 Scope (Current)

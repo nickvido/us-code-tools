@@ -25,7 +25,7 @@
 - `src/utils/manifest.ts` — manifest schema normalization, empty-manifest defaults, atomic manifest writes.
 - `src/utils/fetch-config.ts` — current Congress resolution (`override`/`live`/`fallback`) and fallback warning path.
 - `src/utils/logger.ts` — structured network logging with `api_key` redaction.
-- `src/utils/rate-limit.ts` — sliding-window limiter helpers plus an exported `getSharedApiDataGovLimiter()` singleton/reset hook; the branch still instantiates separate per-module limiter state in `src/sources/congress.ts` and `src/sources/govinfo.ts`, so that shared helper is currently unused by production fetch paths.
+- `src/utils/rate-limit.ts` — sliding-window limiter helpers plus the shared `getSharedApiDataGovLimiter()` singleton/reset hook used by both `src/sources/congress.ts` and `src/sources/govinfo.ts` for the single `API_DATA_GOV_KEY` in-process budget.
 - `src/transforms/` — USLM parsing, markdown rendering, and output writing for `transform`.
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
@@ -119,8 +119,8 @@
   - structured logs redact `api_key` query params via `src/utils/logger.ts`
   - Congress/GovInfo stop immediately on limiter exhaustion and return `next_request_at` instead of sleeping until the next window
   - legislators skip states must not leave a stale `data/cache/legislators/bioguide-crosswalk.json` on disk
-  - open adversary gap on this branch: Congress and GovInfo still do **not** share one in-process limiter singleton; each source creates its own module-local state, so the combined budget can exceed the single-key contract until implementation is centralized
-  - open adversary gap on this branch: `Retry-After` headers from Congress.gov/GovInfo are not yet translated into the machine-readable `rate_limit_exhausted`/`next_request_at` terminal path
+  - Congress and GovInfo now both consult the shared in-process limiter singleton from `src/utils/rate-limit.ts`, so one process no longer keeps separate per-source budgets for the same `API_DATA_GOV_KEY`
+  - open adversary gap on this branch: `Retry-After` headers from Congress.gov/GovInfo are parsed, but `src/sources/congress.ts` and `src/sources/govinfo.ts` still throw `nextRequestAt` as an ISO string in the `429` path; `normalizeError()` only serializes numeric timestamps, so the public `next_request_at` summary can still be lost
 
 ## Things Future Agents Should Notice
 - `docs/architecture/3-architecture.md` proposes an `authors.ts` split, but the current implementation keeps author identity inside `src/backfill/constitution/dataset.ts`; do not assume a separate author module exists.

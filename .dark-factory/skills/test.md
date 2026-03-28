@@ -59,7 +59,8 @@
 - The adversary regression creates a local bare remote and confirms remote HEAD matches the local branch after `git push --set-upstream <remote> <branch>`.
 - Issue #5 tests assume offline-by-default behavior; `src/commands/fetch.ts` has a VITEST/live-test shortcut path for `--all` CLI tests.
 - The round-9 adversary regression asserts that a later skipped legislators run must remove any pre-existing `data/cache/legislators/bioguide-crosswalk.json` rather than only updating manifest state.
-- The current branch does **not** yet have regression coverage proving a single shared in-process limiter across Congress/GovInfo modules or `Retry-After` header translation into `rate_limit_exhausted`/`next_request_at`; the latest adversary review rejected the branch on those two gaps.
+- `tests/adversary-round2-issue5.test.ts` now mocks `src/utils/rate-limit.ts` at the shared-module seam and verifies Congress stops immediately with `rate_limit_exhausted` when the shared limiter reports zero remaining budget.
+- The branch still lacks regression coverage for the specific `429 Retry-After` serialization bug: both sources parse the header, but they currently throw ISO-string `nextRequestAt` values that `normalizeError()` drops because it only preserves numeric timestamps.
 - Full suite still depends on a built `dist/index.js` because transform/backfill/fetch CLI tests execute the compiled entrypoint.
 
 ## Phase 1 Scope (Current)

@@ -94,14 +94,16 @@
 - QA/adversary follow-up fix already landed on this branch:
   - skipped legislators cross-reference now removes stale `data/cache/legislators/bioguide-crosswalk.json` before manifest write
   - verified by `tests/adversary-round9-issue5.test.ts`
-- Current branch status after later adversary review:
-  - branch is still **rejected** pending two issue #5 gaps
-  - `src/sources/congress.ts` and `src/sources/govinfo.ts` each still instantiate their own limiter state instead of sharing one singleton budget for the single `API_DATA_GOV_KEY`
-  - neither source currently honors upstream `Retry-After`; throttle responses still collapse into generic request failures instead of `rate_limit_exhausted` with `next_request_at`
+- Current branch status after the latest local code changes:
+  - Congress and GovInfo now both use the shared limiter singleton from `src/utils/rate-limit.ts`
+  - `tests/adversary-round2-issue5.test.ts` was updated to mock that shared-module seam and verify immediate Congress termination when no shared budget remains
+  - branch is still **rejected** on the narrower remaining issue #5 gap: `Retry-After` is parsed, but both source modules still convert `nextRequestAt` to an ISO string before throwing on `429`, so `normalizeError()` can still drop the public `next_request_at`
 - Most recent code/branch evidence captured for future agents:
-  - `src/utils/rate-limit.ts` now exports `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()`, but `src/sources/congress.ts` and `src/sources/govinfo.ts` still ignore that helper and keep separate module-local limiter state
-  - `src/utils/retry.ts` is currently a minimal retry loop and does not parse HTTP retry headers
-  - branch head during this docs update: `53ad5cd`
+  - `src/sources/congress.ts` and `src/sources/govinfo.ts` now call `getSharedApiDataGovLimiter()` and `markRateLimitUse()` directly
+  - both modules still call `parseRetryAfter()` and then throw `{ code: 'rate_limit_exhausted', nextRequestAt: <ISO string or null> }` in their `429` branches; the normalizers only preserve numeric timestamps
+  - `src/utils/retry.ts` is still a minimal retry loop and does not own HTTP retry-header translation
+
+- This knowledge-capture update documents the branch after the shared-limiter wiring landed but before the `Retry-After` numeric/ISO mismatch is fixed.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
