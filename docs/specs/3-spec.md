@@ -156,7 +156,14 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 
 ## Edge Case Catalog
 - Missing CLI args, unsupported `--phase`, empty `--target`, repeated flags, extra unknown flags, and `--target` pointing at a regular file instead of a directory
-- Non-existent target path, existing empty directory, existing git repo with a Constitution-history prefix, existing non-git directory, detached HEAD target repo, target repo with unrelated commits already present (must be rejected, not appended to), and target repos with no configured push remote (must return `skipped-local-only` success instead of a missing-remote failure)
+- **Non-existent target path:** `git init` a new repo at that path, then backfill. Exit `0`.
+- **Existing empty directory (not a git repo):** `git init` in that directory, then backfill. Exit `0`.
+- **Existing non-git directory with files:** reject with non-zero exit and error message (do not `git init` over existing non-git content).
+- **Existing git repo with Constitution-history prefix:** resume from next missing event. Exit `0`.
+- **Existing git repo with unrelated commits:** reject with non-zero exit and error message.
+- **Detached HEAD target repo:** reject with non-zero exit and error message.
+- **Target repos with no configured push remote:** skip push, report `skipped-local-only`, exit `0`.
+- **Dirty working tree:** reject with non-zero exit and error message before creating any commits. The backfill command must not run against a repo with uncommitted changes.
 - Partial-progress repositories are supported only when existing Constitution commits form a contiguous prefix of the 28-event plan (e.g., only the first 5 commits exist). Internal gaps are NOT supported — a repo with commits 1, 2, 4 but missing 3 is treated as unrelated/non-prefix history and rejected rather than repaired.
 - Duplicate dataset records, missing article/amendment numbers, malformed dates, empty headings, missing source URLs, truncated text, BOM-prefixed text, or invalid UTF-8 in static source assets
 - Deterministic ordering for same-day ratifications, especially Amendments I–X on `1791-12-15`
