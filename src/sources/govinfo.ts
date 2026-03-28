@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { FetchInvocation } from './congress.js';
-import { getCachePaths } from '../utils/cache.js';
+import { getCachePaths, readFreshRawResponseCache, writeRawResponseCache } from '../utils/cache.js';
 import { createRateLimitState, isRateLimitExhausted, markRateLimitUse } from '../utils/rate-limit.js';
 import { readManifest, writeManifest, type FetchManifest } from '../utils/manifest.js';
 import { logNetworkEvent } from '../utils/logger.js';
@@ -28,6 +28,7 @@ interface GovInfoCollectionPage {
 
 const SHARED_LIMIT = 5_000;
 const SHARED_WINDOW_MS = 60 * 60 * 1000;
+const GOVINFO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const DOWNLOAD_TIMEOUT_MS = 500;
 const sharedLimiter = createRateLimitState(SHARED_LIMIT, SHARED_WINDOW_MS);
 
@@ -69,7 +70,7 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
       const pageUrl = nextPageUrl ?? buildInitialListingUrl();
       let listingResponse: { payload: GovInfoCollectionPage };
       try {
-        listingResponse = await fetchGovInfoJson<GovInfoCollectionPage>(pageUrl);
+        listingResponse = await fetchGovInfoJson<GovInfoCollectionPage>(pageUrl, { force: invocation.force });
       } catch (error) {
         if (isRateLimitError(error)) {
           throw createRateLimitErrorWithProgress(error.nextRequestAt, { listed_packages: listedPackages, retained_packages: retainedPackages, summaries, granules, malformed_package_ids: [...malformedPackageIds] });
@@ -108,7 +109,7 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
 
         let summary: { body: string };
         try {
-          summary = await fetchGovInfoText(buildPackageUrl(packageId, 'summary'));
+          summary = await fetchGovInfoText(buildPackageUrl(packageId, 'summary'), { force: invocation.force });
         } catch (error) {
           if (isRateLimitError(error)) {
             throw createRateLimitErrorWithProgress(error.nextRequestAt, { listed_packages: listedPackages, retained_packages: retainedPackages, summaries, granules, malformed_package_ids: [...malformedPackageIds] });
@@ -117,7 +118,7 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
         }
         let granulePayload: { body: string };
         try {
-          granulePayload = await fetchGovInfoText(buildPackageUrl(packageId, 'granules'));
+          granulePayload = await fetchGovInfoText(buildPackageUrl(packageId, 'granules'), { force: invocation.force });
         } catch (error) {
           if (isRateLimitError(error)) {
             throw createRateLimitErrorWithProgress(error.nextRequestAt, { listed_packages: listedPackages, retained_packages: retainedPackages, summaries, granules, malformed_package_ids: [...malformedPackageIds] });
@@ -211,35 +212,46 @@ function buildPackageUrl(packageId: string, kind: 'summary' | 'granules'): strin
   return `https://api.govinfo.gov/packages/${packageId}/${kind}?api_key=${encodeURIComponent(process.env.API_DATA_GOV_KEY ?? '')}`;
 }
 
-async function fetchGovInfoJson<T>(url: string): Promise<{ payload: T }> {
-  const response = await fetchGovInfoResponse(url);
+async function fetchGovInfoJson<T>(url: string, options: { force: boolean }): Promise<{ payload: T }> {
+  const response = await fetchGovInfoResponse(url, options);
   return {
-    payload: await response.json() as T,
+    payload: JSON.parse(response.body) as T,
   };
 }
 
-async function fetchGovInfoText(url: string): Promise<{ body: string }> {
-  const response = await fetchGovInfoResponse(url);
+async function fetchGovInfoText(url: string, options: { force: boolean }): Promise<{ body: string }> {
+  const response = await fetchGovInfoResponse(url, options);
   return {
-    body: await response.text(),
+    body: response.body,
   };
 }
 
-async function fetchGovInfoResponse(url: string): Promise<Response> {
+async function fetchGovInfoResponse(url: string, options: { force: boolean }): Promise<{ body: string }> {
+  const startedAt = Date.now();
+  if (!options.force) {
+    const cached = await readFreshRawResponseCache('govinfo', url, GOVINFO_CACHE_TTL_MS);
+    if (cached !== null) {
+      logNetworkEvent({ level: 'info', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: 'hit', duration_ms: Date.now() - startedAt, status_code: cached.metadata.status_code });
+      return { body: cached.body };
+    }
+  }
+
   const exhaustion = isRateLimitExhausted(sharedLimiter);
   if (exhaustion.exhausted) {
     throw createRateLimitError(exhaustion.nextRequestAt);
   }
 
   markRateLimitUse(sharedLimiter);
-  const response = await fetchWithTimeout(url);
+  const response = await fetchWithTimeout(url, options.force ? 'bypass' : 'miss', startedAt);
   if (response.status === 401 || response.status === 403) {
     throw new Error('upstream_auth_rejected: GovInfo rejected API_DATA_GOV_KEY');
   }
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(`upstream_request_failed: GovInfo request failed with HTTP ${response.status}`);
   }
-  return response;
+
+  await writeRawResponseCache('govinfo', url, response.body, { statusCode: response.status, contentType: response.contentType });
+  return { body: response.body };
 }
 
 function createRateLimitErrorWithProgress(nextRequestAt: number | null, progress: { listed_packages: number; retained_packages: number; summaries: number; granules: number; malformed_package_ids: string[] }): Error & { code: 'rate_limit_exhausted'; nextRequestAt: number | null; progress: { listed_packages: number; retained_packages: number; summaries: number; granules: number; malformed_package_ids: string[] } } {
@@ -248,16 +260,16 @@ function createRateLimitErrorWithProgress(nextRequestAt: number | null, progress
   return error;
 }
 
-async function fetchWithTimeout(url: string): Promise<Response> {
+async function fetchWithTimeout(url: string, cacheStatus: 'miss' | 'bypass', startedAt: number): Promise<{ body: string; status: number; contentType: string | null }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-  const startedAt = Date.now();
   try {
     const response = await fetch(url, { signal: controller.signal });
-    logNetworkEvent({ level: 'info', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: 'miss', duration_ms: Date.now() - startedAt, status_code: response.status });
-    return response;
+    const body = await response.text();
+    logNetworkEvent({ level: 'info', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: cacheStatus, duration_ms: Date.now() - startedAt, status_code: response.status });
+    return { body, status: response.status, contentType: response.headers.get('content-type') };
   } catch (error) {
-    logNetworkEvent({ level: 'error', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: 'miss', duration_ms: Date.now() - startedAt });
+    logNetworkEvent({ level: 'error', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: cacheStatus, duration_ms: Date.now() - startedAt });
     throw error;
   } finally {
     clearTimeout(timeout);
