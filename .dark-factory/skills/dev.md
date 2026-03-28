@@ -9,12 +9,20 @@
   - `npx vitest run tests/unit/backfill-cli-args.test.ts`
   - `npx vitest run tests/integration/backfill-constitution.test.ts`
   - `npx vitest run tests/adversary-round1-issue3.test.ts`
+- Focused issue #5 tests:
+  - `npx vitest run tests/cli/fetch.test.ts`
+  - `npx vitest run tests/utils/fetch-config.test.ts tests/utils/manifest.test.ts tests/utils/rate-limit.test.ts`
+  - `npx vitest run tests/adversary-round9-issue5.test.ts`
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
   - `node dist/index.js transform --title 1 --output ./out`
+- Run fetch after build:
+  - `node dist/index.js fetch --status`
+  - `node dist/index.js fetch --source=congress --congress=119`
+  - `node dist/index.js fetch --all --congress=119`
 - Public CLI entry in `package.json`: `us-code-tools -> ./dist/index.js`
-- CI/build note: integration tests shell out to `dist/index.js`, so `npm run build` must happen before Vitest when validating CLI behavior.
+- CI/build note: integration/CLI tests shell out to `dist/index.js`, so `npm run build` must happen before Vitest when validating compiled CLI behavior.
 
 ## Tech Stack
 - Runtime: Node.js 22+
@@ -23,11 +31,14 @@
 - XML parsing: `fast-xml-parser`
 - Frontmatter: `gray-matter`
 - ZIP handling: `yauzl`
+- HTTP: native `fetch`
 - Testing: Vitest
 - Git integration: system `git` CLI via `child_process`
+- No YAML/CSV parser dependency yet for issue #5; `src/sources/unitedstates.ts` and `src/sources/voteview.ts` currently use lightweight ad hoc parsing helpers
 
 ## File Layout
-- `src/index.ts` — dispatches `transform` and `backfill`
+- `src/index.ts` — dispatches `transform`, `backfill`, and `fetch`
+- `src/commands/fetch.ts` — fetch CLI parsing/dispatch/status output
 - `src/backfill/constitution/dataset.ts` — static Constitution records + author metadata
 - `src/backfill/renderer.ts` — Constitution markdown/frontmatter renderer
 - `src/backfill/messages.ts` — exact historical commit-message templates
@@ -35,15 +46,32 @@
 - `src/backfill/target-repo.ts` — repo prep / preflight / prefix detection / remote resolution
 - `src/backfill/git-adapter.ts` — git wrapper + fast-import commit creation
 - `src/backfill/orchestrator.ts` — applies missing suffix events and pushes current branch
-- `src/domain/`, `src/sources/`, `src/transforms/`, `src/utils/` — existing transform pipeline
+- `src/sources/olrc.ts` — OLRC ZIP acquisition + extraction + latest-vintage selection
+- `src/sources/congress.ts` — Congress fetch orchestration
+- `src/sources/congress-member-snapshot.ts` — member snapshot freshness contract
+- `src/sources/govinfo.ts` — GovInfo collection walk/checkpointing
+- `src/sources/voteview.ts` — VoteView file download/index helpers
+- `src/sources/unitedstates.ts` — legislators download/parsing/crosswalk
+- `src/utils/cache.ts`, `manifest.ts`, `fetch-config.ts`, `logger.ts`, `rate-limit.ts`, `retry.ts` — acquisition infrastructure
+- `tests/cli/` — fetch CLI contract coverage
 - `tests/unit/` — pure-module coverage
 - `tests/integration/` — built CLI end-to-end coverage
 - `tests/adversary-round1-issue3.test.ts` — remote-push regression for issue #3
+- `tests/adversary-round1-issue5.test.ts` … `tests/adversary-round9-issue5.test.ts` — issue #5 regression chain
 
 ## Module Dependency Graph
 
 ### If you're modifying... → Read these first:
-- `src/index.ts` → `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts`
+- `src/index.ts` → `src/commands/fetch.ts`, `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts`
+- `src/commands/fetch.ts` → `src/utils/manifest.ts`, `src/utils/fetch-config.ts`, every `src/sources/*.ts` fetch entrypoint (this file owns CLI contract + deterministic `--all` ordering)
+- `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source uses `getSharedApiDataGovLimiter()` and throws numeric `nextRequestAt` values that `normalizeError()` serializes into the public `next_request_at` field)
+- `src/sources/congress-member-snapshot.ts` → `src/utils/manifest.ts` (freshness derives from manifest snapshot metadata + artifact existence)
+- `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (this source also uses `getSharedApiDataGovLimiter()` and preserves numeric `nextRequestAt` through `normalizeError()`)
+- `src/sources/unitedstates.ts` → `src/utils/manifest.ts`, `src/sources/congress-member-snapshot.ts`, current Congress cache layout in `src/sources/congress.ts`
+- `src/sources/voteview.ts` → `src/utils/manifest.ts` and its in-memory index cache (`inMemoryIndexes`)
+- `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, manifest expectations for selected vintage + per-title state
+- `src/utils/cache.ts` → `src/utils/manifest.ts` consumers in Congress/GovInfo; cache key normalization strips `api_key`
+- `src/utils/manifest.ts` → all fetch sources + `src/commands/fetch.ts` (manifest shape is the contract)
 - `src/backfill/orchestrator.ts` → `src/backfill/planner.ts`, `src/backfill/constitution/dataset.ts`, `src/backfill/target-repo.ts`, `src/backfill/git-adapter.ts`
 - `src/backfill/target-repo.ts` → `src/backfill/planner.ts`, `src/backfill/git-adapter.ts` (prefix checks depend on planned commit metadata and git inspection)
 - `src/backfill/git-adapter.ts` → `src/backfill/planner.ts` (commit creation consumes `HistoricalEvent`)
@@ -51,28 +79,62 @@
 - `src/backfill/renderer.ts` → `src/backfill/constitution/dataset.ts`, `gray-matter`
 - `src/backfill/messages.ts` → no downstream state; keep pure and template-exact
 - `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`
-- `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`
 
 ### Call Chain: Entry Point → Your Code
 ```text
 src/index.ts (main)
+  → runFetchCommand()
+    → parseFetchArgs()
+    → runAllSources() | runSingleSource()
+      → fetchOlrcSource()
+        → fetchOlrcVintagePlan()
+        → getOrCreateZipPath()
+        → extractXmlEntriesFromZip()
+        → writeManifest()
+      → fetchCongressSource()
+        → resolveCurrentCongressScope()
+        → ensureMemberSnapshot()
+          → evaluateCongressMemberSnapshotFreshness()
+        → fetchSingleCongress()
+          → fetchCongressResponse()
+            → readFreshRawResponseCache() / writeRawResponseCache()
+            → getSharedApiDataGovLimiter()
+            → isRateLimitExhausted() / markRateLimitUse()
+            → parseRetryAfter() on HTTP 429, then throw numeric `nextRequestAt` for `normalizeError()` to serialize
+        → writeManifest()
+      → fetchGovInfoSource()
+        → fetchGovInfoResponse()
+          → readFreshRawResponseCache() / writeRawResponseCache()
+          → getSharedApiDataGovLimiter()
+          → isRateLimitExhausted() / markRateLimitUse()
+          → parseRetryAfter() on HTTP 429, then throw numeric `nextRequestAt` for `normalizeError()` to serialize
+        → writeManifest()
+      → fetchVoteViewSource()
+        → fetchWithTimeout()
+        → writeManifest()
+      → fetchUnitedStatesSource()
+        → buildCrossReferenceState()
+          → evaluateCongressMemberSnapshotFreshness()
+          → loadCongressSnapshotBioguideIds()
+        → removeCrosswalkArtifact() when cross-reference is skipped
+        → writeManifest()
+
+src/index.ts (main)
   → runBackfillCommand()
     → runConstitutionBackfill()
       → buildConstitutionPlan(constitutionDataset)
-        → renderConstitutionProvision()
-        → renderConstitutionCommitMessage()
-        → renderAmendmentCommitMessage()
       → prepareTargetRepo()
-        → ensureGitRepo()
-        → ensureAttachedHead()
-        → ensureCleanWorkingTree()
-        → detectMatchingPrefix()
-        → detectPushRemoteName()
       → commitHistoricalEvent()
-      → git push --set-upstream <remote> <branch> (if remote exists)
 ```
 
 ### Key Interfaces (the contracts)
+- `FetchArgs` in `src/commands/fetch.ts` — normalized CLI request for `fetch`
+- `FetchManifest` in `src/utils/manifest.ts` — persisted acquisition state contract
+- `CongressMemberSnapshotState` / `CongressRunState` / `GovInfoCheckpointState` / `LegislatorsCrossReferenceState` in `src/utils/manifest.ts` — per-source manifest contracts
+- `CurrentCongressResolution` in `src/utils/fetch-config.ts` — `override`/`live`/`fallback` current-congress contract
+- `RawResponseCacheMetadata` in `src/utils/cache.ts` — raw API response cache metadata contract
+- `RateLimitState` / `RateLimitExhaustion` in `src/utils/rate-limit.ts` — shared limiter contract
+- `OlrcFetchResult`, `FetchSourceResult` (`congress`), `GovInfoResult`, `VoteViewResult`, `UnitedStatesResult` — per-source CLI result payloads
 - `ConstitutionProvisionRecord` in `src/backfill/constitution/dataset.ts` — per-article/amendment source-of-truth record
 - `ConstitutionDataset` in `src/backfill/constitution/dataset.ts` — full static dataset contract
 - `HistoricalEvent` in `src/backfill/planner.ts` — exact commit/write plan contract
@@ -88,7 +150,16 @@ src/index.ts (main)
 - `prepareTargetRepo()` is intentionally strict; do not relax clean-tree or non-prefix rejection without spec/architecture changes.
 - Push logic must always specify branch explicitly for configured remotes with no upstream.
 - The implementation uses `git fast-import` for historical commits, then `git reset --hard HEAD` to restore a clean working tree.
-- Summary objects use camelCase in code (`eventsApplied`, `pushResult`); tests tolerate both camelCase and snake_case when parsing CLI output.
+- Fetch-path conventions:
+  - `src/commands/fetch.ts` owns CLI validation and top-level fail-open source ordering
+  - `src/utils/manifest.ts` is permissive on read/normalize but all writers should emit the canonical shape
+  - Congress/GovInfo raw API caching goes through `src/utils/cache.ts`; cache keys normalize away `api_key`
+  - Congress and GovInfo both call `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()` from `src/utils/rate-limit.ts`; update tests and any mocks at that shared-module seam rather than assuming per-source limiter state
+  - `src/utils/rate-limit.ts` owns `parseRetryAfter()`, and both `src/sources/congress.ts` and `src/sources/govinfo.ts` now keep the parsed retry horizon numeric until `normalizeError()` converts it into the public ISO `next_request_at` field
+  - `src/utils/retry.ts` still exposes only a minimal `withRetry()` loop and does not own HTTP `Retry-After` translation today
+  - legislators cross-reference must delete stale `bioguide-crosswalk.json` whenever the result status is not `completed`
+  - VoteView indexes are currently in-memory only via `inMemoryIndexes`, so repeated lookups in one process avoid reparsing but cross-process persistence is not implemented
+- Summary/result objects are JSON-first and use spec-style keys like `requested_scope`, `bulk_scope`, `next_request_at`, and `last_success_at`.
 
 ## Practical Notes
 - `parseBackfillArgs()` rejects duplicate flags, unknown flags, and unsupported phases before any filesystem side effects.
@@ -107,11 +178,14 @@ src/index.ts (main)
   - Constitution backfill command and CLI validation
   - static dataset, renderer, planner, target repo preflight, and git history orchestration
   - configured-remote push support without pre-existing upstream
+  - fetch acquisition pipeline for all five issue #5 sources plus manifest/cache infrastructure
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories
   - downstream repo PR workflows
   - live Constitution fetching from external sources
+  - stronger parser dependencies / persisted VoteView indexes; current code intentionally stays lightweight
 - What's a test double vs production:
   - temp repos / bare remotes in tests are doubles
   - committed Constitution dataset and real git CLI orchestration are production paths
+  - fixture upstream payloads are doubles; manifest/cache/source modules are production paths

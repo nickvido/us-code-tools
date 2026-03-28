@@ -57,13 +57,63 @@
   - `npx tsc --noEmit` ✅
   - `npm run build` ✅
 
+## Feature #5 — Data Acquisition — API Clients & Initial Source Download
+- Added `fetch` command support in `src/index.ts` and `src/commands/fetch.ts`:
+  - `--status`
+  - `--source=<name>`
+  - `--all`
+  - optional `--congress=<n>` / `--force`
+  - JSON usage errors for invalid argument combinations
+- Added acquisition infrastructure:
+  - `src/utils/cache.ts` for TTL-backed raw response caching with normalized cache keys
+  - `src/utils/manifest.ts` for source status + checkpoint persistence
+  - `src/utils/fetch-config.ts` for current Congress resolution and degraded fallback signaling
+  - `src/utils/logger.ts` for redacted structured network logs
+  - `src/utils/rate-limit.ts` for sliding-window budget checks
+- Added OLRC acquisition behavior in `src/sources/olrc.ts`:
+  - scrape annual-title listing
+  - choose one latest vintage for the run
+  - download/extract title ZIPs under `data/cache/olrc/`
+  - record missing titles as `missing_from_vintage` without mixing vintages
+- Added Congress.gov acquisition in `src/sources/congress.ts`:
+  - bill pages + detail/actions/cosponsors
+  - committee pages
+  - reusable global member snapshot
+  - bulk-history checkpoint updates in the manifest
+- Added GovInfo PLAW acquisition in `src/sources/govinfo.ts`:
+  - page-by-page listing walk
+  - retained package summary/granule fetches
+  - checkpointed resume state and rate-limit-exhausted terminal path
+- Added VoteView acquisition in `src/sources/voteview.ts`:
+  - downloads `HSall_members.csv`, `HSall_votes.csv`, `HSall_rollcalls.csv`
+  - builds reusable in-memory lookup indexes
+- Added legislators acquisition in `src/sources/unitedstates.ts`:
+  - downloads the three required YAML files
+  - parses lightweight legislator/committee records
+  - builds bioguide crosswalk only from a fresh, complete Congress member snapshot
+- QA/adversary follow-up fix already landed on this branch:
+  - skipped legislators cross-reference now removes stale `data/cache/legislators/bioguide-crosswalk.json` before manifest write
+  - verified by `tests/adversary-round9-issue5.test.ts`
+- Current branch status after the latest local code changes:
+  - Congress and GovInfo now both use the shared limiter singleton from `src/utils/rate-limit.ts`
+  - `tests/adversary-round2-issue5.test.ts` was updated to mock that shared-module seam and verify immediate Congress termination when no shared budget remains
+  - Congress and GovInfo now throw numeric `nextRequestAt` values from their `429` paths, and `normalizeError()` serializes those into the public `next_request_at` field
+- Most recent code/branch evidence captured for future agents:
+  - `src/sources/congress.ts` and `src/sources/govinfo.ts` now call `getSharedApiDataGovLimiter()` and `markRateLimitUse()` directly
+  - both modules call `parseRetryAfter()` and throw `{ code: 'rate_limit_exhausted', nextRequestAt: <number|null> }` in their `429` branches; `normalizeError()` preserves that timestamp as ISO in the final result
+  - `src/utils/retry.ts` is still a minimal retry loop and does not own HTTP retry-header translation
+
+- This knowledge-capture update corrects the stale branch notes that previously described the `Retry-After` serialization bug as still open after it had already been fixed.
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - Title transform flow from issue #1
   - Constitution backfill flow from issue #3
+  - raw acquisition/caching/manifest flow from issue #5
 - What's intentionally deferred:
   - later historical backfill phases (US Code titles, public laws)
   - history rewrite/repair behavior beyond contiguous-prefix resume
+  - downstream consumers of the newly fetched raw artifacts
 - What's a test double vs production:
   - transform fixtures and temp repos/remotes are intentional test doubles
-  - committed Constitution dataset is production application data
+  - committed Constitution dataset, fetch manifest/cache, and current source modules are production application code

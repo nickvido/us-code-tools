@@ -98,12 +98,48 @@
 - **Consequence:** Configured-remote repos succeed without manual upstream setup; this behavior is protected by `tests/adversary-round1-issue3.test.ts`.
 - **Feature:** #3 Constitution Backfill
 
+### ADR-015: Use a manifest-backed filesystem cache for issue #5 acquisition state
+- **Status:** Active
+- **Context:** Issue #5 needs resumable source downloads, TTL-backed API cache reuse, and status reporting without introducing a database.
+- **Decision:** Persist acquisition state only in `data/cache/{source}/` plus `data/manifest.json`, with source modules reading/writing through `src/utils/cache.ts` and `src/utils/manifest.ts`.
+- **Consequence:** Future agents should update the manifest contract instead of adding hidden side-state or ad hoc metadata files.
+- **Feature:** #5 Data Acquisition
+
+### ADR-016: Congress member data is a reusable global snapshot, not a per-congress sub-fetch
+- **Status:** Active
+- **Context:** Congress member pages/details are reused across congress-specific bill/committee fetches and are the only valid input for legislators bioguide cross-reference.
+- **Decision:** `src/sources/congress.ts` records a distinct `member_snapshot` in the manifest and reuses it when `evaluateCongressMemberSnapshotFreshness()` says it is still complete/fresh.
+- **Consequence:** Future agents should not re-download `/member` data inside every congress loop or treat stale/incomplete snapshots as valid crosswalk input.
+- **Feature:** #5 Data Acquisition
+
+### ADR-017: Legislators cross-reference skip paths must remove stale success artifacts
+- **Status:** Active
+- **Context:** QA/adversary coverage found that a later stale-snapshot run could mark cross-reference as skipped while leaving an older `bioguide-crosswalk.json` on disk.
+- **Decision:** `src/sources/unitedstates.ts` deletes `data/cache/legislators/bioguide-crosswalk.json` whenever `buildCrossReferenceState()` returns a non-`completed` status before manifest persistence.
+- **Consequence:** Manifest state and filesystem artifacts stay consistent; future skip-path changes must preserve this cleanup behavior.
+- **Feature:** #5 Data Acquisition
+
+### ADR-018: Congress/GovInfo share one in-process limiter singleton
+- **Status:** Active
+- **Context:** The spec and architecture bind Congress.gov and GovInfo to one `API_DATA_GOV_KEY` budget.
+- **Decision:** Both `src/sources/congress.ts` and `src/sources/govinfo.ts` call `getSharedApiDataGovLimiter()` from `src/utils/rate-limit.ts` before dispatching requests and update that same singleton with `markRateLimitUse()`.
+- **Consequence:** One process now enforces a single rolling-window budget across both sources; tests should mock the shared helper module rather than assuming per-source limiter state.
+- **Feature:** #5 Data Acquisition
+
+### ADR-019: Upstream `Retry-After` stays numeric until result normalization
+- **Status:** Active
+- **Context:** Congress/GovInfo share the `API_DATA_GOV_KEY` limiter and need a machine-readable retry horizon whenever preflight exhaustion or upstream `429` responses occur.
+- **Decision:** Keep `nextRequestAt` as `number | null` inside `src/sources/congress.ts` and `src/sources/govinfo.ts`, and convert it to ISO only inside each module’s `normalizeError()` when emitting the public `next_request_at` field.
+- **Consequence:** `rate_limit_exhausted` results now preserve `next_request_at` consistently across shared-budget exhaustion and parsed `Retry-After` responses; future agents should not reintroduce early ISO conversion in the throw path.
+- **Feature:** #5 Data Acquisition
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - transform ADRs for issue #1
   - Constitution dataset/planner/render/git-history/push ADRs for issue #3
+  - manifest/cache/member-snapshot/crosswalk ADRs for issue #5
 - What's intentionally deferred:
   - later backfill phases and their own ADRs
   - history repair/rewrite semantics for non-prefix repos
 - What's a test double vs production:
-  - temp repos and local bare remotes are test doubles; committed Constitution dataset and git orchestration are production design choices
+  - temp repos and local bare remotes are test doubles; committed Constitution dataset, acquisition manifest/cache, and git orchestration are production design choices
