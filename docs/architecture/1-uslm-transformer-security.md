@@ -2,61 +2,61 @@
 
 **Date:** 2026-03-28
 **Architecture reviewed:** docs/architecture/1-architecture.md
-**Risk level:** High
+**Risk level:** Medium
 
 ## Executive Summary
-The proposed architecture has a solid baseline for a local file-based CLI: it keeps scope tight, avoids unnecessary services and secrets, uses HTTPS, applies atomic writes, and introduces explicit resource bounds for downloaded and extracted content. Most of the meaningful risks are correctly recognized as trust-boundary problems around CLI input, remote ZIP payloads, XML parsing, and output-path handling.
+The revised architecture is materially stronger than the prior draft and now addresses the original blocking extraction risk with concrete archive-validation and containment requirements. For a local, single-process CLI that handles only public statutory content, the remaining concerns are implementation-hardening details rather than architecture blockers.
 
-However, the current ZIP extraction design does not explicitly prohibit path traversal or special filesystem entries from untrusted archive contents. Because the source artifact is remote and the extractor is expected to handle nested paths, this is a high-severity local file write risk that should be fixed in the architecture before implementation begins.
+Overall, the security posture is appropriate for this phase: the trust boundaries are explicit, resource limits are defined, network scope is narrow, and output/cache writes are constrained with atomic and containment-oriented rules. No Critical or High findings remain at the architecture level.
 
 ## Findings
 
-### [HIGH] ZIP extraction contract does not forbid path traversal or special entries
-- **Category:** Tampering / Elevation of Privilege
-- **Component:** `src/sources/olrc.ts`, `src/utils/zip.ts`, extraction workspace flow
-- **Description:** The architecture requires extracting XML files from a remote ZIP and supports nested archive paths, but it does not define mandatory protections against dangerous entry names or entry types. There is no explicit requirement to reject entries containing `..`, absolute paths, drive-letter paths, symlinks, hardlinks, or other special filesystem objects before materializing files into the temp extraction workspace.
-- **Impact:** A compromised upstream archive, malicious mirror, or incorrectly trusted ZIP could cause writes outside the intended temp directory and overwrite arbitrary files accessible to the local user. In the worst case this can corrupt repository files, shell config, SSH material, or other local state on the machine running the CLI.
-- **Recommendation:** Revise the architecture to make ZIP handling non-negotiably safe: do not blindly extract the archive; instead enumerate entries and materialize only regular `.xml` file entries after canonicalizing each entry path, rejecting absolute paths, `..` segments, path separators that escape the workspace, symlinks/hardlinks, and duplicate normalized destinations. Require a post-resolution check that every extracted path remains under the designated extraction root.
-
-### [MEDIUM] Cache trust model lacks authenticated source verification beyond transport security
+### [MEDIUM] Cache integrity is local-only and does not authenticate upstream content
 - **Category:** Spoofing / Supply Chain
-- **Component:** Cache manifest and OLRC download boundary
-- **Description:** The cache design validates local consistency with a manifest and SHA-256 of the downloaded artifact, but that checksum is generated after download and therefore does not authenticate the artifact against an external trusted digest. The architecture assumes HTTPS to `uscode.house.gov` is sufficient.
-- **Impact:** If the upstream source or transport trust is compromised, a malicious ZIP could still be accepted as long as it is internally consistent and parseable.
-- **Recommendation:** Keep HTTPS as the baseline, but document that the SHA-256 in cache is only an integrity check for local corruption/replay, not authenticity. If OLRC ever publishes authoritative digests or signatures, prefer verifying against them. Until then, ensure logs clearly record source URL, content-type mismatch, and ZIP validation failures for operator review.
+- **Component:** `src/sources/olrc.ts`, `src/utils/cache.ts`
+- **Description:** The cache manifest and `.sha256` file protect against partial writes, local corruption, and stale artifact reuse, but they do not authenticate the OLRC payload against an authoritative upstream digest or signature. The current design relies on HTTPS and host trust for source authenticity.
+- **Impact:** If the upstream source or transport trust were compromised, a malicious but well-formed ZIP could still be cached and processed.
+- **Recommendation:** Keep HTTPS/TLS as the baseline for this issue, but document in implementation that cache SHA-256 values provide local integrity only. If OLRC later publishes signed digests or authoritative checksums, add optional verification against them.
 
-### [MEDIUM] XML parser hardening is described generally but not pinned to concrete parser-safe settings
-- **Category:** Input Validation / Denial of Service
-- **Component:** `src/transforms/uslm-to-ir.ts`
-- **Description:** The architecture says the parser must not execute external entities or resolve remote references, which is directionally correct, but it does not specify concrete `fast-xml-parser` configuration constraints or expectations around attribute handling, entity processing, and maximum text/node growth.
-- **Impact:** Ambiguous parser hardening requirements make it easier for implementation to drift into unsafe or unexpectedly expensive parsing behavior, especially when malformed XML fixtures are added later.
-- **Recommendation:** Amend the architecture with a concrete safe parser configuration baseline and require tests that prove malformed XML, oversized text nodes, and unexpected structures become bounded parse errors instead of crashes or unbounded memory growth.
+### [MEDIUM] XML and ZIP resource limits must be enforced exactly as specified during implementation
+- **Category:** Denial of Service / Input Validation
+- **Component:** `src/utils/zip.ts`, `src/transforms/uslm-to-ir.ts`
+- **Description:** The architecture now defines concrete limits for per-entry extracted size, total extracted size, request timeout, bounded retries, and oversized text-node handling. These controls are sufficient on paper, but the implementation must apply them before allocation-heavy operations and test failure paths explicitly.
+- **Impact:** If implemented loosely, malformed or oversized ZIP/XML content could still cause excessive memory or CPU consumption.
+- **Recommendation:** Treat the documented bounds as mandatory acceptance checks in tests. Enforce size checks during archive enumeration/streaming and convert oversize or malformed structures into bounded parse errors rather than crashes.
 
-### [LOW] Output path policy should explicitly address symlink traversal in the target directory tree
+### [LOW] Output-root symlink refusal is correct but may surprise operators without a clear error contract
 - **Category:** Tampering
 - **Component:** `src/transforms/write-output.ts`
-- **Description:** The architecture correctly requires resolved output paths to remain under the requested base path, but it does not say how to handle symlinked intermediate directories inside that base path.
-- **Impact:** In unusual local setups, writing through symlinked directories could place outputs somewhere the operator did not intend.
-- **Recommendation:** During implementation, resolve the output root once, reject non-directory roots, and either forbid symlinked intermediate directories for emitted files or document that the output root is trusted operator-controlled state.
+- **Description:** The architecture appropriately refuses symlinked intermediate directories below the output root to prevent path-escape writes. That policy is secure, but it should produce a deterministic operator-facing error because some local build environments use symlink-heavy directory layouts.
+- **Impact:** Confusing errors could lead operators to weaken the check or misdiagnose failures.
+- **Recommendation:** Emit a clear structured error that names the offending path component and states that symlinked intermediate directories are unsupported for this phase.
 
-### [INFO] Data classification is simple and low sensitivity for this phase
+### [INFO] Prior high-severity archive extraction issue is now addressed in the architecture
+- **Category:** Tampering / Elevation of Privilege
+- **Component:** `src/sources/olrc.ts`, `src/utils/zip.ts`
+- **Description:** The revised architecture now forbids blind extraction, requires entry enumeration, rejects absolute/`..`/drive-prefixed paths, rejects special entries, rejects duplicate normalized destinations, and requires post-resolution containment under the extraction root.
+- **Impact:** This removes the previously identified arbitrary local file write risk from the architectural design.
+- **Recommendation:** Preserve these checks as non-optional implementation requirements and cover them with targeted tests using malicious ZIP fixtures.
+
+### [INFO] Data handled in this phase is low sensitivity
 - **Category:** Data Classification
 - **Component:** Whole system
-- **Description:** This phase handles public statutory text, local cache metadata, local logs, and parse error details. No PII, secrets, payment data, or user-authenticated sessions are introduced by the approved scope.
-- **Impact:** Compliance exposure is low for this ticket, and there are no special encryption-at-rest requirements beyond normal host protections.
-- **Recommendation:** Keep logs free of secrets if future authenticated sources are added, but for this issue the main logging concern is avoiding unnecessary dumping of full XML payloads or filesystem internals into stderr.
+- **Description:** This phase processes public legal text, cache metadata, parse diagnostics, and local file paths. No PII, credentials, tokens, payment data, or authenticated sessions are introduced.
+- **Impact:** Compliance and secret-handling burden is low for this issue.
+- **Recommendation:** Continue avoiding full XML payload dumps in logs; keep stderr focused on bounded diagnostics and file/source identifiers.
 
-### [INFO] Attack surface remains intentionally small
+### [INFO] Attack surface remains intentionally small and appropriate
 - **Category:** Attack Surface
 - **Component:** Whole system
-- **Description:** The architecture avoids a database, HTTP API, background workers, webhooks, and browser-facing components. The only exposed surfaces are local CLI invocation, outbound HTTPS to OLRC, local filesystem writes, and test fixtures.
-- **Impact:** Smaller attack surface materially reduces security complexity and makes a local CLI reviewable.
-- **Recommendation:** Preserve this simplicity in implementation; do not add daemon modes, telemetry SDKs, or network listeners in this issue.
+- **Description:** The design stays within a local CLI boundary and avoids adding an HTTP API, database, background service, webhook receiver, or privileged daemon.
+- **Impact:** Smaller scope materially reduces security complexity and review risk.
+- **Recommendation:** Maintain this narrow surface during implementation; do not introduce network listeners or extra service dependencies in this ticket.
 
 ## Verdict
 
-**Status:** REVISION
+**Status:** APPROVED
 
 - [x] All Critical findings addressed
-- [ ] All High findings addressed
+- [x] All High findings addressed
 - [x] Medium findings tracked
