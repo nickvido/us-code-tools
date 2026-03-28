@@ -27,10 +27,14 @@ Build the first production-ready `transform` pipeline for `us-code-tools` so a s
   <!-- Touches: src/sources/olrc.ts, src/utils/cache.ts, tests/sources/olrc.test.ts -->
 - [ ] When a cached ZIP already exists for the requested title and cache key, the transformer reuses the cached file without making a second HTTP request during the same run.
   <!-- Touches: src/sources/olrc.ts, tests/sources/olrc.test.ts -->
+- [ ] Cache writes are atomic for a given title/cache key: concurrent transforms for the same title must not consume a partially written ZIP, and a zero-byte or invalid cached artifact must be discarded and re-downloaded before parsing begins.
+  <!-- Touches: src/sources/olrc.ts, src/utils/cache.ts, tests/sources/olrc.test.ts, tests/integration/transform-cli.test.ts -->
 - [ ] If the download request returns a non-2xx response, times out, or yields a non-ZIP payload, the CLI exits non-zero, writes no section markdown files, and prints an error message that includes the title number and the failing download URL.
   <!-- Touches: src/sources/olrc.ts, src/index.ts, tests/sources/olrc.test.ts, tests/integration/transform-cli.test.ts -->
 - [ ] The transformer extracts XML files from the downloaded ZIP and fails with a non-zero exit code if no `.xml` file is present in the archive.
   <!-- Touches: src/sources/olrc.ts, tests/sources/olrc.test.ts -->
+- [ ] If the ZIP contains more than one `.xml` file, the transformer processes all `.xml` files in lexical pathname order (including nested paths), merges the parsed sections into a single title result, and fails non-zero only if the merged set yields zero writable sections.
+  <!-- Touches: src/sources/olrc.ts, src/transforms/uslm-to-ir.ts, tests/sources/olrc.test.ts, tests/integration/transform-cli.test.ts -->
 
 ### 3. USLM parse to intermediate representation
 - [ ] A new transform parser module converts the extracted USLM XML into an intermediate representation containing title metadata, zero or more chapter records, and one record per `<section>` element.
@@ -78,9 +82,11 @@ Build the first production-ready `transform` pipeline for `us-code-tools` so a s
   <!-- Touches: tests/**/*.test.ts, tests/fixtures/**/* -->
 - [ ] The repository includes snapshot tests for at least three representative section shapes: a flat section, a section with nested subsection/paragraph structure, and a section containing notes or cross-reference text.
   <!-- Touches: tests/transforms/*.test.ts, tests/fixtures/**/* -->
-- [ ] The repository includes an integration test that exercises the public CLI for Title 1 and asserts that `_title.md` and all expected `section-*.md` files are created in a temporary output directory.
-  <!-- Touches: tests/integration/transform-cli.test.ts -->
-- [ ] `npm test` exits with status 0 and all tests pass in CI on Node.js 22+.
+- [ ] The repository includes a committed fixture manifest for the Title 1 integration case that defines the expected emitted filename set and at least three representative file assertions (`_title.md`, one flat section, and one nested section); the CLI integration test asserts against that committed manifest rather than deriving expectations from live network responses.
+  <!-- Touches: tests/integration/transform-cli.test.ts, tests/fixtures/title-01/**/* -->
+- [ ] The default `npm test` suite runs without outbound network access by using committed Title 1 fixture/cache artifacts or HTTP mocking; any optional live-download verification for OLRC is excluded from the default `npm test` path.
+  <!-- Touches: package.json, vitest.config.ts, tests/integration/transform-cli.test.ts, tests/fixtures/title-01/**/* -->
+- [ ] `npm test` exits with status 0 and all default tests pass in CI on Node.js 22+.
   <!-- Touches: package.json, vitest.config.ts, tests/**/*.test.ts -->
 
 ## Out of Scope
