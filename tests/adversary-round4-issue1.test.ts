@@ -78,10 +78,15 @@ describe('adversary round 4 regressions for #1', () => {
   });
 
   it('preserves structured reporting when title metadata writing fails after section files succeed', async () => {
-    parseUslmToIr.mockReturnValue({
-      titleIr: buildTitleIr([{ sectionNumber: '1', heading: 'Section 1' }]),
-      parseErrors: [],
-    });
+    parseUslmToIr
+      .mockReturnValueOnce({
+        titleIr: buildTitleIr([{ sectionNumber: '1', heading: 'Section 1' }]),
+        parseErrors: [],
+      })
+      .mockReturnValueOnce({
+        titleIr: buildTitleIr([]),
+        parseErrors: [],
+      });
 
     writeTitleOutput.mockResolvedValue({
       filesWritten: 1,

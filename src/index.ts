@@ -94,7 +94,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 1;
     }
 
-    return writeResult.filesWritten > 1 ? 0 : 1;
+    const titleMetadataWriteFailed = writeResult.parseErrors.some(
+      (parseError) => parseError.code === 'OUTPUT_WRITE_FAILED' && parseError.sectionHint === '_title.md',
+    );
+    const sectionFilesWritten = writeResult.filesWritten - (titleMetadataWriteFailed ? 0 : 1);
+
+    return sectionFilesWritten > 0 ? 0 : 1;
   } catch (error) {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
     return 1;
