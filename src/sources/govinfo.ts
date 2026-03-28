@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { FetchInvocation } from './congress.js';
 import { getCachePaths, readFreshRawResponseCache, writeRawResponseCache } from '../utils/cache.js';
-import { createRateLimitState, isRateLimitExhausted, markRateLimitUse } from '../utils/rate-limit.js';
+import { getSharedApiDataGovLimiter, isRateLimitExhausted, markRateLimitUse, parseRetryAfter } from '../utils/rate-limit.js';
 import { readManifest, writeManifest, type FetchManifest } from '../utils/manifest.js';
 import { logNetworkEvent } from '../utils/logger.js';
 
@@ -26,11 +26,8 @@ interface GovInfoCollectionPage {
   count?: number;
 }
 
-const SHARED_LIMIT = 5_000;
-const SHARED_WINDOW_MS = 60 * 60 * 1000;
 const GOVINFO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const DOWNLOAD_TIMEOUT_MS = 500;
-const sharedLimiter = createRateLimitState(SHARED_LIMIT, SHARED_WINDOW_MS);
 
 export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<GovInfoResult> {
   const query_scope = invocation.congress === null ? 'unfiltered' : `congress=${invocation.congress}` as const;
@@ -236,15 +233,19 @@ async function fetchGovInfoResponse(url: string, options: { force: boolean }): P
     }
   }
 
-  const exhaustion = isRateLimitExhausted(sharedLimiter);
+  const exhaustion = isRateLimitExhausted(getSharedApiDataGovLimiter());
   if (exhaustion.exhausted) {
     throw createRateLimitError(exhaustion.nextRequestAt);
   }
 
-  markRateLimitUse(sharedLimiter);
+  markRateLimitUse(getSharedApiDataGovLimiter());
   const response = await fetchWithTimeout(url, options.force ? 'bypass' : 'miss', startedAt);
   if (response.status === 401 || response.status === 403) {
     throw new Error('upstream_auth_rejected: GovInfo rejected API_DATA_GOV_KEY');
+  }
+  if (response.status === 429) {
+    const retryAt = parseRetryAfter(response.retryAfter);
+    throw Object.assign(new Error('rate_limit_exhausted: GovInfo returned 429'), { code: 'rate_limit_exhausted' as const, nextRequestAt: retryAt ? new Date(retryAt).toISOString() : null });
   }
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`upstream_request_failed: GovInfo request failed with HTTP ${response.status}`);
@@ -260,14 +261,14 @@ function createRateLimitErrorWithProgress(nextRequestAt: number | null, progress
   return error;
 }
 
-async function fetchWithTimeout(url: string, cacheStatus: 'miss' | 'bypass', startedAt: number): Promise<{ body: string; status: number; contentType: string | null }> {
+async function fetchWithTimeout(url: string, cacheStatus: 'miss' | 'bypass', startedAt: number): Promise<{ body: string; status: number; contentType: string | null; retryAfter: string | null }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
     const response = await fetch(url, { signal: controller.signal });
     const body = await response.text();
     logNetworkEvent({ level: 'info', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: cacheStatus, duration_ms: Date.now() - startedAt, status_code: response.status });
-    return { body, status: response.status, contentType: response.headers.get('content-type') };
+    return { body, status: response.status, contentType: response.headers.get('content-type'), retryAfter: response.headers.get('retry-after') };
   } catch (error) {
     logNetworkEvent({ level: 'error', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: cacheStatus, duration_ms: Date.now() - startedAt });
     throw error;

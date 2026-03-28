@@ -195,8 +195,11 @@ describe('adversary regressions for issue #5 — round 2', () => {
     const limiterModulePath = resolve(root, 'src', 'utils', 'rate-limit.ts');
     vi.doMock(limiterModulePath, () => ({
       createRateLimitState: () => ({ mocked: true }),
+      getSharedApiDataGovLimiter: () => ({ mocked: true }),
+      resetSharedApiDataGovLimiter: vi.fn(),
       markRateLimitUse: vi.fn(),
       isRateLimitExhausted: vi.fn(() => ({ exhausted: true, nextRequestAt: 1_800_000 })),
+      parseRetryAfter: () => null,
     }));
 
     const congressMod = await importFresh(resolve(root, 'src', 'sources', 'congress.ts'));
