@@ -7,17 +7,19 @@ See `docs/specs/3-spec.md` for the canonical spec.
 Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-tools` that writes the full U.S. Constitution into a target `us-code` git repository as deterministic historical commits: one commit for Articles I–VII on the Constitution’s ratification date, followed by one commit per amendment through Amendment XXVII on each amendment’s ratification date. The implementation must be offline-testable, idempotent on re-run, and reusable as the first backfill phase for later historical-ingestion work.
 
 ## Context
-- The repo already defines a CLI package (`package.json` bin: `us-code-tools`) and project-level content model in `SPEC.md`, including Constitution markdown paths and frontmatter fields.
-- The repository does not yet contain implementation files under `src/` or tests under `tests/`, so this issue must introduce new modules and test coverage rather than extending existing concrete code.
-- This is the first workflow that mutates a downstream git repository instead of only transforming local data.
-- Later backfill phases will reuse the same planning, rendering, repository-opening, commit-writing, and push orchestration patterns, so determinism and resume behavior are non-negotiable.
+- The repo already defines a CLI package (`package.json` bin: `us-code-tools`) and an existing `transform` command implemented in `src/index.ts`, plus current transform/domain/source modules and Vitest coverage.
+- `SPEC.md` already defines the Constitution content model and path conventions, but its broader project structure is aspirational in places; this issue must extend the existing tool surface rather than assuming the scaffold is empty.
+- This is the first workflow in this repo that mutates a downstream git repository instead of only transforming local source data into files.
+- Later backfill phases will reuse the same planning, rendering, repository-opening, commit-writing, and push orchestration patterns, so determinism, idempotency, and resume behavior are non-negotiable.
 - The Constitution source data is effectively static and must be committed in-repo so builds and tests remain offline and deterministic.
 
 ## Acceptance Criteria
 
 ### 1. CLI Surface
 - [ ] Add a new CLI entry path for `backfill` such that `npx us-code-tools backfill --phase=constitution --target <path>` invokes Constitution backfill orchestration.  
-  <!-- Touches: new `src/index.ts` or equivalent CLI bootstrap, new backfill command parser module, CLI tests -->
+  <!-- Touches: existing `src/index.ts` CLI bootstrap or equivalent dispatcher, new backfill command parser module, CLI tests -->
+- [ ] The existing `transform` command behavior remains available and its current tests continue to pass after `backfill` is added.  
+  <!-- Touches: CLI dispatcher, existing transform tests -->
 - [ ] The CLI rejects each invalid invocation with a non-zero exit code and a deterministic error message: missing `--phase`, missing `--target`, unsupported `--phase`, and `--target` resolving to a non-directory path.  
   <!-- Touches: CLI parser/validator, CLI tests -->
 - [ ] The CLI accepts both an existing local git repository path and a non-existent target path that can be created or cloned for use by the backfill workflow.  
