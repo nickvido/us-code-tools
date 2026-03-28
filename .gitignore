@@ -9,6 +9,10 @@ dist/
 .env
 .env.*
 !.env.example
+<<<<<<< HEAD
+=======
+.env.local
+>>>>>>> 04d1b88 (Add .gitignore)
 
 # OS
 .DS_Store
