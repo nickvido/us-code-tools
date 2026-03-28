@@ -38,6 +38,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     let mergedTitle: TitleIR | null = null;
     const parseErrors: ParseError[] = [];
     const seenSectionNumbers = new Set<string>();
+    let hasDuplicateSectionCollision = false;
 
     for (const entry of xmlEntries) {
       const result = parseUslmToIr(entry.xml, entry.xmlPath);
@@ -52,6 +53,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
       for (const section of result.titleIr.sections) {
         if (seenSectionNumbers.has(section.sectionNumber)) {
+          hasDuplicateSectionCollision = true;
           parseErrors.push({
             code: 'INVALID_XML',
             message: `Duplicate section number '${section.sectionNumber}' encountered across XML files`,
@@ -87,6 +89,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     };
 
     process.stdout.write(`${JSON.stringify(report)}\n`);
+
+    if (hasDuplicateSectionCollision) {
+      return 1;
+    }
+
     return writeResult.filesWritten > 1 ? 0 : 1;
   } catch (error) {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
