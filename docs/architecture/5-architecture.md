@@ -176,14 +176,16 @@ export interface OlrcManifestState {
 export interface CongressManifestState {
   last_success_at: string | null;
   last_failure: SourceFailureRecord | null;
-  current_congress_resolution: {
-    current: number | null;
-    resolution: 'live' | 'override' | 'fallback' | null;
-    fallback_value: number | null;
-    degraded: boolean;
-    operator_review_required: boolean;
-    resolved_at: string | null;
-  };
+  bulk_scope: {
+    congress: {
+      start: number;           // e.g. 93
+      current: number;         // resolved CURRENT_CONGRESS
+      resolution: 'live' | 'override' | 'fallback';
+      fallback_value: number | null;  // non-null only when resolution='fallback'
+      operator_review_required: boolean; // true when resolution='fallback'
+    };
+    resolved_at: string;
+  } | null;  // null when not a bulk run
   member_snapshot: {
     snapshot_id: string | null;
     status: 'missing' | 'complete' | 'incomplete' | 'stale';
@@ -385,14 +387,7 @@ The seed-equivalent artifacts for this issue are:
     "congress": {
       "last_success_at": null,
       "last_failure": null,
-      "current_congress_resolution": {
-        "current": null,
-        "resolution": null,
-        "fallback_value": null,
-        "degraded": false,
-        "operator_review_required": false,
-        "resolved_at": null
-      },
+      "bulk_scope": null,
       "member_snapshot": {
         "snapshot_id": null,
         "status": "missing",
@@ -498,6 +493,52 @@ Stdout: single JSON object
   "rate_limit_exhausted": false,
   "next_request_at": null,
   "degraded": false,
+  "errors": []
+}
+```
+
+#### 2.3.2b Bulk run result (fetch --all)
+```json
+{
+  "source": "congress",
+  "ok": true,
+  "requested_scope": { "congress": "93..119" },
+  "bulk_scope": {
+    "congress": {
+      "start": 93,
+      "current": 119,
+      "resolution": "live",
+      "fallback_value": null,
+      "operator_review_required": false
+    },
+    "resolved_at": "2026-03-28T20:00:00.000Z"
+  },
+  "counts": { "...": "..." },
+  "rate_limit_exhausted": false,
+  "next_request_at": null,
+  "errors": []
+}
+```
+
+#### 2.3.2c Bulk run with degraded fallback
+```json
+{
+  "source": "congress",
+  "ok": true,
+  "requested_scope": { "congress": "93..119" },
+  "bulk_scope": {
+    "congress": {
+      "start": 93,
+      "current": 119,
+      "resolution": "fallback",
+      "fallback_value": 119,
+      "operator_review_required": true
+    },
+    "resolved_at": "2026-03-28T20:00:00.000Z"
+  },
+  "counts": { "...": "..." },
+  "rate_limit_exhausted": false,
+  "next_request_at": null,
   "errors": []
 }
 ```
@@ -696,9 +737,10 @@ This issue’s production target is an operator-run CLI on Node.js.
 ### Logging
 - structured JSON lines to stderr
 - allowlist-only event schema; the logger may emit only approved scalar fields and small arrays defined in `src/utils/logger.ts`
-- minimum fields: `ts`, `level`, `event`, `source`, `origin_host`, `path_template`, `method`, `attempt`, `cache_status`, `duration_ms`, `status_code`
-- forbidden log content: raw request URLs with query strings, raw headers, raw bodies, raw manifest fragments, raw upstream payloads, and raw exception serialization
-- redaction policy removes query values for `api_key` and any Authorization-like headers before a value reaches the logger boundary
+- minimum fields: `ts`, `level`, `event`, `source`, `url` (redacted — see below), `method`, `attempt`, `cache_status`, `duration_ms`, `status_code`
+- the `url` field is the request URL with sensitive query parameters (e.g., `api_key`) replaced by `[REDACTED]`; this satisfies the spec requirement for a URL field while preventing credential leakage
+- forbidden log content: raw headers, raw bodies, raw manifest fragments, raw upstream payloads, and raw exception serialization
+- redaction policy: query values for `api_key` and any Authorization-like headers are replaced with `[REDACTED]` before a value reaches the logger boundary
 - failures are logged as normalized error records: `error.code`, `error.message`, `retryable`, and selected source identifiers only
 
 ### Monitoring / operator visibility
