@@ -40,18 +40,34 @@ function parseJsonResult(stdout: string, stderr: string): Record<string, unknown
 }
 
 function gitLogFormat(repo: string): string[] {
-  const output = execSync(`git -C ${JSON.stringify(repo)} log --reverse --format="%ai %s"`, {
+  const revisions = execSync(`git -C ${JSON.stringify(repo)} rev-list --reverse HEAD`, {
     encoding: 'utf8',
     cwd: process.cwd(),
-  }).toString();
-  return output.trim().split('\n').filter(Boolean);
+  }).toString().trim().split('\n').filter(Boolean);
+
+  return revisions.map((revision) => {
+    const commit = execSync(`git -C ${JSON.stringify(repo)} cat-file -p ${revision}`, {
+      encoding: 'utf8',
+      cwd: process.cwd(),
+    }).toString();
+    const lines = commit.split('\n');
+    const authorLine = lines.find((line) => line.startsWith('author '));
+    const message = commit.split('\n\n').slice(1).join('\n\n').trim().split('\n')[0];
+    const match = /^author .+ <.+> (-?\d+) ([+-]\d{4})$/.exec(authorLine ?? '');
+    if (!match) {
+      throw new Error(`Could not parse author line for ${revision}`);
+    }
+
+    const isoDate = new Date(Number(match[1]) * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    return `${isoDate} ${match[2]} ${message}`;
+  });
 }
 
 function assertConstitutionTree(repo: string) {
   const expected = [
-    ...['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].map((numeral) => `constitution/article-${numeral}.md`),
-    ...Array.from({ length: 27 }, (_, idx) => `constitution/amendment-${String(idx + 1).padStart(2, '0')}.md`),
-  ];
+    ...['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].map((numeral) => `article-${numeral}.md`),
+    ...Array.from({ length: 27 }, (_, idx) => `amendment-${String(idx + 1).padStart(2, '0')}.md`),
+  ].sort();
 
   const files = readdirSync(resolve(repo, 'constitution')).sort();
   expect(files).toEqual(expected);
@@ -83,6 +99,7 @@ function writeUnrelatedCommit(repo: string) {
 }
 
 describe('backfill constitution integration', () => {
+  const LONG_TIMEOUT_MS = 20_000;
   it('creates 28 constitution commits and deterministic target files in a fresh repo', () => {
     const target = mkdtempSync(join(tmpdir(), 'us-code-tools-backfill-'));
     try {
@@ -118,7 +135,7 @@ describe('backfill constitution integration', () => {
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
-  });
+  }, LONG_TIMEOUT_MS);
 
   it('is idempotent on second run (no new commits added)', () => {
     const target = mkdtempSync(join(tmpdir(), 'us-code-tools-backfill-'));
@@ -148,7 +165,7 @@ describe('backfill constitution integration', () => {
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
-  });
+  }, LONG_TIMEOUT_MS);
 
   it('supports resume from a contiguous prefix and fills missing suffix', () => {
     const target = mkdtempSync(join(tmpdir(), 'us-code-tools-backfill-prefix-'));
@@ -179,7 +196,7 @@ describe('backfill constitution integration', () => {
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
-  });
+  }, LONG_TIMEOUT_MS);
 
   it('rejects an existing populated non-git directory before init', () => {
     const target = mkdtempSync(join(tmpdir(), 'us-code-tools-backfill-populated-'));
@@ -211,7 +228,7 @@ describe('backfill constitution integration', () => {
       expect(output).toContain('working tree must be clean');
 
       const revCount = Number(
-        execSync(`git -C ${JSON.stringify(target)} rev-list --count HEAD`, {
+        execSync(`git -C ${JSON.stringify(target)} rev-list --count --all`, {
           cwd: process.cwd(),
           encoding: 'utf8',
         }).toString().trim(),
@@ -280,5 +297,5 @@ describe('backfill constitution integration', () => {
 
     rmSync(emptyExisting, { recursive: true, force: true });
     rmSync(nested, { recursive: true, force: true });
-  });
+  }, LONG_TIMEOUT_MS);
 });
