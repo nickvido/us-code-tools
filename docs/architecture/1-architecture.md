@@ -10,11 +10,13 @@ Approved spec input: `docs/specs/1-spec.md`
 - GitHub issue #1 and issue comments
 
 ## Review Feedback Addressed
-- No prior `## [security-architect]` or `## [arch-reviewer]` comments exist on issue #1.
-- The architecture below incorporates the approved spec’s clarifications on:
+- `## [security-architect]` revision reviewed from `docs/architecture/1-uslm-transformer-security.md`.
+- The architecture below now explicitly addresses:
+  - ZIP path traversal and special-entry rejection during XML materialization
   - deterministic handling of ZIP archives containing multiple XML files
   - CI-safe integration testing without mandatory live network access
   - atomic cache writes and invalid cache recovery for concurrent title requests
+  - concrete XML parser hardening and output-root symlink refusal rules
 
 ## 1. Data Model
 
@@ -564,10 +566,17 @@ The only untrusted input sources in this phase are:
 - reject archives with zero XML entries
 - cap maximum uncompressed XML size per entry at a safe upper bound (e.g. 64 MiB) to reduce ZIP bomb risk
 - cap total extracted XML bytes per run at a safe upper bound (e.g. 256 MiB)
+- **do not perform blind archive extraction**; enumerate entries first and materialize only accepted `.xml` regular-file entries
+- reject any entry whose normalized archive path is absolute, contains `..` segments, contains a Windows drive prefix, or resolves outside the designated extraction root after canonicalization
+- reject symlinks, hardlinks, device files, and any non-regular entry type even if the ZIP library exposes them as extractable entries
+- reject duplicate normalized XML destinations so two archive entries cannot alias to the same extracted path
+- require a post-resolution containment check that every materialized XML path remains under the extraction root before opening it
 
 #### XML parsing safety
-- use a parser configuration that does not execute external entities or resolve remote references
+- use `fast-xml-parser` in a non-validating, non-executing configuration: `ignoreAttributes: false`, `attributeNamePrefix: '@_'`, `trimValues: false`, `parseTagValue: false`, `parseAttributeValue: false`, `processEntities: true`, `allowBooleanAttributes: false`
+- do not enable any custom entity resolution, external resource loading, or schema fetching; parsing operates only on the local XML bytes already extracted from the trusted-to-be-contained workspace
 - preserve text content only; ignore unexpected executable constructs
+- cap accepted text node length per normalized field (for example 1 MiB) and convert oversize or malformed structures into bounded parse errors rather than process crashes
 - treat malformed sections as parse errors, not process crashes
 
 ### 7.3 Filesystem Safety
@@ -575,6 +584,8 @@ The only untrusted input sources in this phase are:
 - never write outside the user-specified output directory for emitted markdown
 - normalize section identifiers only for `/` → `-`; do not permit path traversal from section identifiers
 - use `path.join` / `path.resolve` and verify resolved output stays under the requested base path
+- resolve the output root once before writes begin; if the supplied output path exists and is not a directory, fail the run before any files are emitted
+- treat symlinked intermediate directories under the output root as unsafe for this phase: refuse to descend through them and require a real operator-controlled directory tree for emitted files
 
 ### 7.4 Network Security
 - HTTPS only
