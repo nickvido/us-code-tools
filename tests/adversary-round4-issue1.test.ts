@@ -58,7 +58,8 @@ describe('adversary round 4 regressions for #1', () => {
     const { main } = await import('../src/index.js');
     const exitCode = await main(['transform', '--title', '1', '--output', '/tmp/out']);
 
-    expect(exitCode).toBe(0);
+    // Architecture requires deterministic failure when duplicate section numbers appear across XML files.
+    expect(exitCode).toBe(1);
     expect(writeTitleOutput).toHaveBeenCalledTimes(1);
 
     const report = getLastJsonReport();
