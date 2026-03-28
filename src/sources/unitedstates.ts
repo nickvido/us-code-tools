@@ -3,6 +3,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { getCachePaths } from '../utils/cache.js';
 import { readManifest, writeManifest, type DownloadedFileManifestEntry, type FetchManifest, type LegislatorsCrossReferenceState } from '../utils/manifest.js';
+import { logNetworkEvent } from '../utils/logger.js';
 import { evaluateCongressMemberSnapshotFreshness } from './congress-member-snapshot.js';
 
 const LEGISLATOR_FILES = ['legislators-current.yaml', 'legislators-historical.yaml', 'committees-current.yaml'] as const;
@@ -57,6 +58,6 @@ function splitTopLevelYamlRecords(yaml: string): string[] { const normalized = y
 function matchScalar(block: string, pattern: RegExp): string | null { const match = block.match(pattern); const value = match?.[1]?.trim(); return value ? value.replace(/^['"]|['"]$/g, '') : null; }
 async function fileExists(path: string): Promise<boolean> { try { await access(path); return true; } catch { return false; } }
 async function recordFailure(code: string, message: string): Promise<void> { const manifest = await readManifest(); manifest.sources.legislators.last_failure = { code, message }; await writeManifest(manifest); }
-async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); try { return await fetch(url, { signal: controller.signal }); } finally { clearTimeout(timeout); } }
+async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); const startedAt = Date.now(); try { const response = await fetch(url, { signal: controller.signal }); logNetworkEvent({ level:'info', event:'network.request', source:'legislators', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt, status_code:response.status }); return response; } catch (error) { logNetworkEvent({ level:'error', event:'network.request', source:'legislators', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt }); throw error; } finally { clearTimeout(timeout); } }
 function deriveSkippedCrossReferenceState(status:'missing'|'complete'|'incomplete'|'stale', snapshotId:string|null): LegislatorsCrossReferenceState { return { status: status === 'stale' ? 'skipped_stale_congress_snapshot' : status === 'incomplete' ? 'skipped_incomplete_congress_snapshot' : 'skipped_missing_congress_cache', based_on_snapshot_id:snapshotId, crosswalk_artifact_id:null, matched_bioguide_ids:0, unmatched_legislator_bioguide_ids:0, unmatched_congress_bioguide_ids:0, updated_at:new Date().toISOString() }; }
 function sha256(value: string): string { return createHash('sha256').update(value).digest('hex'); }

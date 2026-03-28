@@ -4,6 +4,7 @@ import type { FetchInvocation } from './congress.js';
 import { getCachePaths } from '../utils/cache.js';
 import { createRateLimitState, isRateLimitExhausted, markRateLimitUse } from '../utils/rate-limit.js';
 import { readManifest, writeManifest, type FetchManifest } from '../utils/manifest.js';
+import { logNetworkEvent } from '../utils/logger.js';
 
 export interface GovInfoResult {
   source: 'govinfo';
@@ -55,8 +56,10 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
     const finalizedPackageIds = new Set<string>(manifest.sources.govinfo.checkpoints[query_scope]?.finalized_package_ids ?? []);
     let nextPageUrl = invocation.force ? null : manifest.sources.govinfo.checkpoints[query_scope]?.next_page_url ?? null;
     let listedPackages = 0;
+    let retainedPackages = 0;
     let summaries = 0;
     let granules = 0;
+    const malformedPackageIds = new Set<string>();
 
     if (invocation.force) {
       delete manifest.sources.govinfo.checkpoints[query_scope];
@@ -64,13 +67,29 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
 
     do {
       const pageUrl = nextPageUrl ?? buildInitialListingUrl();
-      const listingResponse = await fetchGovInfoJson<GovInfoCollectionPage>(pageUrl);
-      const retainedPackageIds = (listingResponse.payload.packages ?? [])
+      let listingResponse: { payload: GovInfoCollectionPage };
+      try {
+        listingResponse = await fetchGovInfoJson<GovInfoCollectionPage>(pageUrl);
+      } catch (error) {
+        if (isRateLimitError(error)) {
+          throw createRateLimitErrorWithProgress(error.nextRequestAt, { listed_packages: listedPackages, retained_packages: retainedPackages, summaries, granules, malformed_package_ids: [...malformedPackageIds] });
+        }
+        throw error;
+      }
+      const listedPackageIds = (listingResponse.payload.packages ?? [])
         .map((item) => item.packageId)
-        .filter((value): value is string => typeof value === 'string' && value.length > 0)
-        .filter((value) => matchesCongressFilter(value, invocation.congress));
+        .filter((value): value is string => typeof value === 'string' && value.length > 0);
+      const retainedPackageIds = listedPackageIds.filter((value) => {
+        const match = matchesCongressFilter(value, invocation.congress);
+        if (match === 'malformed') {
+          malformedPackageIds.add(value);
+          return false;
+        }
+        return match;
+      });
 
-      listedPackages += retainedPackageIds.length;
+      listedPackages += listedPackageIds.length;
+      retainedPackages += retainedPackageIds.length;
       nextPageUrl = listingResponse.payload.nextPage ?? null;
 
       manifest.sources.govinfo.checkpoints[query_scope] = {
@@ -87,8 +106,24 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
           continue;
         }
 
-        const summary = await fetchGovInfoText(buildPackageUrl(packageId, 'summary'));
-        const granulePayload = await fetchGovInfoText(buildPackageUrl(packageId, 'granules'));
+        let summary: { body: string };
+        try {
+          summary = await fetchGovInfoText(buildPackageUrl(packageId, 'summary'));
+        } catch (error) {
+          if (isRateLimitError(error)) {
+            throw createRateLimitErrorWithProgress(error.nextRequestAt, { listed_packages: listedPackages, retained_packages: retainedPackages, summaries, granules, malformed_package_ids: [...malformedPackageIds] });
+          }
+          throw error;
+        }
+        let granulePayload: { body: string };
+        try {
+          granulePayload = await fetchGovInfoText(buildPackageUrl(packageId, 'granules'));
+        } catch (error) {
+          if (isRateLimitError(error)) {
+            throw createRateLimitErrorWithProgress(error.nextRequestAt, { listed_packages: listedPackages, retained_packages: retainedPackages, summaries, granules, malformed_package_ids: [...malformedPackageIds] });
+          }
+          throw error;
+        }
         await writeFile(resolve(sourceDirectory, `${packageId}-summary.json`), summary.body, { encoding: 'utf8', mode: 0o640 });
         await writeFile(resolve(sourceDirectory, `${packageId}-granules.json`), granulePayload.body, { encoding: 'utf8', mode: 0o640 });
 
@@ -112,10 +147,10 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
       query_scope,
       termination: 'complete',
       listed_package_count: listedPackages,
-      retained_package_count: listedPackages,
+      retained_package_count: retainedPackages,
       summary_count: summaries,
       granule_count: granules,
-      malformed_package_ids: [],
+      malformed_package_ids: [...malformedPackageIds],
       completed_at: new Date().toISOString(),
     };
     manifest.sources.govinfo.last_success_at = new Date().toISOString();
@@ -142,11 +177,11 @@ export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<G
       manifest.sources.govinfo.query_scopes[query_scope] = {
         query_scope,
         termination: 'rate_limit_exhausted',
-        listed_package_count: 0,
-        retained_package_count: 0,
-        summary_count: 0,
-        granule_count: 0,
-        malformed_package_ids: [],
+        listed_package_count: normalized.listed_packages,
+        retained_package_count: normalized.retained_packages,
+        summary_count: normalized.summaries,
+        granule_count: normalized.granules,
+        malformed_package_ids: normalized.malformed_package_ids,
         completed_at: null,
       };
     }
@@ -207,23 +242,38 @@ async function fetchGovInfoResponse(url: string): Promise<Response> {
   return response;
 }
 
+function createRateLimitErrorWithProgress(nextRequestAt: number | null, progress: { listed_packages: number; retained_packages: number; summaries: number; granules: number; malformed_package_ids: string[] }): Error & { code: 'rate_limit_exhausted'; nextRequestAt: number | null; progress: { listed_packages: number; retained_packages: number; summaries: number; granules: number; malformed_package_ids: string[] } } {
+  const error = createRateLimitError(nextRequestAt) as Error & { code: 'rate_limit_exhausted'; nextRequestAt: number | null; progress: { listed_packages: number; retained_packages: number; summaries: number; granules: number; malformed_package_ids: string[] } };
+  error.progress = progress;
+  return error;
+}
+
 async function fetchWithTimeout(url: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  const startedAt = Date.now();
   try {
-    return await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { signal: controller.signal });
+    logNetworkEvent({ level: 'info', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: 'miss', duration_ms: Date.now() - startedAt, status_code: response.status });
+    return response;
+  } catch (error) {
+    logNetworkEvent({ level: 'error', event: 'network.request', source: 'govinfo', method: 'GET', url, attempt: 1, cache_status: 'miss', duration_ms: Date.now() - startedAt });
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function matchesCongressFilter(packageId: string, congress: number | null): boolean {
+function matchesCongressFilter(packageId: string, congress: number | null): boolean | 'malformed' {
   if (congress === null) {
     return true;
   }
 
   const match = /^PLAW-(\d+)/.exec(packageId);
-  return match?.[1] === String(congress);
+  if (match?.[1] === undefined) {
+    return packageId.startsWith('PLAW-') ? 'malformed' : false;
+  }
+  return match[1] === String(congress);
 }
 
 function createRateLimitError(nextRequestAt: number | null): Error & { code: 'rate_limit_exhausted'; nextRequestAt: number | null } {
@@ -236,25 +286,42 @@ function createRateLimitError(nextRequestAt: number | null): Error & { code: 'ra
   return error;
 }
 
-function normalizeError(error: unknown): { code: string; message: string; next_request_at: string | null } {
-  if (error instanceof Error && 'code' in error && error.code === 'rate_limit_exhausted') {
-    const nextRequestAt = 'nextRequestAt' in error && typeof error.nextRequestAt === 'number'
+function isRateLimitError(error: unknown): error is Error & { code: 'rate_limit_exhausted'; nextRequestAt: number | null } {
+  return error instanceof Error && 'code' in error && error.code === 'rate_limit_exhausted';
+}
+
+function normalizeError(error: unknown): { code: string; message: string; next_request_at: string | null; listed_packages: number; retained_packages: number; summaries: number; granules: number; malformed_package_ids: string[] } {
+  if (isRateLimitError(error)) {
+    const nextRequestAt = typeof error.nextRequestAt === 'number'
       ? new Date(error.nextRequestAt).toISOString()
       : null;
+    const progress = 'progress' in error && typeof error.progress === 'object' && error.progress !== null
+      ? error.progress as { listed_packages?: number; retained_packages?: number; summaries?: number; granules?: number; malformed_package_ids?: string[] }
+      : {};
     return {
       code: 'rate_limit_exhausted',
       message: error.message,
       next_request_at: nextRequestAt,
+      listed_packages: progress.listed_packages ?? 0,
+      retained_packages: progress.retained_packages ?? 0,
+      summaries: progress.summaries ?? 0,
+      granules: progress.granules ?? 0,
+      malformed_package_ids: Array.isArray(progress.malformed_package_ids) ? progress.malformed_package_ids : [],
     };
   }
 
   if (error instanceof Error && error.message.startsWith('upstream_auth_rejected:')) {
-    return { code: 'upstream_auth_rejected', message: error.message, next_request_at: null };
+    return { code: 'upstream_auth_rejected', message: error.message, next_request_at: null, listed_packages: 0, retained_packages: 0, summaries: 0, granules: 0, malformed_package_ids: [] };
   }
 
   return {
     code: 'upstream_request_failed',
     message: error instanceof Error ? error.message : 'GovInfo fetch failed',
     next_request_at: null,
+    listed_packages: 0,
+    retained_packages: 0,
+    summaries: 0,
+    granules: 0,
+    malformed_package_ids: [],
   };
 }

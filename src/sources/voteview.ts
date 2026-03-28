@@ -3,6 +3,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { getCachePaths } from '../utils/cache.js';
 import { readManifest, writeManifest, type DownloadedFileManifestEntry } from '../utils/manifest.js';
+import { logNetworkEvent } from '../utils/logger.js';
 
 const VOTEVIEW_FILES = ['HSall_members.csv', 'HSall_votes.csv', 'HSall_rollcalls.csv'] as const;
 const VOTEVIEW_BASE_URL = 'https://voteview.com/static/data/out';
@@ -72,5 +73,5 @@ function toNumber(value: string | undefined): number | null { if (!value) return
 function buildManifestEntry(dataDirectory: string, artifactPath: string, body: string): DownloadedFileManifestEntry { return { path: artifactPath.startsWith(dataDirectory) ? artifactPath.slice(dataDirectory.length + 1) : artifactPath, byte_count: Buffer.byteLength(body, 'utf8'), checksum_sha256: sha256(body), fetched_at: new Date().toISOString() }; }
 async function fileExists(path: string): Promise<boolean> { try { await access(path); return true; } catch { return false; } }
 async function recordFailure(code: string, message: string): Promise<void> { const manifest = await readManifest(); manifest.sources.voteview.last_failure = { code, message }; await writeManifest(manifest); }
-async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); try { return await fetch(url, { signal: controller.signal }); } finally { clearTimeout(timeout); } }
+async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); const startedAt = Date.now(); try { const response = await fetch(url, { signal: controller.signal }); logNetworkEvent({ level:'info', event:'network.request', source:'voteview', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt, status_code:response.status }); return response; } catch (error) { logNetworkEvent({ level:'error', event:'network.request', source:'voteview', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt }); throw error; } finally { clearTimeout(timeout); } }
 function sha256(value: string): string { return createHash('sha256').update(value).digest('hex'); }

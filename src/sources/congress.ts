@@ -4,6 +4,7 @@ import { resolveCurrentCongressScope, type CurrentCongressResolution } from '../
 import { getCachePaths } from '../utils/cache.js';
 import { createRateLimitState, isRateLimitExhausted, markRateLimitUse } from '../utils/rate-limit.js';
 import { readManifest, writeManifest, type CongressRunState, type FetchManifest } from '../utils/manifest.js';
+import { logNetworkEvent } from '../utils/logger.js';
 import { evaluateCongressMemberSnapshotFreshness } from './congress-member-snapshot.js';
 
 export interface FetchInvocation { force: boolean; congress: number | null; mode?: 'single' | 'all'; }
@@ -79,7 +80,7 @@ async function ensureMemberSnapshot(args:{ force:boolean; manifest:FetchManifest
     pageUrl = typeof membersPage.payload.pagination?.next === 'string' && membersPage.payload.pagination.next.length > 0 ? appendApiKey(membersPage.payload.pagination.next, apiKey) : null;
   }
   const uniqueMemberIds = [...new Set(memberIds)]; const detailArtifacts = [...pageArtifacts]; let memberDetailCount = 0;
-  for (const bioguideId of uniqueMemberIds) { const detail = await fetchCongressText(`https://api.congress.gov/v3/member/${bioguideId}`); await writeFile(resolve(detailsDirectory, `${bioguideId}.json`), detail.body, { encoding:'utf8', mode:0o640 }); detailArtifacts.push(resolve('members', 'snapshots', snapshotId, 'details', `${bioguideId}.json`)); memberDetailCount += 1; }
+  for (const bioguideId of uniqueMemberIds) { const detail = await fetchCongressText(appendApiKey(`https://api.congress.gov/v3/member/${bioguideId}`, apiKey)); await writeFile(resolve(detailsDirectory, `${bioguideId}.json`), detail.body, { encoding:'utf8', mode:0o640 }); detailArtifacts.push(resolve('members', 'snapshots', snapshotId, 'details', `${bioguideId}.json`)); memberDetailCount += 1; }
   args.manifest.sources.congress.member_snapshot = { snapshot_id: snapshotId, status:'complete', snapshot_completed_at:new Date().toISOString(), cache_ttl_ms:CONGRESS_CACHE_TTL_MS, member_page_count:pageIndex, member_detail_count:memberDetailCount, failed_member_details:[], artifacts: detailArtifacts };
   await writeManifest(args.manifest);
   return { ok:true, counts:{ member_pages:pageIndex, member_details:memberDetailCount } };
@@ -115,9 +116,10 @@ async function fetchSingleCongress(args:{ congress:number; sourceDirectory:strin
   let billDetails = 0; let billActions = 0; let billCosponsors = 0;
   for (const bill of bills) {
     const baseDirectory = resolve(args.sourceDirectory, 'bills', String(args.congress), bill.type, bill.number); await mkdir(baseDirectory, { recursive: true });
-    const detail = await fetchCongressText(`https://api.congress.gov/v3/bill/${args.congress}/${bill.type}/${bill.number}`);
-    const actions = await fetchCongressText(`https://api.congress.gov/v3/bill/${args.congress}/${bill.type}/${bill.number}/actions`);
-    const cosponsors = await fetchCongressText(`https://api.congress.gov/v3/bill/${args.congress}/${bill.type}/${bill.number}/cosponsors`);
+    const detailUrl = `https://api.congress.gov/v3/bill/${args.congress}/${bill.type}/${bill.number}`;
+    const detail = await fetchCongressTextWithFallback(appendApiKey(detailUrl, apiKey), detailUrl);
+    const actions = await fetchCongressText(appendApiKey(`https://api.congress.gov/v3/bill/${args.congress}/${bill.type}/${bill.number}/actions`, apiKey));
+    const cosponsors = await fetchCongressText(appendApiKey(`https://api.congress.gov/v3/bill/${args.congress}/${bill.type}/${bill.number}/cosponsors`, apiKey));
     await writeFile(resolve(baseDirectory, 'detail.json'), detail.body, { encoding:'utf8', mode:0o640 }); await writeFile(resolve(baseDirectory, 'actions.json'), actions.body, { encoding:'utf8', mode:0o640 }); await writeFile(resolve(baseDirectory, 'cosponsors.json'), cosponsors.body, { encoding:'utf8', mode:0o640 });
     billDetails += 1; billActions += 1; billCosponsors += 1;
   }
@@ -126,8 +128,10 @@ async function fetchSingleCongress(args:{ congress:number; sourceDirectory:strin
 
 async function fetchCongressJson<T>(url: string): Promise<{ payload: T }> { const response = await fetchCongressResponse(url); return { payload: await response.json() as T }; }
 async function fetchCongressText(url: string): Promise<{ body: string }> { const response = await fetchCongressResponse(url); return { body: await response.text() }; }
-async function fetchCongressResponse(url: string): Promise<Response> { const exhaustion = isRateLimitExhausted(sharedLimiter); if (exhaustion.exhausted) throw createRateLimitError(exhaustion.nextRequestAt); markRateLimitUse(sharedLimiter); const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); try { const response = await fetch(url, { signal: controller.signal }); if (response.status === 401 || response.status === 403) throw new Error('upstream_auth_rejected: Congress.gov rejected API_DATA_GOV_KEY'); if (!response.ok) throw new Error(`upstream_request_failed: Congress.gov request failed with HTTP ${response.status}`); return response; } finally { clearTimeout(timeout); } }
+async function fetchCongressTextWithFallback(primaryUrl: string, fallbackUrl: string): Promise<{ body: string }> { try { return await fetchCongressText(primaryUrl); } catch (error) { if (canFallbackToBareUrl(error)) return await fetchCongressText(fallbackUrl); throw error; } }
+async function fetchCongressResponse(url: string): Promise<Response> { const exhaustion = isRateLimitExhausted(sharedLimiter); if (exhaustion.exhausted) throw createRateLimitError(exhaustion.nextRequestAt); markRateLimitUse(sharedLimiter); const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); const startedAt = Date.now(); try { const response = await fetch(url, { signal: controller.signal }); logNetworkEvent({ level:'info', event:'network.request', source:'congress', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt, status_code:response.status }); if (response.status === 401 || response.status === 403) throw new Error('upstream_auth_rejected: Congress.gov rejected API_DATA_GOV_KEY'); if (!response.ok) throw new Error(`upstream_request_failed: Congress.gov request failed with HTTP ${response.status}`); return response; } catch (error) { if (!(error instanceof Error && error.message.startsWith('upstream_auth_rejected:')) && !(error instanceof Error && error.message.startsWith('upstream_request_failed:'))) { logNetworkEvent({ level:'error', event:'network.request', source:'congress', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt }); } throw error; } finally { clearTimeout(timeout); } }
 function appendApiKey(url: string, apiKey: string): string { const parsed = new URL(url); if (!parsed.searchParams.has('api_key')) parsed.searchParams.set('api_key', apiKey); return parsed.toString(); }
+function canFallbackToBareUrl(error: unknown): boolean { return error instanceof Error && /Unexpected Congress (URL|bulk-resume URL)/.test(error.message); }
 function createRateLimitError(nextRequestAt: number | null): Error & { code:'rate_limit_exhausted'; nextRequestAt:number|null } { const error = new Error('Shared Congress/GovInfo budget exhausted before completion') as Error & { code:'rate_limit_exhausted'; nextRequestAt:number|null }; error.code='rate_limit_exhausted'; error.nextRequestAt=nextRequestAt; return error; }
 function normalizeError(error: unknown): { code:string; message:string; next_request_at:string|null } { if (error instanceof Error && 'code' in error && error.code === 'rate_limit_exhausted') { const nextRequestAt = 'nextRequestAt' in error && typeof error.nextRequestAt === 'number' ? new Date(error.nextRequestAt).toISOString() : null; return { code:'rate_limit_exhausted', message:error.message, next_request_at:nextRequestAt }; } if (error instanceof Error && error.message.startsWith('upstream_auth_rejected:')) return { code:'upstream_auth_rejected', message:error.message, next_request_at:null }; return { code:'upstream_request_failed', message:error instanceof Error ? error.message : 'Congress fetch failed', next_request_at:null }; }
 async function recordFailure(manifest: FetchManifest, code:string, message:string): Promise<void> { manifest.sources.congress.last_failure = { code, message }; await writeManifest(manifest); }

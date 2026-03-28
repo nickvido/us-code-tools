@@ -7,6 +7,7 @@ import type { XmlEntry } from '../domain/model.js';
 import { padTitleNumber } from '../domain/normalize.js';
 import { getCachePaths } from '../utils/cache.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
+import { logNetworkEvent } from '../utils/logger.js';
 
 const DOWNLOAD_TIMEOUT_MS = 500;
 const DOWNLOAD_RETRY_COUNT = 1;
@@ -337,10 +338,14 @@ async function fetchWithRetry(url: string): Promise<Response> {
   while (true) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+    const startedAt = Date.now();
     try {
-      return await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, { signal: controller.signal });
+      logNetworkEvent({ level:'info', event:'network.request', source:'olrc', method:'GET', url, attempt:attempt + 1, cache_status:'miss', duration_ms:Date.now() - startedAt, status_code:response.status });
+      return response;
     } catch (error) {
       const normalizedError = toError(error);
+      logNetworkEvent({ level:'error', event:'network.request', source:'olrc', method:'GET', url, attempt:attempt + 1, cache_status:'miss', duration_ms:Date.now() - startedAt });
       if (attempt >= DOWNLOAD_RETRY_COUNT || !isTransientDownloadError(normalizedError)) {
         throw new Error(`failed to download from ${url}: ${normalizedError.message}`);
       }
