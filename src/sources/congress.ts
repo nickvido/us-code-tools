@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveCurrentCongressScope, type CurrentCongressResolution } from '../utils/fetch-config.js';
 import { getCachePaths } from '../utils/cache.js';
@@ -51,6 +52,7 @@ interface CongressMemberListPayload {
 
 const SHARED_LIMIT = 5_000;
 const SHARED_WINDOW_MS = 60 * 60 * 1000;
+const CONGRESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const sharedLimiter = createRateLimitState(SHARED_LIMIT, SHARED_WINDOW_MS);
 
 export async function fetchCongressSource(invocation: FetchInvocation): Promise<FetchSourceResult> {
@@ -207,7 +209,10 @@ async function ensureMemberSnapshot(args: {
       error: { code: string; message: string };
     }
 > {
-  if (!args.force && args.manifest.sources.congress.member_snapshot.status === 'complete') {
+  const snapshot = args.manifest.sources.congress.member_snapshot;
+  const snapshotFreshness = await evaluateMemberSnapshotFreshness(snapshot, args.sourceDirectory);
+
+  if (!args.force && snapshotFreshness.isReusable) {
     return {
       ok: true,
       counts: {
@@ -217,32 +222,51 @@ async function ensureMemberSnapshot(args: {
     };
   }
 
+  if (!args.force) {
+    args.manifest.sources.congress.member_snapshot = {
+      ...snapshot,
+      status: snapshotFreshness.rebuildStatus,
+    };
+    await writeManifest(args.manifest);
+  }
+
   const apiKey = process.env.API_DATA_GOV_KEY ?? '';
+  const snapshotId = `snapshot-${Date.now()}`;
+  const snapshotDirectory = resolve(args.sourceDirectory, 'members', 'snapshots', snapshotId);
+  const pagesDirectory = resolve(snapshotDirectory, 'pages');
+  const detailsDirectory = resolve(snapshotDirectory, 'details');
+  await mkdir(pagesDirectory, { recursive: true });
+  await mkdir(detailsDirectory, { recursive: true });
+
   const members = await fetchCongressJson<CongressMemberListPayload>(
     `https://api.congress.gov/v3/member?api_key=${encodeURIComponent(apiKey)}`,
   );
+  const memberPageArtifact = resolve(pagesDirectory, 'page-1.json');
+  await writeFile(memberPageArtifact, JSON.stringify(members.payload), { encoding: 'utf8', mode: 0o640 });
+
   const bioguideIds = (members.payload.members ?? [])
     .map((member) => member.bioguideId)
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
 
-  await writeFile(resolve(args.sourceDirectory, 'member-list.json'), JSON.stringify(members.payload), { encoding: 'utf8', mode: 0o640 });
-
+  const artifacts = [resolve('members', 'snapshots', snapshotId, 'pages', 'page-1.json')];
   let memberDetailCount = 0;
   for (const bioguideId of bioguideIds) {
     const detail = await fetchCongressText(`https://api.congress.gov/v3/member/${bioguideId}?api_key=${encodeURIComponent(apiKey)}`);
-    await writeFile(resolve(args.sourceDirectory, `member-${bioguideId}.json`), detail.body, { encoding: 'utf8', mode: 0o640 });
+    const detailArtifact = resolve(detailsDirectory, `${bioguideId}.json`);
+    await writeFile(detailArtifact, detail.body, { encoding: 'utf8', mode: 0o640 });
+    artifacts.push(resolve('members', 'snapshots', snapshotId, 'details', `${bioguideId}.json`));
     memberDetailCount += 1;
   }
 
   args.manifest.sources.congress.member_snapshot = {
-    snapshot_id: `snapshot-${Date.now()}`,
+    snapshot_id: snapshotId,
     status: 'complete',
     snapshot_completed_at: new Date().toISOString(),
-    cache_ttl_ms: 24 * 60 * 60 * 1000,
+    cache_ttl_ms: CONGRESS_CACHE_TTL_MS,
     member_page_count: 1,
     member_detail_count: memberDetailCount,
     failed_member_details: [],
-    artifacts: ['member-list', ...bioguideIds.map((id) => `member-${id}`)],
+    artifacts,
   };
   await writeManifest(args.manifest);
 
@@ -253,6 +277,41 @@ async function ensureMemberSnapshot(args: {
       member_details: memberDetailCount,
     },
   };
+}
+
+async function evaluateMemberSnapshotFreshness(
+  snapshot: FetchManifest['sources']['congress']['member_snapshot'],
+  sourceDirectory: string,
+): Promise<{ isReusable: boolean; rebuildStatus: 'missing' | 'incomplete' | 'stale' }> {
+  if (snapshot.status !== 'complete') {
+    return {
+      isReusable: false,
+      rebuildStatus: snapshot.status === 'incomplete' ? 'incomplete' : snapshot.status === 'missing' ? 'missing' : 'stale',
+    };
+  }
+
+  if (snapshot.snapshot_completed_at === null || snapshot.cache_ttl_ms === null) {
+    return { isReusable: false, rebuildStatus: 'stale' };
+  }
+
+  const completedAt = Date.parse(snapshot.snapshot_completed_at);
+  if (!Number.isFinite(completedAt) || (completedAt + snapshot.cache_ttl_ms) <= Date.now()) {
+    return { isReusable: false, rebuildStatus: 'stale' };
+  }
+
+  if (snapshot.artifacts.length === 0) {
+    return { isReusable: false, rebuildStatus: 'stale' };
+  }
+
+  for (const artifact of snapshot.artifacts) {
+    try {
+      await access(resolve(sourceDirectory, artifact), fsConstants.F_OK);
+    } catch {
+      return { isReusable: false, rebuildStatus: 'stale' };
+    }
+  }
+
+  return { isReusable: true, rebuildStatus: 'stale' };
 }
 
 function resolveRequestedCongresses(
