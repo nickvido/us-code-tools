@@ -22,6 +22,7 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   - `npx us-code-tools fetch --all`
   - `npx us-code-tools fetch --source=olrc`
   - `npx us-code-tools fetch --source=congress --congress=<integer>`
+  - `npx us-code-tools fetch --source=govinfo`
   - `npx us-code-tools fetch --source=govinfo --congress=<integer>`
   - `npx us-code-tools fetch --source=voteview`
   - `npx us-code-tools fetch --source=legislators`
@@ -31,8 +32,9 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 - [ ] `fetch` returns exit code `1` and prints a deterministic usage error when:
   - both `--all` and `--source` are present
   - `--status` is combined with `--all`, `--source`, or `--congress`
-  - `--source=congress` or `--source=govinfo` is missing `--congress`
+  - `--source=congress` is missing `--congress`
   - `--source` is not one of `olrc|congress|govinfo|voteview|legislators`
+  - `--congress` is supplied for `--source=olrc`, `--source=voteview`, or `--source=legislators`
   - `--congress` is not an integer greater than or equal to `1`
   <!-- Touches: src/index.ts, tests/unit/fetch-cli-args.test.ts -->
 - [ ] `fetch --status` prints a single JSON object to stdout whose top-level keys are `generated_at`, `manifest_path`, and `sources`; `sources` contains exactly the keys `olrc`, `congress`, `govinfo`, `voteview`, and `legislators`.
@@ -78,6 +80,13 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 - [ ] `fetch --source=olrc` attempts all 54 titles in one invocation and exits non-zero if one or more titles fail; the stdout JSON summary includes `requested_titles`, `succeeded_titles`, `failed_titles`, and a `results` array with one object per title.
   <!-- Touches: src/index.ts, src/sources/olrc.ts, tests/integration/fetch-cli.test.ts -->
 
+- [ ] If `fetch --source=congress --congress=<n>` or `fetch --source=govinfo` / `fetch --source=govinfo --congress=<n>` is invoked without a configured `api.data.gov` key, the command exits `1`, prints a deterministic runtime error, performs no outbound HTTP request for that source, and does not write a success entry for that source into the manifest.
+  <!-- Touches: src/index.ts, src/sources/congress.ts, src/sources/govinfo.ts, tests/unit/fetch-auth-config.test.ts, tests/integration/fetch-cli.test.ts -->
+- [ ] If Congress.gov or GovInfo responds with authentication/authorization failure for the configured key (HTTP `401` or `403`), the individual source fetch exits `1`, reports a deterministic source failure code in its JSON summary, and leaves previously fresh cache entries intact.
+  <!-- Touches: src/index.ts, src/sources/congress.ts, src/sources/govinfo.ts, tests/unit/sources/congress.test.ts, tests/unit/sources/govinfo.test.ts, tests/integration/fetch-cli.test.ts -->
+- [ ] During `fetch --all`, missing credentials or upstream `401`/`403` failures for Congress.gov or GovInfo are recorded as per-source failures in the final JSON summary while the remaining requested sources still run.
+  <!-- Touches: src/index.ts, src/utils/manifest.ts or equivalent, tests/integration/fetch-cli.test.ts -->
+
 ### 6. Congress.gov source client
 - [ ] A new typed client module `src/sources/congress.ts` implements methods for:
   - listing bills for a congress
@@ -101,7 +110,9 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   - fetching package summary by `packageId`
   - fetching package granules by `packageId`
   <!-- Touches: src/sources/govinfo.ts, tests/unit/sources/govinfo.test.ts, tests/fixtures/govinfo/* -->
-- [ ] `fetch --source=govinfo --congress=<n>` enumerates all public-law package IDs for the requested congress, stores the raw collection/listing responses and package-level responses in `data/cache/govinfo/`, and records the congress number plus package count in the manifest.
+- [ ] `fetch --source=govinfo` enumerates public-law package IDs using the repository’s default GovInfo acquisition query, stores the raw collection/listing responses and package-level responses in `data/cache/govinfo/`, and records the query parameters plus package count in the manifest.
+  <!-- Touches: src/index.ts, src/sources/govinfo.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
+- [ ] `fetch --source=govinfo --congress=<n>` applies a congress filter to the same GovInfo acquisition flow, stores the filtered raw responses in `data/cache/govinfo/`, and records the requested congress number plus package count in the manifest.
   <!-- Touches: src/index.ts, src/sources/govinfo.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
 - [ ] If GovInfo returns package summaries but granules are absent or empty for a package, the package is still recorded as fetched with `granule_count: 0` rather than causing the entire congress fetch to fail.
   <!-- Touches: src/sources/govinfo.ts, tests/unit/sources/govinfo.test.ts -->
@@ -162,13 +173,15 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 1. Run `npx us-code-tools fetch --status` in a clean checkout. Verify it exits `0`, prints JSON, and shows all five sources with empty or not-yet-fetched status.
 2. Run `npx us-code-tools fetch --source=olrc`. Verify the command attempts titles 1 through 54, writes `data/cache/olrc/title-01/` through `title-54/`, and records title-level outcomes in `data/manifest.json`.
 3. Run `npx us-code-tools fetch --source=congress --congress=119` with a valid API key. Verify raw bill/member/committee responses are cached under `data/cache/congress/` and the manifest records congress `119`.
-4. Run `npx us-code-tools fetch --source=govinfo --congress=119` with a valid API key. Verify public-law package listings are cached under `data/cache/govinfo/` and the manifest includes package counts.
-5. Run `npx us-code-tools fetch --source=voteview`. Verify exactly the three required CSV files exist under `data/cache/voteview/` and their metadata appears in the manifest.
-6. Run `npx us-code-tools fetch --source=legislators`. Verify exactly the three required YAML files exist under `data/cache/legislators/` and the manifest includes them.
-7. Re-run one of the API-backed fetches without `--force`. Verify logs/status indicate a cache hit and no network request is made for fresh cached entries.
-8. Re-run the same command with `--force`. Verify the artifact timestamps in `data/manifest.json` change.
-9. Run `npx us-code-tools fetch --all`. Verify the command returns a per-source summary and exits non-zero only if one or more sources fail.
-10. Run `npm test`. Verify all default tests pass and live tests remain skipped unless their env flag is provided.
+4. Run `npx us-code-tools fetch --source=govinfo` with a valid API key. Verify public-law package listings are cached under `data/cache/govinfo/` and the manifest includes query metadata plus package counts.
+5. Run `npx us-code-tools fetch --source=govinfo --congress=119` with a valid API key. Verify the same cache path is used for the filtered fetch and the manifest records congress `119`.
+6. Run `npx us-code-tools fetch --source=voteview`. Verify exactly the three required CSV files exist under `data/cache/voteview/` and their metadata appears in the manifest.
+7. Run `npx us-code-tools fetch --source=legislators`. Verify exactly the three required YAML files exist under `data/cache/legislators/` and the manifest includes them.
+8. Re-run one of the API-backed fetches without `--force`. Verify logs/status indicate a cache hit and no network request is made for fresh cached entries.
+9. Re-run the same command with `--force`. Verify the artifact timestamps in `data/manifest.json` change.
+10. Run `npx us-code-tools fetch --source=congress --congress=119` with the API key unset. Verify the command exits `1`, emits the documented missing-credential error, performs no outbound request, and does not write a success manifest entry for Congress.gov.
+11. Run `npx us-code-tools fetch --all` with the API key unset. Verify OLRC, VoteView, and legislators still run, while Congress.gov and GovInfo are reported as source-specific failures in the final JSON summary.
+12. Run `npm test`. Verify all default tests pass and live tests remain skipped unless their env flag is provided.
 
 ## Edge Case Catalog
 - Invalid CLI combinations: duplicate flags, unknown flags, unknown source names, missing `--congress`, non-integer congress numbers, `--congress=0`.
