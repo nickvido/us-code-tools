@@ -18,7 +18,7 @@
 - **Status:** Active
 - **Context:** Title ZIPs may contain multiple XML files and nested paths.
 - **Decision:** `extractXmlEntriesFromZip()` returns all accepted XML entries sorted lexically; `src/index.ts` merges all parsed sections into one `TitleIR`.
-- **Consequence:** Multi-file archives remain deterministic and CI-testable.
+- **Consequence:** Multi-file archives remain deterministic and CI-testable, but the implementation is currently incomplete versus architecture: merge logic still needs exact `sectionNumber` de-duplication across XML entries with `INVALID_XML` reporting and omission of colliding sections.
 - **Feature:** #1 USLM XML to Markdown Transformer
 
 ### ADR-004: Treat malformed sections as partial failures, not process-fatal failures
@@ -47,6 +47,13 @@
 - **Context:** Output should not escape the operator-selected tree.
 - **Decision:** `assertSafeOutputPath()` rejects symlinked path segments below the output root.
 - **Consequence:** Some symlink-heavy local setups may fail intentionally; do not remove this check without revisiting architecture.
+- **Feature:** #1 USLM XML to Markdown Transformer
+
+### ADR-008: Preserve structured report semantics when `_title.md` write fails
+- **Status:** Required by architecture, not yet fully implemented
+- **Context:** Section file writes already accumulate `OUTPUT_WRITE_FAILED` parse errors, but `_title.md` is still written outside that error boundary in `src/transforms/write-output.ts`.
+- **Decision:** Title metadata write failures must be converted into `OUTPUT_WRITE_FAILED` parse errors and returned in `writeResult.parseErrors` so `src/index.ts` can still emit the final JSON report.
+- **Consequence:** Future dev work should extend the current section-write partial-failure pattern to the title metadata write instead of relying on the top-level catch.
 - **Feature:** #1 USLM XML to Markdown Transformer
 
 ## Phase 1 Scope (Current)

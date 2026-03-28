@@ -16,6 +16,7 @@
 - `tests/adversary-round1-issue1.test.ts` — chapter-contained sections + symlinked output regression coverage.
 - `tests/adversary-round2-issue1.test.ts` — early `--output` validation + cache-manifest/SHA validation regressions.
 - `tests/adversary-round3-issue1.test.ts` — source-credit separation + oversized-field parse-bound regressions.
+- No adversary-round4 regression tests exist yet for the current open findings (duplicate section merge handling, `_title.md` write-failure report preservation).
 
 ## Fixtures
 - `tests/fixtures/title-01/manifest.json` — expected output filenames / parse-error codes for integration assertions.

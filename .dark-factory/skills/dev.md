@@ -32,11 +32,11 @@
 ## Module Dependency Graph
 
 ### If you're modifying... → Read these first:
-- `src/index.ts` → `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts`, `src/domain/model.ts`
+- `src/index.ts` → `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts`, `src/domain/model.ts`, `docs/architecture/1-architecture.md §4.2/§6.4`
 - `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, `docs/architecture/1-architecture.md`
 - `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `docs/specs/1-spec.md`
 - `src/transforms/markdown.ts` → `src/domain/model.ts`, `SPEC.md`
-- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/domain/normalize.ts`, `src/utils/fs.ts`
+- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/domain/normalize.ts`, `src/utils/fs.ts`, `src/domain/model.ts`
 - `src/utils/fs.ts` → `docs/architecture/1-architecture.md` (symlink/output-root policy)
 - `src/domain/model.ts` → every transform and writer module (contract file)
 
@@ -79,6 +79,9 @@ src/index.ts (main)
 - `tsconfig.json` uses `rootDir: "src"`; tests are not compiled into `dist`.
 - `files_written > 1` in `src/index.ts` currently drives exit code 0 (at least one section plus `_title.md`).
 - `resolveTitleUrl()` currently hardcodes the OLRC `118/200` releasepoint URL pattern.
+- Latest adversary review left two active implementation gaps:
+  - duplicate `sectionNumber` values across multiple XML entries are not yet detected during merge in `src/index.ts`
+  - `_title.md` write failures are not yet folded into `writeResult.parseErrors` in `src/transforms/write-output.ts`
 
 ## Phase 1 Scope (Current)
 - What's implemented:

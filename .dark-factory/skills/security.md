@@ -45,6 +45,7 @@
   - verifies resolved target stays under output root
   - refuses symlinked intermediate directories
 - `atomicWriteFile()` uses temp file + rename to avoid partial output files.
+- Current reporting gap: `_title.md` is still written outside the section-write error collection path in `src/transforms/write-output.ts`, so metadata-write failures can bypass structured report emission even though section files are already preserved on disk.
 
 ## Security Decisions with Rationale
 - **No blind ZIP extraction** — required to avoid path traversal and special-entry writes from untrusted archives.
@@ -56,6 +57,7 @@
 - Lack of database/auth/RLS is intentional; this feature is a local CLI only.
 - Fixture-backed integration tests are intentional; live network is deferred from default CI.
 - Hardcoded OLRC releasepoint pattern is acceptable for Phase 1; dynamic releasepoint discovery is future work.
+- Do not treat the current duplicate-section merge behavior as acceptable just because XML entries are lexically ordered; architecture requires exact `sectionNumber` de-duplication across entries and omission/reporting on collision.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
