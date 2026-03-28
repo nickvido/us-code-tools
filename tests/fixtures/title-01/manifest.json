@@ -1,0 +1,27 @@
+{
+  "title": 1,
+  "source_url": "https://uscode.house.gov/download/releasepoints/us/pl/118/200/xml_usc01@118-200.zip",
+  "expected_files": [
+    "_title.md",
+    "section-1.md",
+    "section-36B.md",
+    "section-2-3.md"
+  ],
+  "section_assertions": {
+    "_title.md": {
+      "heading": "General Provisions"
+    },
+    "section-1.md": {
+      "h1": "# § 1. Words denoting number, gender, and so forth"
+    },
+    "section-36B.md": {
+      "section": "36B"
+    },
+    "section-2-3.md": {
+      "h1": "# § 2/3. Section with slash in number"
+    }
+  },
+  "expected_parse_errors": [
+    "MISSING_SECTION_NUMBER"
+  ]
+}

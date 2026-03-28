@@ -1,0 +1,24 @@
+<uslm>
+  <title>
+    <num>1</num>
+    <heading>General Provisions</heading>
+    <section>
+      <num>2/3</num>
+      <heading>Section with slash in number</heading>
+      <status>in-force</status>
+      <source>https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section2-3</source>
+      <paragraph>
+        <num>(1)</num>
+        <text>Slash-section path normalization tests.</text>
+      </paragraph>
+    </section>
+    <section>
+      <heading>Missing identifier should be omitted</heading>
+      <status>in-force</status>
+      <paragraph>
+        <num>(1)</num>
+        <text>Invalid section with missing section number</text>
+      </paragraph>
+    </section>
+  </title>
+</uslm>

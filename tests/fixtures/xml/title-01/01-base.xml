@@ -1,0 +1,57 @@
+<uslm>
+  <title>
+    <num>1</num>
+    <heading>General Provisions</heading>
+    <chapter>
+      <num>I</num>
+      <heading>General Provisions</heading>
+    </chapter>
+    <section>
+      <num>1</num>
+      <heading>Words denoting number, gender, and so forth</heading>
+      <status>in-force</status>
+      <source>https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section1</source>
+      <enacted>1947-07-30</enacted>
+      <public-law>PL 80-772</public-law>
+      <last-amended>1998-11-13</last-amended>
+      <last-amended-by>PL 105-277</last-amended-by>
+      <subsection>
+        <num>(a)</num>
+        <heading>Definitions</heading>
+        <paragraph>
+          <num>(1)</num>
+          <text>(1) The word "Act" means ...</text>
+          <subparagraph>
+            <num>(A)</num>
+            <text>(A) Used as a noun.</text>
+            <clause>
+              <num>(i)</num>
+              <text>(i) Includes all public and private law.</text>
+              <item>
+                <num>(I)</num>
+                <text>(I) Especially for purposes of subsection (a).</text>
+              </item>
+            </clause>
+          </subparagraph>
+        </paragraph>
+      </subsection>
+      <note>
+        <type>editorial</type>
+        <text>For historical context, see 1 U.S.C. § 2.</text>
+      </note>
+    </section>
+    <section>
+      <num>36B</num>
+      <heading>Protection for private blocking and screening of offensive material</heading>
+      <status>in-force</status>
+      <source>https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section36B</source>
+      <cross-reference>
+        <text>See section <xref>1</xref>.</text>
+      </cross-reference>
+      <paragraph>
+        <num>(1)</num>
+        <text>Simple flat section paragraph for numeric assertions.</text>
+      </paragraph>
+    </section>
+  </title>
+</uslm>
