@@ -108,15 +108,17 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
   <!-- Touches: src/sources/congress.ts, tests/sources/congress.test.ts, tests/sources/congress-members.test.ts -->
 - [ ] `fetch --all` performs the global Congress member snapshot at most once per command invocation and reuses that snapshot across all congress numbers processed in the same run.
   <!-- Touches: src/index.ts, src/sources/congress.ts, tests/cli/fetch.test.ts -->
-- [ ] **Bulk historical contract:** `fetch --all` without `--congress` must include Congress.gov acquisition for every congress integer in the inclusive range `93..CURRENT_CONGRESS`, where `CURRENT_CONGRESS` is exported from the single runtime source of truth `src/utils/fetch-config.ts` and is emitted in the JSON summary as `bulk_scope.congress.current`.
+- [ ] **Bulk historical contract:** `fetch --all` without `--congress` must include Congress.gov acquisition for every congress integer in the inclusive range `93..CURRENT_CONGRESS`, where `CURRENT_CONGRESS` is resolved at runtime by calling `GET /congress/current` from the Congress.gov API (cached for the process lifetime), with a hardcoded floor fallback (initially `119`) logged as a warning if the API call fails. The resolved value is emitted in the JSON summary as `bulk_scope.congress.current`. `src/utils/fetch-config.ts` exports `getCurrentCongress(apiKey: string): Promise<number>` as the sole source of truth; tests may override via `CURRENT_CONGRESS_OVERRIDE` env var.
   <!-- Touches: src/index.ts, src/sources/congress.ts, src/utils/fetch-config.ts, tests/cli/fetch.test.ts -->
+- [ ] **Congress.gov bulk checkpoint/resume:** During a bulk `fetch --all` Congress.gov crawl across `93..CURRENT_CONGRESS`, the manifest records the last fully completed congress number. A subsequent non-`--force` `fetch --all` skips congresses already recorded as complete in the manifest and resumes from the next congress. A `--force` run discards the bulk progress and restarts from congress `93`.
+  <!-- Touches: src/sources/congress.ts, src/utils/manifest.ts, tests/sources/congress-resume.test.ts -->
 - [ ] `fetch --all --congress=<n>` narrows Congress.gov acquisition to exactly the same behavior as `fetch --source=congress --congress=<n>`.
   <!-- Touches: src/index.ts, tests/cli/fetch.test.ts -->
 
 ### 5) GovInfo acquisition
 - [ ] A new typed client module `src/sources/govinfo.ts` implements methods for: paginated PLAW collection listing (`GET /collections/PLAW`), package summary (`GET /packages/{packageId}/summary`), and package granules (`GET /packages/{packageId}/granules`).
   <!-- Touches: src/sources/govinfo.ts, tests/sources/govinfo.test.ts -->
-- [ ] `fetch --source=govinfo` uses this exact default query contract: collection `PLAW`, no congress filter, upstream natural pagination order, continue listing until there is no next page **or** the shared rate budget is exhausted, then fetch summary and granules for every listed package returned before termination.
+- [ ] `fetch --source=govinfo` uses this exact default query contract: collection `PLAW`, no congress filter, API-returned page order (the client requests pages in the order the upstream API provides `nextPage` links and does not reorder them). The acquisition loop interleaves listing and detail fetching: for each page of results, it first fetches the page, then fetches summary and granules for each package on that page before requesting the next listing page. If the shared rate budget is exhausted at any point (during listing OR during summary/granule fetching), the source enters the `rate_limit_exhausted` terminal path immediately.
   <!-- Touches: src/sources/govinfo.ts, tests/sources/govinfo.test.ts -->
 - [ ] GovInfo listing progress is checkpointed in the manifest with enough information for a later non-`--force` run to resume instead of restarting from page 1. The checkpoint must include: the next listing cursor/URL to request, the retained package IDs discovered but not yet finalized, and the query scope (`unfiltered` or `congress=<n>`).
   <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo-resume.test.ts -->
@@ -129,6 +131,8 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
   2. **rate_limit_exhausted** — the shared Congress.gov/GovInfo budget depletes mid-run, the source exits `1`, reports `rate_limit_exhausted: true`, persists the resume checkpoint for the unfinished query scope, and the manifest references only artifacts fully written before exhaustion.
   <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo.test.ts, tests/sources/govinfo-resume.test.ts -->
 - [ ] A subsequent non-`--force` GovInfo run with the same query scope resumes from the persisted checkpoint, does not re-fetch already finalized package summaries/granules, and advances to either a later checkpoint or a `complete` terminal state.
+  <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo-resume.test.ts -->
+- [ ] A `--force` GovInfo run discards any existing resume checkpoint for the matching query scope before starting, effectively restarting acquisition from page 1. Previously finalized artifacts are re-fetched and overwritten.
   <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo-resume.test.ts -->
 - [ ] **Bulk historical contract:** `fetch --all` without `--congress` includes GovInfo acquisition in the same unfiltered PLAW mode as `fetch --source=govinfo`; `fetch --all --congress=<n>` includes GovInfo acquisition in the same congress-filtered mode as `fetch --source=govinfo --congress=<n>`.
   <!-- Touches: src/index.ts, src/sources/govinfo.ts, tests/cli/fetch.test.ts -->
@@ -223,7 +227,7 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
 - **Database:** none
 - **API endpoints:** no new internal HTTP endpoints
 - **Infrastructure:** local filesystem storage under `data/cache/` plus `data/manifest.json`
-- **Environment variables / secrets:** `API_DATA_GOV_KEY` for Congress.gov/GovInfo; one explicit live-test opt-in env flag for networked integration tests; `CURRENT_CONGRESS` is a repository constant exported from `src/utils/fetch-config.ts` and consumed by fixtures/tests rather than defined independently there
+- **Environment variables / secrets:** `API_DATA_GOV_KEY` for Congress.gov/GovInfo; one explicit live-test opt-in env flag for networked integration tests; `CURRENT_CONGRESS_OVERRIDE` (optional, test-only) to override the runtime-resolved current congress number; `getCurrentCongress()` in `src/utils/fetch-config.ts` is the sole runtime source of truth (resolves via Congress.gov API with hardcoded floor fallback)
 
 ## Complexity Estimate
 XL — umbrella epic requiring decomposition into the child slices listed above.
