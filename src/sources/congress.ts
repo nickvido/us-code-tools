@@ -15,7 +15,7 @@ export interface FetchSourceResult {
 }
 interface CongressBillListPayload { bills?: Array<{ number?: string | number; type?: string; congress?: number }>; pagination?: { next?: string | null } }
 interface CongressMemberListPayload { members?: Array<{ bioguideId?: string }>; pagination?: { next?: string | null } }
-const SHARED_LIMIT = 5_000; const SHARED_WINDOW_MS = 60 * 60 * 1000; const CONGRESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; const sharedLimiter = createRateLimitState(SHARED_LIMIT, SHARED_WINDOW_MS);
+const SHARED_LIMIT = 5_000; const SHARED_WINDOW_MS = 60 * 60 * 1000; const CONGRESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; const DOWNLOAD_TIMEOUT_MS = 500; const sharedLimiter = createRateLimitState(SHARED_LIMIT, SHARED_WINDOW_MS);
 
 export async function fetchCongressSource(invocation: FetchInvocation): Promise<FetchSourceResult> {
   const mode = invocation.mode ?? 'single';
@@ -25,16 +25,40 @@ export async function fetchCongressSource(invocation: FetchInvocation): Promise<
   try {
     const { sourceDirectory } = getCachePaths('congress'); await mkdir(sourceDirectory, { recursive: true });
     const manifest = await readManifest(); if (bulkScope) manifest.sources.congress.bulk_scope = { congress: bulkScope.congress };
+    const requestedCongresses = resolveRequestedCongresses(invocation, bulkScope, manifest);
+    if (invocation.mode === 'all' && invocation.congress === null) {
+      manifest.sources.congress.bulk_history_checkpoint = {
+        scope: 'all',
+        current: bulkScope?.congress.current ?? requestedCongresses.at(-1) ?? 93,
+        start: 93,
+        next_congress: requestedCongresses[0] ?? null,
+        updated_at: new Date().toISOString(),
+      };
+    }
     const memberSnapshot = await ensureMemberSnapshot({ force: invocation.force, manifest, sourceDirectory });
     if (!memberSnapshot.ok) { await recordFailure(manifest, memberSnapshot.error.code, memberSnapshot.error.message); return { source:'congress', ok:false, requested_scope:{ congress: requestedScope }, bulk_scope: bulkScope, rate_limit_exhausted: memberSnapshot.rate_limit_exhausted, next_request_at: memberSnapshot.next_request_at, error: memberSnapshot.error }; }
     const counts = { bill_pages:0, bill_details:0, bill_actions:0, bill_cosponsors:0, committee_pages:0, member_pages:memberSnapshot.counts.member_pages, member_details:memberSnapshot.counts.member_details };
-    for (const congress of resolveRequestedCongresses(invocation, bulkScope)) {
+    for (const congress of requestedCongresses) {
       const congressCounts = await fetchSingleCongress({ congress, sourceDirectory });
       counts.bill_pages += congressCounts.bill_pages; counts.bill_details += congressCounts.bill_details; counts.bill_actions += congressCounts.bill_actions; counts.bill_cosponsors += congressCounts.bill_cosponsors; counts.committee_pages += congressCounts.committee_pages;
       manifest.sources.congress.congress_runs[String(congress)] = { congress, completed_at: new Date().toISOString(), bill_page_count: congressCounts.bill_pages, bill_detail_count: congressCounts.bill_details, bill_action_count: congressCounts.bill_actions, bill_cosponsor_count: congressCounts.bill_cosponsors, committee_page_count: congressCounts.committee_pages, failed_bills: [] } satisfies CongressRunState;
       manifest.sources.congress.last_success_at = new Date().toISOString(); manifest.sources.congress.last_failure = null;
+      if (invocation.mode === 'all' && invocation.congress === null) {
+        const nextCongress = requestedCongresses.find((candidate) => candidate > congress) ?? null;
+        manifest.sources.congress.bulk_history_checkpoint = {
+          scope: 'all',
+          current: bulkScope?.congress.current ?? requestedCongresses.at(-1) ?? congress,
+          start: 93,
+          next_congress: nextCongress,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      await writeManifest(manifest);
     }
-    await writeManifest(manifest);
+    if (invocation.mode === 'all' && invocation.congress === null) {
+      manifest.sources.congress.bulk_history_checkpoint = null;
+      await writeManifest(manifest);
+    }
     return { source:'congress', ok:true, requested_scope:{ congress: requestedScope }, bulk_scope: bulkScope, rate_limit_exhausted:false, next_request_at:null, counts };
   } catch (error) {
     const normalized = normalizeError(error); const failureManifest = await readManifest(); await recordFailure(failureManifest, normalized.code, normalized.message);
@@ -61,7 +85,26 @@ async function ensureMemberSnapshot(args:{ force:boolean; manifest:FetchManifest
   return { ok:true, counts:{ member_pages:pageIndex, member_details:memberDetailCount } };
 }
 
-function resolveRequestedCongresses(invocation: FetchInvocation, bulkScope:{ congress: CurrentCongressResolution } | null): number[] { if (invocation.congress !== null) return [invocation.congress]; if (invocation.mode === 'all') { const result:number[] = []; for (let congress = 93; congress <= (bulkScope?.congress.current ?? 93); congress += 1) result.push(congress); return result; } return [93]; }
+function resolveRequestedCongresses(invocation: FetchInvocation, bulkScope:{ congress: CurrentCongressResolution } | null, manifest: FetchManifest): number[] {
+  if (invocation.congress !== null) {
+    return [invocation.congress];
+  }
+
+  if (invocation.mode === 'all') {
+    const checkpoint = !invocation.force ? manifest.sources.congress.bulk_history_checkpoint : null;
+    const startCongress = checkpoint?.next_congress ?? 93;
+    const result:number[] = [];
+    for (let congress = startCongress; congress <= (bulkScope?.congress.current ?? 93); congress += 1) {
+      if (!invocation.force && checkpoint === null && manifest.sources.congress.congress_runs[String(congress)]?.completed_at) {
+        continue;
+      }
+      result.push(congress);
+    }
+    return result;
+  }
+
+  return [93];
+}
 
 async function fetchSingleCongress(args:{ congress:number; sourceDirectory:string }): Promise<{ bill_pages:number; bill_details:number; bill_actions:number; bill_cosponsors:number; committee_pages:number }> {
   const apiKey = process.env.API_DATA_GOV_KEY ?? ''; const billsDirectory = resolve(args.sourceDirectory, 'bills', String(args.congress), 'pages'); const committeesDirectory = resolve(args.sourceDirectory, 'committees', String(args.congress), 'pages'); await mkdir(billsDirectory, { recursive: true }); await mkdir(committeesDirectory, { recursive: true });
@@ -83,7 +126,7 @@ async function fetchSingleCongress(args:{ congress:number; sourceDirectory:strin
 
 async function fetchCongressJson<T>(url: string): Promise<{ payload: T }> { const response = await fetchCongressResponse(url); return { payload: await response.json() as T }; }
 async function fetchCongressText(url: string): Promise<{ body: string }> { const response = await fetchCongressResponse(url); return { body: await response.text() }; }
-async function fetchCongressResponse(url: string): Promise<Response> { const exhaustion = isRateLimitExhausted(sharedLimiter); if (exhaustion.exhausted) throw createRateLimitError(exhaustion.nextRequestAt); markRateLimitUse(sharedLimiter); const response = await fetch(url); if (response.status === 401 || response.status === 403) throw new Error('upstream_auth_rejected: Congress.gov rejected API_DATA_GOV_KEY'); if (!response.ok) throw new Error(`upstream_request_failed: Congress.gov request failed with HTTP ${response.status}`); return response; }
+async function fetchCongressResponse(url: string): Promise<Response> { const exhaustion = isRateLimitExhausted(sharedLimiter); if (exhaustion.exhausted) throw createRateLimitError(exhaustion.nextRequestAt); markRateLimitUse(sharedLimiter); const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); try { const response = await fetch(url, { signal: controller.signal }); if (response.status === 401 || response.status === 403) throw new Error('upstream_auth_rejected: Congress.gov rejected API_DATA_GOV_KEY'); if (!response.ok) throw new Error(`upstream_request_failed: Congress.gov request failed with HTTP ${response.status}`); return response; } finally { clearTimeout(timeout); } }
 function appendApiKey(url: string, apiKey: string): string { const parsed = new URL(url); if (!parsed.searchParams.has('api_key')) parsed.searchParams.set('api_key', apiKey); return parsed.toString(); }
 function createRateLimitError(nextRequestAt: number | null): Error & { code:'rate_limit_exhausted'; nextRequestAt:number|null } { const error = new Error('Shared Congress/GovInfo budget exhausted before completion') as Error & { code:'rate_limit_exhausted'; nextRequestAt:number|null }; error.code='rate_limit_exhausted'; error.nextRequestAt=nextRequestAt; return error; }
 function normalizeError(error: unknown): { code:string; message:string; next_request_at:string|null } { if (error instanceof Error && 'code' in error && error.code === 'rate_limit_exhausted') { const nextRequestAt = 'nextRequestAt' in error && typeof error.nextRequestAt === 'number' ? new Date(error.nextRequestAt).toISOString() : null; return { code:'rate_limit_exhausted', message:error.message, next_request_at:nextRequestAt }; } if (error instanceof Error && error.message.startsWith('upstream_auth_rejected:')) return { code:'upstream_auth_rejected', message:error.message, next_request_at:null }; return { code:'upstream_request_failed', message:error instanceof Error ? error.message : 'Congress fetch failed', next_request_at:null }; }

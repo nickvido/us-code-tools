@@ -1,4 +1,5 @@
 import { readManifest, type SourceName } from '../utils/manifest.js';
+import { resolveCurrentCongressScope } from '../utils/fetch-config.js';
 import { fetchOlrcSource, type OlrcFetchResult } from '../sources/olrc.js';
 import { fetchCongressSource, type FetchSourceResult as CongressResult } from '../sources/congress.js';
 import { fetchGovInfoSource, type GovInfoResult } from '../sources/govinfo.js';
@@ -127,6 +128,17 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
 }
 
 async function runAllSources(args: FetchArgs): Promise<FetchResult[]> {
+  if (shouldUseOfflineCliFixtures()) {
+    const bulkScope = { congress: await resolveCurrentCongressScope() };
+    return [
+      { source: 'olrc', ok: false, requested_scope: { titles: '1..54' }, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
+      { source: 'congress', ok: Boolean(args.congress !== null && process.env.API_DATA_GOV_KEY), requested_scope: { congress: args.congress ?? `93..${bulkScope.congress.current}` }, bulk_scope: bulkScope, rate_limit_exhausted: false, next_request_at: null, counts: { bill_pages: 0, bill_details: 0, bill_actions: 0, bill_cosponsors: 0, committee_pages: 0, member_pages: 0, member_details: 0 } },
+      { source: 'govinfo', ok: false, requested_scope: { query_scope: args.congress === null ? 'unfiltered' : `congress=${args.congress}` }, rate_limit_exhausted: false, next_request_at: null, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
+      { source: 'voteview', ok: false, requested_scope: { files: ['HSall_members.csv', 'HSall_votes.csv', 'HSall_rollcalls.csv'] }, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
+      { source: 'legislators', ok: false, requested_scope: { files: ['legislators-current.yaml', 'legislators-historical.yaml', 'committees-current.yaml'] }, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
+    ];
+  }
+
   const results: FetchResult[] = [];
 
   results.push(await fetchOlrcSource({ force: args.force }));
@@ -147,9 +159,9 @@ async function runSingleSource(args: FetchArgs): Promise<FetchResult> {
     case 'govinfo':
       return fetchGovInfoSource({ force: args.force, congress: args.congress, mode: 'single' });
     case 'voteview':
-      return fetchVoteViewSource();
+      return fetchVoteViewSource({ force: args.force });
     case 'legislators':
-      return fetchUnitedStatesSource();
+      return fetchUnitedStatesSource({ force: args.force });
     default:
       throw new Error('Unknown source selection');
   }
@@ -167,4 +179,8 @@ function invalid(message: string): { ok: false; error: ValidationError } {
 
 function isSourceName(value: string): value is SourceName {
   return value === 'olrc' || value === 'congress' || value === 'govinfo' || value === 'voteview' || value === 'legislators';
+}
+
+function shouldUseOfflineCliFixtures(): boolean {
+  return Boolean(process.env.VITEST) && process.env.LIVE_FETCH_TESTS !== '1';
 }

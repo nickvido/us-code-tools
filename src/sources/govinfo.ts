@@ -27,6 +27,7 @@ interface GovInfoCollectionPage {
 
 const SHARED_LIMIT = 5_000;
 const SHARED_WINDOW_MS = 60 * 60 * 1000;
+const DOWNLOAD_TIMEOUT_MS = 500;
 const sharedLimiter = createRateLimitState(SHARED_LIMIT, SHARED_WINDOW_MS);
 
 export async function fetchGovInfoSource(invocation: FetchInvocation): Promise<GovInfoResult> {
@@ -196,7 +197,7 @@ async function fetchGovInfoResponse(url: string): Promise<Response> {
   }
 
   markRateLimitUse(sharedLimiter);
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   if (response.status === 401 || response.status === 403) {
     throw new Error('upstream_auth_rejected: GovInfo rejected API_DATA_GOV_KEY');
   }
@@ -204,6 +205,16 @@ async function fetchGovInfoResponse(url: string): Promise<Response> {
     throw new Error(`upstream_request_failed: GovInfo request failed with HTTP ${response.status}`);
   }
   return response;
+}
+
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function matchesCongressFilter(packageId: string, congress: number | null): boolean {

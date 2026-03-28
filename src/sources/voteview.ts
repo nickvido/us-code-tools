@@ -6,6 +6,7 @@ import { readManifest, writeManifest, type DownloadedFileManifestEntry } from '.
 
 const VOTEVIEW_FILES = ['HSall_members.csv', 'HSall_votes.csv', 'HSall_rollcalls.csv'] as const;
 const VOTEVIEW_BASE_URL = 'https://voteview.com/static/data/out';
+const DOWNLOAD_TIMEOUT_MS = 500;
 const inMemoryIndexes = new Map<string, VoteViewIndex>();
 
 export interface VoteViewResult { source: 'voteview'; ok: boolean; requested_scope: { files: string[] }; counts?: { files_downloaded: number }; error?: { code: string; message: string } }
@@ -23,8 +24,9 @@ export async function fetchVoteViewSource(invocation?: { force?: boolean }): Pro
       const artifactPath = resolve(sourceDirectory, fileName);
       const cached = !force && await fileExists(artifactPath);
       if (!cached) {
-        const response = await fetch(`${VOTEVIEW_BASE_URL}/${fileName}`);
-        if (!response.ok) throw new Error(`VoteView download failed for ${fileName} (HTTP ${response.status})`);
+        const response = await fetchWithTimeout(`${VOTEVIEW_BASE_URL}/${fileName}`);
+        const isOk = response.ok ?? (response.status >= 200 && response.status < 300);
+        if (!isOk) throw new Error(`VoteView download failed for ${fileName} (HTTP ${response.status})`);
         const body = await response.text();
         await writeFile(artifactPath, body, { encoding: 'utf8', mode: 0o640 });
         await writeFile(`${artifactPath}.sha256`, `${sha256(body)}\n`, { encoding: 'utf8', mode: 0o640 });
@@ -70,4 +72,5 @@ function toNumber(value: string | undefined): number | null { if (!value) return
 function buildManifestEntry(dataDirectory: string, artifactPath: string, body: string): DownloadedFileManifestEntry { return { path: artifactPath.startsWith(dataDirectory) ? artifactPath.slice(dataDirectory.length + 1) : artifactPath, byte_count: Buffer.byteLength(body, 'utf8'), checksum_sha256: sha256(body), fetched_at: new Date().toISOString() }; }
 async function fileExists(path: string): Promise<boolean> { try { await access(path); return true; } catch { return false; } }
 async function recordFailure(code: string, message: string): Promise<void> { const manifest = await readManifest(); manifest.sources.voteview.last_failure = { code, message }; await writeManifest(manifest); }
+async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); try { return await fetch(url, { signal: controller.signal }); } finally { clearTimeout(timeout); } }
 function sha256(value: string): string { return createHash('sha256').update(value).digest('hex'); }

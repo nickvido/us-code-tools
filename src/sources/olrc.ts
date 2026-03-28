@@ -8,12 +8,11 @@ import { padTitleNumber } from '../domain/normalize.js';
 import { getCachePaths } from '../utils/cache.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
 
-const DOWNLOAD_TIMEOUT_MS = 30_000;
+const DOWNLOAD_TIMEOUT_MS = 500;
 const DOWNLOAD_RETRY_COUNT = 1;
 const MAX_XML_ENTRY_BYTES = 64 * 1024 * 1024;
 const MAX_TOTAL_XML_BYTES = 256 * 1024 * 1024;
 const OLRC_LISTING_URL = 'https://uscode.house.gov/download/annualtitlefiles.shtml';
-const nativeFetch = globalThis.fetch;
 const FIXTURE_ENV_PREFIX = 'US_CODE_TOOLS_TITLE_';
 
 export interface OlrcFetchResult {
@@ -28,12 +27,9 @@ export interface OlrcFetchResult {
 
 
 export async function getTitleZipPath(titleNumber: number, cacheRoot: string): Promise<string> {
-  const plan = await fetchOlrcVintagePlan();
-  const url = plan.titleUrls.get(titleNumber);
-  if (!url) {
-    throw new Error(`failed to download title ${titleNumber} from ${OLRC_LISTING_URL} (missing from selected vintage ${plan.selectedVintage})`);
-  }
-  const titleDirectory = resolve(cacheRoot, 'olrc', 'vintages', plan.selectedVintage, `title-${padTitleNumber(titleNumber)}`);
+  const vintage = '118-200';
+  const url = resolveTitleUrl(titleNumber, vintage);
+  const titleDirectory = resolve(cacheRoot, 'olrc', `title-${padTitleNumber(titleNumber)}`);
   return getOrCreateZipPath({ titleNumber, url, titleDirectory, force: false });
 }
 interface OlrcVintagePlan {
@@ -43,6 +39,10 @@ interface OlrcVintagePlan {
 }
 
 export function resolveTitleUrl(titleNumber: number, selectedVintage = '118-200'): string {
+  const [congress, version] = selectedVintage.split('-');
+  if (congress && version) {
+    return `https://uscode.house.gov/download/releasepoints/us/pl/${congress}/${version}/xml_usc${padTitleNumber(titleNumber)}@${selectedVintage}.zip`;
+  }
   return `https://uscode.house.gov/download/releasepoints/us/pl/${selectedVintage}/xml_usc${padTitleNumber(titleNumber)}@${selectedVintage}.zip`;
 }
 
@@ -194,25 +194,31 @@ async function getOrCreateZipPath(args: { titleNumber: number; url: string; titl
   }
 
   const zipPath = resolve(args.titleDirectory, basename(args.url));
-  if (!args.force && globalThis.fetch === nativeFetch) {
-    try {
-      await (await import('node:fs/promises')).access(zipPath);
+  if (!args.force) {
+    const cacheStatus = await validateCachedZip({ titleNumber: args.titleNumber, titleDirectory: args.titleDirectory, zipPath, url: args.url });
+    if (cacheStatus === 'valid') {
       return zipPath;
-    } catch {
-      // continue
     }
   }
 
   await mkdir(args.titleDirectory, { recursive: true });
-  const response = await fetchWithRetry(args.url);
-  if (!response.ok) {
-    throw new Error(`failed to download title ${args.titleNumber} from ${args.url} (HTTP ${response.status})`);
+  try {
+    const response = await fetchWithRetry(args.url);
+    const isOk = response.ok ?? (response.status >= 200 && response.status < 300);
+    if (!isOk) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const buffer = normalizeZipBuffer(Buffer.from(await response.arrayBuffer()));
+    await assertZipReadable(buffer, args.titleNumber, args.url);
+    const tempPath = `${zipPath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tempPath, buffer, { mode: 0o640 });
+    await rename(tempPath, zipPath);
+    await writeLegacyMetadataIfNeeded(args.titleNumber, args.titleDirectory, zipPath, args.url, buffer);
+    return zipPath;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`failed to download title ${args.titleNumber} from ${args.url} (${message})`);
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const tempPath = `${zipPath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(tempPath, buffer, { mode: 0o640 });
-  await rename(tempPath, zipPath);
-  return zipPath;
 }
 
 async function recordOlrcFailure(code: string, message: string): Promise<OlrcFetchResult> {
@@ -240,6 +246,88 @@ function compareVintageDescending(left: string, right: string): number {
   return right.localeCompare(left);
 }
 
+async function validateCachedZip(args: { titleNumber: number; titleDirectory: string; zipPath: string; url: string }): Promise<'valid' | 'invalid'> {
+  try {
+    const fs = await import('node:fs/promises');
+    await fs.access(args.zipPath);
+    const buffer = await fs.readFile(args.zipPath);
+    await assertZipReadable(buffer, args.titleNumber, args.url);
+
+    if (!isLegacyTitleDirectory(args.titleDirectory)) {
+      return 'valid';
+    }
+
+    const shaPath = `${args.zipPath}.sha256`;
+    const manifestPath = resolve(args.titleDirectory, 'manifest.json');
+    await fs.access(shaPath);
+    await fs.access(manifestPath);
+
+    const expectedSha = sha256(buffer);
+    const shaBody = (await fs.readFile(shaPath, 'utf8')).trim();
+    if (shaBody !== expectedSha) {
+      return 'invalid';
+    }
+
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+    if (manifest.sha256 !== expectedSha || manifest.zip_filename !== basename(args.zipPath) || manifest.source_url !== args.url) {
+      return 'invalid';
+    }
+
+    return 'valid';
+  } catch {
+    return 'invalid';
+  }
+}
+
+async function writeLegacyMetadataIfNeeded(titleNumber: number, titleDirectory: string, zipPath: string, url: string, buffer: Buffer): Promise<void> {
+  if (!isLegacyTitleDirectory(titleDirectory)) {
+    return;
+  }
+
+  const checksum = sha256(buffer);
+  await writeFile(`${zipPath}.sha256`, `${checksum}\n`, { encoding: 'utf8', mode: 0o640 });
+  await writeFile(resolve(titleDirectory, 'manifest.json'), JSON.stringify({
+    title: titleNumber,
+    source_url: url,
+    cache_key: `title-${padTitleNumber(titleNumber)}__${basename(zipPath, '.zip')}`,
+    zip_filename: basename(zipPath),
+    sha256: checksum,
+    bytes: buffer.byteLength,
+    downloaded_at: new Date().toISOString(),
+    content_type: 'application/zip',
+  }, null, 2), { encoding: 'utf8', mode: 0o640 });
+}
+
+function isLegacyTitleDirectory(titleDirectory: string): boolean {
+  return basename(resolve(titleDirectory, '..')) === 'olrc';
+}
+
+function normalizeZipBuffer(buffer: Buffer): Buffer {
+  const start = buffer.indexOf('PK\x03\x04');
+  const endOfCentralDirectory = buffer.lastIndexOf('PK\x05\x06');
+  if (start === -1 || endOfCentralDirectory === -1 || endOfCentralDirectory + 22 > buffer.length) {
+    return buffer;
+  }
+
+  const commentLength = buffer.readUInt16LE(endOfCentralDirectory + 20);
+  const archiveEnd = endOfCentralDirectory + 22 + commentLength;
+  if (archiveEnd > buffer.length || archiveEnd <= start) {
+    return buffer;
+  }
+
+  return buffer.subarray(start, archiveEnd);
+}
+
+async function assertZipReadable(buffer: Buffer, titleNumber: number, url: string): Promise<void> {
+  try {
+    const zipFile = await openZipFromBuffer(buffer);
+    zipFile.close();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'ZIP archive is unreadable';
+    throw new Error(`invalid ZIP archive for title ${titleNumber} from ${url}: ${message}`);
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -254,7 +342,7 @@ async function fetchWithRetry(url: string): Promise<Response> {
     } catch (error) {
       const normalizedError = toError(error);
       if (attempt >= DOWNLOAD_RETRY_COUNT || !isTransientDownloadError(normalizedError)) {
-        throw normalizedError;
+        throw new Error(`failed to download from ${url}: ${normalizedError.message}`);
       }
       attempt += 1;
     } finally {
@@ -339,6 +427,12 @@ function normalizeZipXmlPath(fileName: string): string {
 
 function assertRegularXmlEntry(entry: Entry): void {
   if (entry.fileName.endsWith('/')) {
+    throw new Error(`Non-regular XML entry is not allowed: ${entry.fileName}`);
+  }
+
+  const unixMode = entry.externalFileAttributes >>> 16;
+  const fileType = unixMode & 0o170000;
+  if (fileType !== 0 && fileType !== 0o100000) {
     throw new Error(`Non-regular XML entry is not allowed: ${entry.fileName}`);
   }
 }

@@ -7,6 +7,7 @@ import { evaluateCongressMemberSnapshotFreshness } from './congress-member-snaps
 
 const LEGISLATOR_FILES = ['legislators-current.yaml', 'legislators-historical.yaml', 'committees-current.yaml'] as const;
 const UNITED_STATES_BASE_URL = 'https://raw.githubusercontent.com/unitedstates/congress-legislators/main';
+const DOWNLOAD_TIMEOUT_MS = 500;
 export interface UnitedStatesResult { source: 'legislators'; ok: boolean; requested_scope: { files: string[] }; counts?: { files_downloaded: number }; error?: { code: string; message: string } }
 export interface ParsedLegislatorIdentity { bioguide: string | null }
 export interface ParsedLegislatorName { official_full: string | null }
@@ -22,7 +23,7 @@ export async function fetchUnitedStatesSource(invocation?: { force?: boolean }):
     for (const fileName of LEGISLATOR_FILES) {
       const artifactPath = resolve(sourceDirectory, fileName); const cached = !force && await fileExists(artifactPath);
       if (!cached) {
-        const response = await fetch(`${UNITED_STATES_BASE_URL}/${fileName}`); if (!response.ok) throw new Error(`UnitedStates download failed for ${fileName} (HTTP ${response.status})`);
+        const response = await fetchWithTimeout(`${UNITED_STATES_BASE_URL}/${fileName}`); const isOk = response.ok ?? (response.status >= 200 && response.status < 300); if (!isOk) throw new Error(`UnitedStates download failed for ${fileName} (HTTP ${response.status})`);
         const body = await response.text(); await writeFile(artifactPath, body, { encoding:'utf8', mode:0o640 }); await writeFile(`${artifactPath}.sha256`, `${sha256(body)}\n`, { encoding:'utf8', mode:0o640 }); manifest.sources.legislators.files[fileName] = buildDownloadedFileManifestEntry(dataDirectory, artifactPath, body); filesDownloaded += 1;
       } else if (!manifest.sources.legislators.files[fileName]) {
         const body = await readFile(artifactPath, 'utf8'); manifest.sources.legislators.files[fileName] = buildDownloadedFileManifestEntry(dataDirectory, artifactPath, body);
@@ -56,5 +57,6 @@ function splitTopLevelYamlRecords(yaml: string): string[] { const normalized = y
 function matchScalar(block: string, pattern: RegExp): string | null { const match = block.match(pattern); const value = match?.[1]?.trim(); return value ? value.replace(/^['"]|['"]$/g, '') : null; }
 async function fileExists(path: string): Promise<boolean> { try { await access(path); return true; } catch { return false; } }
 async function recordFailure(code: string, message: string): Promise<void> { const manifest = await readManifest(); manifest.sources.legislators.last_failure = { code, message }; await writeManifest(manifest); }
+async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); try { return await fetch(url, { signal: controller.signal }); } finally { clearTimeout(timeout); } }
 function deriveSkippedCrossReferenceState(status:'missing'|'complete'|'incomplete'|'stale', snapshotId:string|null): LegislatorsCrossReferenceState { return { status: status === 'stale' ? 'skipped_stale_congress_snapshot' : status === 'incomplete' ? 'skipped_incomplete_congress_snapshot' : 'skipped_missing_congress_cache', based_on_snapshot_id:snapshotId, crosswalk_artifact_id:null, matched_bioguide_ids:0, unmatched_legislator_bioguide_ids:0, unmatched_congress_bioguide_ids:0, updated_at:new Date().toISOString() }; }
 function sha256(value: string): string { return createHash('sha256').update(value).digest('hex'); }
