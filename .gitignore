@@ -31,6 +31,7 @@ Thumbs.db
 # Cache
 .cache/
 *.zip
+!tests/fixtures/title-01/title-01.zip
 
 # Test coverage
 coverage/
@@ -38,6 +39,3 @@ coverage/
 # Logs
 *.log
 logs/
-
-# Legacy compatibility
-.env.local
