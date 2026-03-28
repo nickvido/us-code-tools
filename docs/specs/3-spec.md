@@ -22,8 +22,10 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: CLI dispatcher, existing transform tests -->
 - [ ] The CLI rejects each invalid invocation with a non-zero exit code and a deterministic error message: missing `--phase`, missing `--target`, unsupported `--phase`, and `--target` resolving to a non-directory path.  
   <!-- Touches: CLI parser/validator, CLI tests -->
-- [ ] The CLI accepts either: (a) an existing local git repository whose history is empty or already matches a prefix of the 28-event Constitution plan, or (b) a non-existent target path that the workflow can create as a new git repository before backfilling. It must reject a target repository containing unrelated pre-existing commits with a deterministic non-zero exit and error message, rather than appending Constitution history after unrelated commits.  
+- [ ] The CLI accepts either: (a) an existing local git repository whose history is empty or already matches a prefix of the 28-event Constitution plan, or (b) a non-existent target path that the workflow will `git init` as a new local repository before backfilling. It must reject a target repository containing unrelated pre-existing commits with a deterministic non-zero exit and error message, rather than appending Constitution history after unrelated commits.  
   <!-- Touches: repository opener/precondition validator, integration tests -->
+- [ ] If the target repo has no configured remote (e.g., a freshly `git init`'d repo or `--target ./test-repo`), the push step is skipped and the command exits `0` after all 28 local commits are created. The CLI must NOT fail because push has no remote to push to.  
+  <!-- Touches: push adapter, integration tests -->
 
 ### 2. Static Constitution Dataset
 - [ ] Commit a static Constitution dataset in this repository containing exactly 7 articles and 27 amendments, each with: `type`, `number`, `heading`, `proposed`, `ratified`, `proposing_body`, `source`, and full markdown-ready text content.  
@@ -56,7 +58,28 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 ### 5. Commit Authoring and Messages
 - [ ] Each historical commit is created with both `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to exactly `YYYY-MM-DDT00:00:00+0000` for that event’s ratification date (for example, Amendment XXVII must use `1992-05-07T00:00:00+0000` for both variables).  
   <!-- Touches: git commit adapter, unit/integration tests -->
-- [ ] The commit author name and email are derived from the proposing body for the event and are deterministic for all 28 events, including `Constitutional Convention <convention@constitution.gov>` for the original Constitution and congress-specific identities for amendments proposed by Congress.  
+- [ ] The commit author name and email are deterministic for all 28 events. The complete mapping is:
+  | Event | Author Name | Author Email |
+  |-------|-------------|--------------|
+  | Constitution (Articles I-VII) | Constitutional Convention | convention@constitution.gov |
+  | Amendments I-X (Bill of Rights) | 1st Congress | congress-1@congress.gov |
+  | Amendment XI | 3rd Congress | congress-3@congress.gov |
+  | Amendment XII | 8th Congress | congress-8@congress.gov |
+  | Amendment XIII | 38th Congress | congress-38@congress.gov |
+  | Amendment XIV | 39th Congress | congress-39@congress.gov |
+  | Amendment XV | 40th Congress | congress-40@congress.gov |
+  | Amendment XVI | 61st Congress | congress-61@congress.gov |
+  | Amendment XVII | 62nd Congress | congress-62@congress.gov |
+  | Amendment XVIII | 65th Congress | congress-65@congress.gov |
+  | Amendment XIX | 66th Congress | congress-66@congress.gov |
+  | Amendment XX | 72nd Congress | congress-72@congress.gov |
+  | Amendment XXI | 72nd Congress | congress-72@congress.gov |
+  | Amendment XXII | 80th Congress | congress-80@congress.gov |
+  | Amendment XXIII | 86th Congress | congress-86@congress.gov |
+  | Amendment XXIV | 87th Congress | congress-87@congress.gov |
+  | Amendment XXV | 89th Congress | congress-89@congress.gov |
+  | Amendment XXVI | 92nd Congress | congress-92@congress.gov |
+  | Amendment XXVII | 1st Congress | congress-1@congress.gov |
   <!-- Touches: author mapping logic, planner/commit tests -->
 - [ ] The Constitution commit message matches this template exactly, with field values filled from the dataset:
   ```
