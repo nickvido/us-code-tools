@@ -113,9 +113,12 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   - for every enumerated bill returned by those bill-list pages, one cached response each for `GET /bill/{n}/{type}/{number}`, `GET /bill/{n}/{type}/{number}/actions`, and `GET /bill/{n}/{type}/{number}/cosponsors`, unless a fresh cache entry already satisfies that exact request
   - every paginated committee-list response returned by `GET /committee/{n}` until the API indicates there is no next page
   - every paginated `GET /member` response required to enumerate the full member collection exposed by Congress.gov, continuing until the API indicates there is no next page; this member acquisition is global rather than congress-filtered because the endpoint itself is not scoped by congress
-  and the manifest records the requested congress number plus the page counts fetched for bills, bill details, bill actions, bill cosponsors, committees, and members.
+  - for every enumerated member record whose listing payload contains a non-empty `bioguideId`, one cached response for `GET /member/{bioguideId}`, unless a fresh cache entry already satisfies that exact request
+  and the manifest records the requested congress number plus the page counts fetched for bills, bill details, bill actions, bill cosponsors, committees, member list pages, and member detail records.
   <!-- Touches: src/index.ts, src/sources/congress.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
 - [ ] If any enumerated Congress.gov bill fails to fetch one or more of its required detail/actions/cosponsors artifacts after the configured retries are exhausted, the congress source result exits non-zero, the JSON summary includes that bill identifier in a deterministic failure list, and the manifest records success only for the bill artifacts that were fully written.
+  <!-- Touches: src/index.ts, src/sources/congress.ts, src/utils/manifest.ts, tests/unit/sources/congress.test.ts, tests/integration/fetch-cli.test.ts -->
+- [ ] If any enumerated Congress.gov member with a non-empty `bioguideId` fails to fetch its required `GET /member/{bioguideId}` artifact after the configured retries are exhausted, the congress source result exits non-zero, the JSON summary includes that `bioguideId` in a deterministic failed-member list, and the manifest records success only for the member-detail artifacts that were fully written.
   <!-- Touches: src/index.ts, src/sources/congress.ts, src/utils/manifest.ts, tests/unit/sources/congress.test.ts, tests/integration/fetch-cli.test.ts -->
 - [ ] Integration tests for Congress.gov are skipped unless the configured env var for live external tests is set; when enabled, at least one live request to Congress.gov bill listing succeeds with the configured API key.
   <!-- Touches: tests/integration/congress-live.test.ts or equivalent -->
@@ -147,19 +150,32 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   <!-- Touches: src/sources/voteview.ts, tests/unit/sources/voteview.test.ts -->
 - [ ] The client exposes parsing entry points that can read each CSV into typed records without loading duplicate file content into memory more than once per parse operation.
   <!-- Touches: src/sources/voteview.ts, tests/unit/sources/voteview.test.ts -->
+- [ ] The client exposes a typed indexing surface that, after parsing the downloaded VoteView files, can answer at minimum these deterministic lookups without rescanning the raw CSV files:
+  - list member records for a requested congress number
+  - return the member record for a requested member identifier used by the dataset
+  - list roll-call/vote records for a requested congress number
+  - list roll-call/vote records for a requested member identifier
+  The implementation may satisfy this via in-memory indexes, persisted index artifacts, or both, but the public contract must make the above lookups mechanically testable.
+  <!-- Touches: src/sources/voteview.ts, tests/unit/sources/voteview.test.ts -->
 - [ ] `fetch --source=voteview` stores the three CSV files under `data/cache/voteview/` and records byte size and checksum per file in the manifest.
   <!-- Touches: src/index.ts, src/sources/voteview.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
-- [ ] A live integration test is skippable in CI and, when enabled, verifies that at least one VoteView CSV can be downloaded and its header row parsed into the expected typed field set.
+- [ ] If the implementation persists VoteView index artifacts to disk, they are stored under `data/cache/voteview/` and the manifest records their paths and generation timestamp; if the implementation keeps indexes in memory only, the unit test suite must still verify the typed lookup contract above against fixture data.
+  <!-- Touches: src/sources/voteview.ts, src/utils/manifest.ts, tests/unit/sources/voteview.test.ts -->
+- [ ] A live integration test is skippable in CI and, when enabled, verifies that at least one VoteView CSV can be downloaded, its header row parsed into the expected typed field set, and at least one congress or member lookup can be served from the index surface.
   <!-- Touches: tests/integration/voteview-live.test.ts or equivalent -->
 
 ### 9. UnitedStates legislators source client
 - [ ] A new typed client module `src/sources/unitedstates.ts` downloads exactly these files from the `unitedstates/congress-legislators` dataset: `legislators-current.yaml`, `legislators-historical.yaml`, and `committees-current.yaml`.
   <!-- Touches: src/sources/unitedstates.ts, tests/unit/sources/unitedstates.test.ts -->
-- [ ] The client exposes typed parse results for current legislators, historical legislators, and current committees, and preserves Congress bioguide identifiers when present so later cross-reference work can consume them.
+- [ ] The client exposes typed parse results for current legislators, historical legislators, and current committees, and preserves Congress bioguide identifiers when present.
   <!-- Touches: src/sources/unitedstates.ts, tests/unit/sources/unitedstates.test.ts -->
+- [ ] The client also exposes a typed bioguide cross-reference routine that compares parsed legislators records against Congress.gov member identifiers derived from cached `GET /member` list and/or `GET /member/{bioguideId}` detail artifacts, and returns a deterministic summary containing at minimum: `matched_bioguide_ids`, `unmatched_legislator_bioguide_ids`, and `unmatched_congress_bioguide_ids`.
+  <!-- Touches: src/sources/unitedstates.ts, src/sources/congress.ts, tests/unit/sources/unitedstates.test.ts -->
 - [ ] `fetch --source=legislators` stores the YAML source files under `data/cache/legislators/` and records per-file metadata in the manifest.
   <!-- Touches: src/index.ts, src/sources/unitedstates.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
-- [ ] A live integration test is skippable in CI and, when enabled, verifies that at least one legislators YAML file can be downloaded and parsed into one or more typed records.
+- [ ] When fresh Congress.gov member cache data is available from the same run or an existing cache, legislators acquisition writes a deterministic cross-reference artifact at `data/cache/legislators/bioguide-crosswalk.json` and records its path plus matched/unmatched counts in the manifest; when Congress member cache data is unavailable, the source summary and manifest record `cross_reference_status: "skipped_missing_congress_cache"` instead of failing the legislators fetch.
+  <!-- Touches: src/index.ts, src/sources/unitedstates.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
+- [ ] A live integration test is skippable in CI and, when enabled, verifies that at least one legislators YAML file can be downloaded and parsed into one or more typed records; if Congress member cache fixtures or live data are available for the same run, the test also verifies that the bioguide cross-reference summary is generated.
   <!-- Touches: tests/integration/unitedstates-live.test.ts or equivalent -->
 
 ### 10. End-to-end orchestration, status, and repository hygiene
@@ -197,13 +213,13 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 ## Acceptance Tests (human-readable)
 1. Run `npx us-code-tools fetch --status` in a clean checkout. Verify it exits `0`, prints JSON, and shows all five sources with empty or not-yet-fetched status.
 2. Run `npx us-code-tools fetch --source=olrc`. Verify the command attempts titles 1 through 54, writes `data/cache/olrc/title-01/` through `title-54/`, and records title-level outcomes in `data/manifest.json`.
-3. Run `npx us-code-tools fetch --source=congress --congress=119` with a valid API key. Verify raw bill-list and committee-list pages for congress `119` are cached under `data/cache/congress/`, verify that every enumerated bill also has cached detail/actions/cosponsors responses, verify member pages continue until the Congress.gov `GET /member` listing has no next page, and verify the manifest records congress `119` plus fetched page counts for bills, bill details, bill actions, bill cosponsors, committees, and members.
+3. Run `npx us-code-tools fetch --source=congress --congress=119` with a valid API key. Verify raw bill-list and committee-list pages for congress `119` are cached under `data/cache/congress/`, verify that every enumerated bill also has cached detail/actions/cosponsors responses, verify member pages continue until the Congress.gov `GET /member` listing has no next page, verify that every enumerated member with a non-empty `bioguideId` also has a cached `GET /member/{bioguideId}` response, and verify the manifest records congress `119` plus fetched page counts for bills, bill details, bill actions, bill cosponsors, committees, member list pages, and member detail records.
 4. Run `npx us-code-tools fetch --all` without `--congress`. Verify the command exits `1` with the documented usage error for a missing all-sources congress scope.
 5. Run `npx us-code-tools fetch --source=govinfo` with a valid API key. Verify it walks the unfiltered `PLAW` collection until there is no next page, fetches summary and granules for each returned package, caches those responses under `data/cache/govinfo/`, and records `query_scope: "all_plaw"`, request parameters, and package count in the manifest.
 6. Run `npx us-code-tools fetch --source=govinfo --congress=119` with a valid API key. Verify it walks the same `PLAW` listing flow, parses congress membership from each collection item's `packageId` by reading the decimal digits immediately after `PLAW-`, retains only packages whose parsed congress is `119`, uses the same cache root, and records `query_scope: "congress"`, congress `119`, request parameters, and package count in the manifest.
 7. Run the GovInfo congress-filter unit/integration test fixture with a mixed `PLAW` collection page containing package IDs for multiple congresses plus at least one malformed `packageId`. Verify only the requested congress's package IDs are retained and malformed/unparseable IDs are excluded and surfaced in diagnostics.
-8. Run `npx us-code-tools fetch --source=voteview`. Verify exactly the three required CSV files exist under `data/cache/voteview/` and their metadata appears in the manifest.
-9. Run `npx us-code-tools fetch --source=legislators`. Verify exactly the three required YAML files exist under `data/cache/legislators/` and the manifest includes them.
+8. Run `npx us-code-tools fetch --source=voteview`. Verify exactly the three required CSV files exist under `data/cache/voteview/`, their metadata appears in the manifest, and the VoteView client can satisfy at least one congress lookup and one member lookup from its typed index surface without rescanning the raw CSV fixtures.
+9. Run `npx us-code-tools fetch --source=legislators`. Verify exactly the three required YAML files exist under `data/cache/legislators/` and the manifest includes them. Then run the legislators bioguide cross-reference against cached Congress member data; verify it produces a deterministic summary with matched and unmatched ID lists and, when Congress cache data is available, writes `data/cache/legislators/bioguide-crosswalk.json`.
 10. Re-run one of the API-backed fetches without `--force`. Verify logs/status indicate a cache hit and no network request is made for fresh cached entries.
 11. Re-run the same command with `--force`. Verify the artifact timestamps in `data/manifest.json` change.
 12. Run `npx us-code-tools fetch --status --force`. Verify the command exits `1` with the documented usage error for an invalid flag combination.
@@ -215,7 +231,7 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 ## Edge Case Catalog
 - Invalid CLI combinations: duplicate flags, unknown flags, unknown source names, missing `--congress`, non-integer congress numbers, `--congress=0`.
 - Malformed external payloads: truncated ZIPs, HTML returned instead of ZIP/JSON/CSV/YAML, malformed JSON, malformed YAML, invalid UTF-8, BOM-prefixed CSV/YAML, empty files, duplicate CSV headers.
-- Partial data: Congress.gov bill detail exists but actions or cosponsors endpoint returns empty; GovInfo package exists but granules endpoint returns no entries; legislators file exists but some records omit bioguide IDs.
+- Partial data: Congress.gov bill detail exists but actions or cosponsors endpoint returns empty; GovInfo package exists but granules endpoint returns no entries; legislators file exists but some records omit bioguide IDs; Congress member list entries exist without `bioguideId`; VoteView rows exist for a congress/member combination whose paired records are missing from another CSV.
 - Delimiter edge cases: CSV rows with embedded commas, quoted newlines, trailing separators, empty fields between delimiters.
 - Encoding issues: XML/CSV/YAML with BOM markers, mixed newline styles, unicode names, emoji or non-ASCII committee/member names, invalid UTF-8 bytes in downloaded files.
 - Subsystem failure: cache directory cannot be created, manifest file is corrupt JSON, filesystem rename fails, DNS failure, TLS failure, network timeout, 429 throttling, 5xx upstream failures.
@@ -234,6 +250,8 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   - manifest updates are monotonic for successful artifacts and never invent entries for failed writes
   - OLRC title results are always keyed to title numbers `1..54`
   - GovInfo congress filtering is deterministic for the same `packageId` inputs: parsing the digits immediately after `PLAW-` always yields the same retain/exclude decision for a requested congress
+  - VoteView index lookups are deterministic for the same downloaded CSV inputs and requested congress/member keys
+  - legislators bioguide cross-reference produces the same matched/unmatched sets for the same Congress cache inputs and YAML inputs
   - Congress/GovInfo shared limiter never grants more reservations than its configured hourly ceiling
 - **Purity boundary:** all filesystem writes, clock reads, environment-variable reads, and HTTP requests live in thin effectful adapters invoked by orchestration code; unit tests cover pure logic and integration tests cover the adapters.
 
