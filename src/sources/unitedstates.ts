@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { getCachePaths } from '../utils/cache.js';
 import { readManifest, writeManifest, type DownloadedFileManifestEntry, type FetchManifest, type LegislatorsCrossReferenceState } from '../utils/manifest.js';
@@ -30,7 +30,8 @@ export async function fetchUnitedStatesSource(invocation?: { force?: boolean }):
         const body = await readFile(artifactPath, 'utf8'); manifest.sources.legislators.files[fileName] = buildDownloadedFileManifestEntry(dataDirectory, artifactPath, body);
       }
     }
-    const crossReference = await buildCrossReferenceState(manifest, sourceDirectory); manifest.sources.legislators.last_success_at = new Date().toISOString(); manifest.sources.legislators.last_failure = null; manifest.sources.legislators.cross_reference = crossReference; await writeManifest(manifest);
+    const crossReference = await buildCrossReferenceState(manifest, sourceDirectory); if (crossReference.status !== 'completed') await removeCrosswalkArtifact(sourceDirectory);
+    manifest.sources.legislators.last_success_at = new Date().toISOString(); manifest.sources.legislators.last_failure = null; manifest.sources.legislators.cross_reference = crossReference; await writeManifest(manifest);
     return { source:'legislators', ok:true, requested_scope:{ files:[...LEGISLATOR_FILES] }, counts:{ files_downloaded: filesDownloaded } };
   } catch (error) { await recordFailure('upstream_request_failed', error instanceof Error ? error.message : 'Legislators fetch failed'); return { source:'legislators', ok:false, requested_scope:{ files:[...LEGISLATOR_FILES] }, error:{ code:'upstream_request_failed', message:error instanceof Error ? error.message : 'Legislators fetch failed' } }; }
 }
@@ -57,6 +58,10 @@ function parseCommitteeYamlRecords(yaml: string): ParsedCommitteeRecord[] { retu
 function splitTopLevelYamlRecords(yaml: string): string[] { const normalized = yaml.replace(/\r\n/g, '\n').trim(); if (normalized.length === 0) return []; return normalized.split(/^-(?=\s|$)/m).map((record) => record.trim()).filter((record) => record.length > 0); }
 function matchScalar(block: string, pattern: RegExp): string | null { const match = block.match(pattern); const value = match?.[1]?.trim(); return value ? value.replace(/^['"]|['"]$/g, '') : null; }
 async function fileExists(path: string): Promise<boolean> { try { await access(path); return true; } catch { return false; } }
+async function removeCrosswalkArtifact(sourceDirectory: string): Promise<void> {
+  try { await unlink(resolve(sourceDirectory, 'bioguide-crosswalk.json')); } catch (error) { if (!isMissingFileError(error)) throw error; }
+}
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
 async function recordFailure(code: string, message: string): Promise<void> { const manifest = await readManifest(); manifest.sources.legislators.last_failure = { code, message }; await writeManifest(manifest); }
 async function fetchWithTimeout(url: string): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS); const startedAt = Date.now(); try { const response = await fetch(url, { signal: controller.signal }); logNetworkEvent({ level:'info', event:'network.request', source:'legislators', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt, status_code:response.status }); return response; } catch (error) { logNetworkEvent({ level:'error', event:'network.request', source:'legislators', method:'GET', url, attempt:1, cache_status:'miss', duration_ms:Date.now() - startedAt }); throw error; } finally { clearTimeout(timeout); } }
 function deriveSkippedCrossReferenceState(status:'missing'|'complete'|'incomplete'|'stale', snapshotId:string|null): LegislatorsCrossReferenceState { return { status: status === 'stale' ? 'skipped_stale_congress_snapshot' : status === 'incomplete' ? 'skipped_incomplete_congress_snapshot' : 'skipped_missing_congress_cache', based_on_snapshot_id:snapshotId, crosswalk_artifact_id:null, matched_bioguide_ids:0, unmatched_legislator_bioguide_ids:0, unmatched_congress_bioguide_ids:0, updated_at:new Date().toISOString() }; }
