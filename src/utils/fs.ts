@@ -20,7 +20,11 @@ export async function assertSafeOutputPath(outputRoot: string, targetPath: strin
       if (stats.isSymbolicLink()) {
         throw new Error(`Refusing symlinked output directory: ${cursor}`);
       }
-    } catch {
+    } catch (error) {
+      const errno = error as NodeJS.ErrnoException;
+      if (errno.code !== 'ENOENT') {
+        throw error;
+      }
       // Missing segments are fine; they will be created.
     }
     cursor = dirname(cursor);

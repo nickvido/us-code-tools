@@ -38,7 +38,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section{section}`,
   };
 
-  for (const sectionNode of asArray(titleNode.section)) {
+  for (const sectionNode of collectSectionNodes(titleNode)) {
     const sectionNumber = normalizeWhitespace(readText(sectionNode.num));
     if (!sectionNumber) {
       parseErrors.push({
@@ -80,6 +80,13 @@ interface XmlNode {
 }
 
 type XmlValue = string | number | boolean | XmlNode | Array<string | number | boolean | XmlNode>;
+
+function collectSectionNodes(titleNode: XmlNode): XmlNode[] {
+  return [
+    ...asArray(titleNode.section),
+    ...asArray(titleNode.chapter).flatMap((chapter) => asArray(chapter.section)),
+  ];
+}
 
 function parseSection(titleNumber: number, sectionNode: XmlNode): SectionIR {
   const sectionNumber = normalizeWhitespace(readText(sectionNode.num));
