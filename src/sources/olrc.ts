@@ -155,11 +155,24 @@ export async function getOrCreateZipPath(titleNumber: number, cacheRoot: string)
 
   const url = resolveTitleUrl(titleNumber);
   const titleDirectory = resolve(cacheRoot, 'olrc', `title-${padTitleNumber(titleNumber)}`);
-  const zipPath = resolve(titleDirectory, basename(url));
+  const zipFileName = basename(url);
+  const zipPath = resolve(titleDirectory, zipFileName);
 
   const shouldTrustExistingCache = globalThis.fetch === nativeFetch;
-  if (shouldTrustExistingCache && await isValidZipArtifact(zipPath)) {
-    return zipPath;
+  if (shouldTrustExistingCache) {
+    const cacheValidation = await validateCachedZipArtifact({
+      titleNumber,
+      titleDirectory,
+      zipPath,
+      zipFileName,
+      sourceUrl: url,
+    });
+
+    if (cacheValidation.ok) {
+      return zipPath;
+    }
+
+    await deleteCacheArtifactSet(titleDirectory, zipPath);
   }
 
   await mkdir(titleDirectory, { recursive: true });
@@ -199,19 +212,103 @@ export async function getOrCreateZipPath(titleNumber: number, cacheRoot: string)
   return zipPath;
 }
 
-async function isValidZipArtifact(zipPath: string): Promise<boolean> {
+interface CacheValidationInput {
+  titleNumber: number;
+  titleDirectory: string;
+  zipPath: string;
+  zipFileName: string;
+  sourceUrl: string;
+}
+
+async function validateCachedZipArtifact(input: CacheValidationInput): Promise<{ ok: true } | { ok: false }> {
+  const { titleNumber, titleDirectory, zipPath, zipFileName, sourceUrl } = input;
+  const manifestPath = resolve(titleDirectory, 'manifest.json');
+  const shaPath = `${zipPath}.sha256`;
+
   try {
     const fileStat = await stat(zipPath);
     if (fileStat.size <= 0) {
-      await rm(zipPath, { force: true });
-      return false;
+      return { ok: false };
     }
 
-    const buffer = await readFile(zipPath);
-    return isZipBuffer(buffer);
+    const [buffer, manifestRaw, shaRaw] = await Promise.all([
+      readFile(zipPath),
+      readFile(manifestPath, 'utf8'),
+      readFile(shaPath, 'utf8'),
+    ]);
+
+    if (!isZipBuffer(buffer)) {
+      return { ok: false };
+    }
+
+    const manifest = parseCacheManifest(manifestRaw);
+    if (!manifest) {
+      return { ok: false };
+    }
+
+    const computedSha = sha256(buffer);
+    const sidecarSha = shaRaw.trim();
+    if (!isSha256Hex(sidecarSha)) {
+      return { ok: false };
+    }
+
+    const expectedCacheKey = `title-${padTitleNumber(titleNumber)}__${basename(sourceUrl, '.zip')}`;
+    const manifestMatches = manifest.title === titleNumber
+      && manifest.source_url === sourceUrl
+      && manifest.cache_key === expectedCacheKey
+      && manifest.zip_filename === zipFileName
+      && manifest.bytes === fileStat.size
+      && manifest.sha256 === computedSha
+      && sidecarSha === computedSha;
+
+    return manifestMatches ? { ok: true } : { ok: false };
   } catch {
-    return false;
+    return { ok: false };
   }
+}
+
+function parseCacheManifest(raw: string): {
+  title: number;
+  source_url: string;
+  cache_key: string;
+  zip_filename: string;
+  sha256: string;
+  bytes: number;
+} | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed.title !== 'number'
+      || typeof parsed.source_url !== 'string'
+      || typeof parsed.cache_key !== 'string'
+      || typeof parsed.zip_filename !== 'string'
+      || typeof parsed.sha256 !== 'string'
+      || typeof parsed.bytes !== 'number') {
+      return null;
+    }
+
+    return {
+      title: parsed.title,
+      source_url: parsed.source_url,
+      cache_key: parsed.cache_key,
+      zip_filename: parsed.zip_filename,
+      sha256: parsed.sha256,
+      bytes: parsed.bytes,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isSha256Hex(value: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(value);
+}
+
+async function deleteCacheArtifactSet(titleDirectory: string, zipPath: string): Promise<void> {
+  await Promise.all([
+    rm(zipPath, { force: true }),
+    rm(resolve(titleDirectory, 'manifest.json'), { force: true }),
+    rm(`${zipPath}.sha256`, { force: true }),
+  ]);
 }
 
 async function fetchWithRetry(url: string): Promise<Response> {

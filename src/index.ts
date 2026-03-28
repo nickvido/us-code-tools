@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { getTitleZipPath, extractXmlEntriesFromZip, resolveTitleUrl } from './sources/olrc.js';
 import type { ParseError, TitleIR } from './domain/model.js';
@@ -21,6 +21,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const { titleNumber, outputDir } = parsed.value;
+
+  const outputValidationError = await validateOutputDirectory(outputDir);
+  if (outputValidationError) {
+    usage(outputValidationError);
+    return 1;
+  }
 
   try {
     const zipPath = await getTitleZipPath(titleNumber, resolve(process.cwd(), '.cache'));
@@ -93,6 +99,24 @@ function parseArgs(args: string[]): { ok: true; value: { titleNumber: number; ou
       outputDir: resolve(args[outputIndex + 1]),
     },
   };
+}
+
+async function validateOutputDirectory(outputDir: string): Promise<string | null> {
+  try {
+    const outputStat = await stat(outputDir);
+    if (!outputStat.isDirectory()) {
+      return '--output must point to a directory or a path that does not exist yet';
+    }
+
+    return null;
+  } catch (error) {
+    const normalizedError = error as NodeJS.ErrnoException;
+    if (normalizedError.code === 'ENOENT') {
+      return null;
+    }
+
+    return `failed to inspect --output path: ${normalizedError.message}`;
+  }
 }
 
 function usage(error: string): void {
