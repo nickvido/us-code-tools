@@ -2,15 +2,43 @@
 
 ## Trust Boundary
 - Untrusted inputs:
-  - CLI flags (`transform` and `backfill`)
+  - CLI flags (`transform`, `backfill`, and `fetch`)
   - target path contents and git metadata in the downstream repo
   - existing target-repo history/branch state
   - configured remote behavior during `git push`
   - remote OLRC ZIP/XML payloads for the transform flow
+  - all upstream acquisition payloads for issue #5: OLRC listing/ZIPs, Congress.gov JSON, GovInfo JSON, VoteView CSV, UnitedStates YAML
+  - persisted manifest/cache contents read back from disk
 - Trusted application data:
   - committed Constitution dataset in `src/backfill/constitution/dataset.ts`
 
 ## Implemented Controls
+
+### Fetch / Acquisition Safety
+- `src/commands/fetch.ts`
+  - rejects invalid selector combinations with JSON `error.code="invalid_arguments"` and exit `2`
+  - preserves fail-open behavior in `--all`: later sources still run after earlier source failures
+- `src/utils/cache.ts`
+  - normalizes raw-response cache URLs by removing `api_key`
+  - writes raw body + metadata via temp file + rename
+  - reuses TTL-fresh Congress/GovInfo API responses when `--force` is not set
+- `src/utils/manifest.ts`
+  - normalizes missing/corrupt partial source state back to canonical defaults
+  - writes `data/manifest.json` atomically with mode `0600`
+- `src/utils/logger.ts`
+  - redacts `api_key` query values before network events hit stderr
+  - emits allowlisted scalar fields only (`source`, `method`, `url`, `attempt`, `cache_status`, `duration_ms`, `status_code`)
+- `src/utils/fetch-config.ts`
+  - only uses `API_DATA_GOV_KEY` for Congress/GovInfo auth
+  - falls back to a hardcoded Congress floor only after failed live resolution and logs a warning event
+- `src/utils/rate-limit.ts`
+  - enforces sliding-window exhaustion with a machine-readable `nextRequestAt`
+  - interactive runs stop on exhaustion instead of waiting for the next hour
+- `src/sources/congress-member-snapshot.ts`
+  - treats the Congress member snapshot as reusable only when status is `complete`, `snapshot_completed_at + cache_ttl_ms` is still fresh, and every referenced artifact still exists on disk
+- `src/sources/unitedstates.ts`
+  - skips cross-reference unless the latest Congress snapshot is complete and fresh
+  - deletes stale `bioguide-crosswalk.json` on skip paths so manifest state and disk state cannot disagree
 
 ### Backfill Target Safety
 - `src/backfill/target-repo.ts`
@@ -63,6 +91,9 @@
 - **Contiguous-prefix-only resume:** prevents ambiguous repair behavior and stops the tool from silently appending foundational history after unrelated commits.
 - **Explicit branch push:** prevents configured-remote repos without upstream from failing at the final network step.
 - **Static Constitution dataset:** keeps the backfill path offline and deterministic; no runtime trust in external text sources.
+- **Manifest/cache as the only persistence layer for issue #5:** avoids hidden state and keeps partial-write safety testable.
+- **Redacted structured logging:** prevents `API_DATA_GOV_KEY` leakage in stderr logs while still preserving request observability.
+- **Skip-path crosswalk cleanup:** a skipped legislators cross-reference is not allowed to leave a stale success artifact behind; this is both correctness and data-integrity hardening.
 
 ## Things Future Agents Should Not Mislabel as Bugs
 - No database/auth/RLS: intentional; this repo is a local CLI, not a service.
@@ -70,6 +101,9 @@
 - Rejection of non-prefix history is intentional; this phase does not repair or rewrite history.
 - Local-only repos with no remote are valid success cases (`pushResult: skipped-local-only`).
 - `git fast-import` is intentional for historical author/date control; do not replace it casually with ordinary `git commit` without revalidating exact-history guarantees.
+- Congress and GovInfo each instantiate a same-shaped module-local limiter rather than importing one shared singleton; document/adjust carefully instead of assuming cross-module coordination already exists.
+- VoteView indexing is currently in-memory only; lack of on-disk index files is an implementation choice, not accidental data loss.
+- The fallback current-congress path is expected to mark runs degraded/operator-review-required; that warning path is part of the contract.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
@@ -79,11 +113,14 @@
   - deterministic UTC historical commit dating
   - explicit-branch remote push behavior
   - legacy transform ZIP/output hardening remains in place
+  - issue #5 cache/manifest atomicity, redacted network logging, member-snapshot freshness checks, and skip-path crosswalk cleanup
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes
   - automatic recovery/repair for malformed target histories
   - runtime fetching/verification of Constitution text from remote sources
+  - stronger host-allowlist / disk-ceiling enforcement promised by architecture but not yet fully centralized in code
 - What's a test double vs production:
   - temp repos and bare remotes in tests are doubles for downstream targets
   - actual repo-preflight and git execution code paths are production paths exercised in integration tests
+  - fixture source payloads are doubles; manifest/cache/crosswalk cleanup behavior is production logic
