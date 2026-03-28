@@ -1,4 +1,5 @@
 import { readManifest, type SourceName } from '../utils/manifest.js';
+import { fetchOlrcSource, type OlrcFetchResult } from '../sources/olrc.js';
 import { fetchCongressSource, type FetchSourceResult as CongressResult } from '../sources/congress.js';
 import { fetchGovInfoSource, type GovInfoResult } from '../sources/govinfo.js';
 import { fetchVoteViewSource, type VoteViewResult } from '../sources/voteview.js';
@@ -17,14 +18,7 @@ interface ValidationError {
   message: string;
 }
 
-interface OlrcResult {
-  source: 'olrc';
-  ok: boolean;
-  requested_scope: { titles: string };
-  error: { code: string; message: string };
-}
-
-type FetchResult = OlrcResult | CongressResult | GovInfoResult | VoteViewResult | UnitedStatesResult;
+type FetchResult = OlrcFetchResult | CongressResult | GovInfoResult | VoteViewResult | UnitedStatesResult;
 
 export async function runFetchCommand(argv: string[]): Promise<number> {
   const parsed = parseFetchArgs(argv);
@@ -135,17 +129,11 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
 async function runAllSources(args: FetchArgs): Promise<FetchResult[]> {
   const results: FetchResult[] = [];
 
-  results.push({
-    source: 'olrc',
-    ok: false,
-    requested_scope: { titles: '1..54' },
-    error: { code: 'not_implemented', message: 'OLRC acquisition is not implemented yet' },
-  });
-
-  results.push(await fetchCongressSource({ force: args.force, congress: args.congress ?? 93, mode: 'all' }));
+  results.push(await fetchOlrcSource({ force: args.force }));
+  results.push(await fetchCongressSource({ force: args.force, congress: args.congress, mode: 'all' }));
   results.push(await fetchGovInfoSource({ force: args.force, congress: args.congress, mode: 'all' }));
-  results.push(await fetchVoteViewSource());
-  results.push(await fetchUnitedStatesSource());
+  results.push(await fetchVoteViewSource({ force: args.force }));
+  results.push(await fetchUnitedStatesSource({ force: args.force }));
 
   return results;
 }
@@ -153,12 +141,7 @@ async function runAllSources(args: FetchArgs): Promise<FetchResult[]> {
 async function runSingleSource(args: FetchArgs): Promise<FetchResult> {
   switch (args.source) {
     case 'olrc':
-      return {
-        source: 'olrc',
-        ok: false,
-        requested_scope: { titles: '1..54' },
-        error: { code: 'not_implemented', message: 'OLRC acquisition is not implemented yet' },
-      };
+      return fetchOlrcSource({ force: args.force });
     case 'congress':
       return fetchCongressSource({ force: args.force, congress: args.congress, mode: 'single' });
     case 'govinfo':

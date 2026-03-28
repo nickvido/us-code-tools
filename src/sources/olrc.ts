@@ -5,6 +5,8 @@ import yauzl from 'yauzl';
 import type { Entry, ZipFile } from 'yauzl';
 import type { XmlEntry } from '../domain/model.js';
 import { padTitleNumber } from '../domain/normalize.js';
+import { getCachePaths } from '../utils/cache.js';
+import { readManifest, writeManifest } from '../utils/manifest.js';
 
 const inflightDownloads = new Map<string, Promise<string>>();
 const resolvedDownloads = new Map<string, string>();
@@ -464,4 +466,57 @@ function openZipFromBuffer(buffer: Buffer): Promise<ZipFile> {
       resolveZip(zipFile);
     });
   });
+}
+
+export interface OlrcFetchResult {
+  source: 'olrc';
+  ok: boolean;
+  requested_scope: { titles: string };
+  counts?: { titles_downloaded: number };
+  error?: { code: string; message: string };
+}
+
+export async function fetchOlrcSource(invocation?: { force?: boolean }): Promise<OlrcFetchResult> {
+  try {
+    const { cacheDirectory } = getCachePaths('olrc');
+    let titlesDownloaded = 0;
+
+    for (let titleNumber = 1; titleNumber <= 54; titleNumber += 1) {
+      const zipPath = await getTitleZipPath(titleNumber, cacheDirectory);
+      await extractXmlEntriesFromZip(zipPath);
+      titlesDownloaded += 1;
+    }
+
+    const manifest = await readManifest();
+    manifest.sources.olrc = {
+      last_success_at: new Date().toISOString(),
+      last_failure: null,
+    };
+    await writeManifest(manifest);
+
+    return {
+      source: 'olrc',
+      ok: true,
+      requested_scope: { titles: '1..54' },
+      counts: { titles_downloaded: titlesDownloaded },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'OLRC fetch failed';
+    const manifest = await readManifest();
+    manifest.sources.olrc = {
+      last_success_at: manifest.sources.olrc.last_success_at,
+      last_failure: { code: 'upstream_request_failed', message },
+    };
+    await writeManifest(manifest);
+
+    return {
+      source: 'olrc',
+      ok: false,
+      requested_scope: { titles: '1..54' },
+      error: {
+        code: 'upstream_request_failed',
+        message,
+      },
+    };
+  }
 }
