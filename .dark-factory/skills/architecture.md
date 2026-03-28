@@ -25,7 +25,7 @@
 - `src/utils/manifest.ts` — manifest schema normalization, empty-manifest defaults, atomic manifest writes.
 - `src/utils/fetch-config.ts` — current Congress resolution (`override`/`live`/`fallback`) and fallback warning path.
 - `src/utils/logger.ts` — structured network logging with `api_key` redaction.
-- `src/utils/rate-limit.ts` — sliding-window limiter helpers used by Congress/GovInfo; currently exports primitives only, and the branch still instantiates separate per-module limiter state in `src/sources/congress.ts` and `src/sources/govinfo.ts`.
+- `src/utils/rate-limit.ts` — sliding-window limiter helpers plus an exported `getSharedApiDataGovLimiter()` singleton/reset hook; the branch still instantiates separate per-module limiter state in `src/sources/congress.ts` and `src/sources/govinfo.ts`, so that shared helper is currently unused by production fetch paths.
 - `src/transforms/` — USLM parsing, markdown rendering, and output writing for `transform`.
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.

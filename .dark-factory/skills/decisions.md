@@ -121,9 +121,9 @@
 
 ### ADR-018: Congress/GovInfo must share one in-process limiter singleton
 - **Status:** Proposed / not yet implemented on current branch
-- **Context:** The spec and architecture bind Congress.gov and GovInfo to one `API_DATA_GOV_KEY` budget, but the current branch creates separate `sharedLimiter` instances inside `src/sources/congress.ts` and `src/sources/govinfo.ts`.
-- **Decision:** Centralize limiter state in shared infrastructure (expected under `src/utils/rate-limit.ts` or a sibling shared module) and have both sources consult/mutate that same singleton before request dispatch.
-- **Consequence:** Until this lands, the branch can oversubscribe the single-key hourly budget across the two sources and remains adversary-rejected.
+- **Context:** The spec and architecture bind Congress.gov and GovInfo to one `API_DATA_GOV_KEY` budget. `src/utils/rate-limit.ts` now exports `getSharedApiDataGovLimiter()`, but the current branch still creates separate module-local `sharedLimiter` instances inside `src/sources/congress.ts` and `src/sources/govinfo.ts` instead of using that helper.
+- **Decision:** Wire both sources to the existing shared infrastructure in `src/utils/rate-limit.ts` (or an equivalent shared limiter module) and have both request paths consult/mutate that same singleton before request dispatch.
+- **Consequence:** Until the sources actually switch over, the branch can oversubscribe the single-key hourly budget across the two sources and remains adversary-rejected.
 - **Feature:** #5 Data Acquisition
 
 ### ADR-019: Upstream `Retry-After` must map to the fetch exhaustion contract

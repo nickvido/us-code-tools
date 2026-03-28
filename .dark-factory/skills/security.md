@@ -34,7 +34,7 @@
 - `src/utils/rate-limit.ts`
   - enforces sliding-window exhaustion with a machine-readable `nextRequestAt`
   - interactive runs stop on exhaustion instead of waiting for the next hour
-  - currently provides shared primitives, but the branch has not yet centralized Congress/GovInfo onto one singleton limiter instance
+  - now exports `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()`, but the branch has not yet centralized Congress/GovInfo onto that singleton limiter instance
 - `src/sources/congress-member-snapshot.ts`
   - treats the Congress member snapshot as reusable only when status is `complete`, `snapshot_completed_at + cache_ttl_ms` is still fresh, and every referenced artifact still exists on disk
 - `src/sources/unitedstates.ts`

@@ -64,9 +64,9 @@
 ### If you're modifying... → Read these first:
 - `src/index.ts` → `src/commands/fetch.ts`, `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts`
 - `src/commands/fetch.ts` → `src/utils/manifest.ts`, `src/utils/fetch-config.ts`, every `src/sources/*.ts` fetch entrypoint (this file owns CLI contract + deterministic `--all` ordering)
-- `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source currently owns its own module-local limiter state; adversary review requires moving that state to shared infrastructure before changing request-budget behavior)
+- `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (`src/utils/rate-limit.ts` already exports `getSharedApiDataGovLimiter()`, but this source still uses its own module-local limiter state instead of that singleton)
 - `src/sources/congress-member-snapshot.ts` → `src/utils/manifest.ts` (freshness derives from manifest snapshot metadata + artifact existence)
-- `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (this source also owns a separate module-local limiter state today, so Congress/GovInfo budget coordination is not yet truly shared)
+- `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (`src/utils/rate-limit.ts` already has the intended shared limiter helper, but this source also keeps a separate module-local limiter state today, so Congress/GovInfo budget coordination is not yet truly shared)
 - `src/sources/unitedstates.ts` → `src/utils/manifest.ts`, `src/sources/congress-member-snapshot.ts`, current Congress cache layout in `src/sources/congress.ts`
 - `src/sources/voteview.ts` → `src/utils/manifest.ts` and its in-memory index cache (`inMemoryIndexes`)
 - `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, manifest expectations for selected vintage + per-title state
@@ -150,7 +150,7 @@ src/index.ts (main)
   - `src/commands/fetch.ts` owns CLI validation and top-level fail-open source ordering
   - `src/utils/manifest.ts` is permissive on read/normalize but all writers should emit the canonical shape
   - Congress/GovInfo raw API caching goes through `src/utils/cache.ts`; cache keys normalize away `api_key`
-  - Congress and GovInfo each define a module-local `sharedLimiter`; they are structurally identical but not a single shared singleton across modules, and this is the current blocking adversary finding
+  - Congress and GovInfo each define a module-local `sharedLimiter`; `src/utils/rate-limit.ts` already exports `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()`, but neither source uses that singleton yet, and this remains the current blocking adversary finding
   - `src/utils/retry.ts` currently exposes only a minimal `withRetry()` loop and does not yet parse or surface HTTP `Retry-After`; do not assume server-directed backoff exists yet
   - legislators cross-reference must delete stale `bioguide-crosswalk.json` whenever the result status is not `completed`
   - VoteView indexes are currently in-memory only via `inMemoryIndexes`, so repeated lookups in one process avoid reparsing but cross-process persistence is not implemented

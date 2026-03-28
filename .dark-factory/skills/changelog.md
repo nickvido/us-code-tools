@@ -99,9 +99,9 @@
   - `src/sources/congress.ts` and `src/sources/govinfo.ts` each still instantiate their own limiter state instead of sharing one singleton budget for the single `API_DATA_GOV_KEY`
   - neither source currently honors upstream `Retry-After`; throttle responses still collapse into generic request failures instead of `rate_limit_exhausted` with `next_request_at`
 - Most recent code/branch evidence captured for future agents:
-  - `src/utils/rate-limit.ts` exports helper primitives only
+  - `src/utils/rate-limit.ts` now exports `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()`, but `src/sources/congress.ts` and `src/sources/govinfo.ts` still ignore that helper and keep separate module-local limiter state
   - `src/utils/retry.ts` is currently a minimal retry loop and does not parse HTTP retry headers
-  - branch head during this docs update: `4006b79`
+  - branch head during this docs update: `53ad5cd`
 
 ## Phase 1 Scope (Current)
 - What's implemented:
