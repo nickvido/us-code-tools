@@ -10,6 +10,10 @@ function getZipNameForTitle(resolveUrl: (...args: unknown[]) => unknown, title: 
   return basename(new URL(titleUrl).pathname);
 }
 
+function toExactArrayBuffer(buffer: Buffer): ArrayBuffer {
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+}
+
 async function loadOlrcWithMockFetch(mockFetch: (input: RequestInfo | URL) => Promise<unknown>) {
   const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
   const originalFetch = globalThis.fetch;
@@ -39,7 +43,7 @@ describe('adversary round5 regressions for #1', () => {
       headers: {
         get: () => 'application/zip',
       },
-      arrayBuffer: async () => fixtureBytes.buffer,
+      arrayBuffer: async () => toExactArrayBuffer(fixtureBytes),
     }));
 
     const { module, restore } = await loadOlrcWithMockFetch(async (input: RequestInfo | URL) => requestMock(String(input)));
@@ -111,7 +115,7 @@ describe('adversary round5 regressions for #1', () => {
       headers: {
         get: () => 'application/zip',
       },
-      arrayBuffer: async () => badZip.buffer,
+      arrayBuffer: async () => toExactArrayBuffer(badZip),
     }));
 
     const { module, restore } = await loadOlrcWithMockFetch(async (input: RequestInfo | URL) => requestMock(String(input)));

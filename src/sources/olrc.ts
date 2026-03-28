@@ -194,6 +194,10 @@ export async function getOrCreateZipPath(titleNumber: number, cacheRoot: string)
     throw new Error(`failed to download title ${titleNumber} from ${url} (non-ZIP payload)`);
   }
 
+  if (!(await isReadableZipBuffer(buffer))) {
+    throw new Error(`failed to download title ${titleNumber} from ${url} (unreadable ZIP payload)`);
+  }
+
   const tempPath = `${zipPath}.tmp-${process.pid}-${Date.now()}`;
   await writeFile(tempPath, buffer);
   const manifest = {
@@ -237,7 +241,7 @@ async function validateCachedZipArtifact(input: CacheValidationInput): Promise<{
       readFile(shaPath, 'utf8'),
     ]);
 
-    if (!isZipBuffer(buffer)) {
+    if (!isZipBuffer(buffer) || !(await isReadableZipBuffer(buffer))) {
       return { ok: false };
     }
 
@@ -341,12 +345,37 @@ function isZipBuffer(buffer: Buffer): boolean {
 }
 
 function normalizeZipBuffer(buffer: Buffer): Buffer {
-  if (isZipBuffer(buffer)) {
-    return buffer;
+  const localFileHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+  const signatureIndex = isZipBuffer(buffer) ? 0 : buffer.indexOf(localFileHeader);
+  const normalizedStart = signatureIndex >= 0 ? buffer.subarray(signatureIndex) : buffer;
+
+  const endOfCentralDirectory = findEndOfCentralDirectory(normalizedStart);
+  return endOfCentralDirectory === null ? normalizedStart : normalizedStart.subarray(0, endOfCentralDirectory);
+}
+
+function findEndOfCentralDirectory(buffer: Buffer): number | null {
+  const minRecordLength = 22;
+  if (buffer.length < minRecordLength) {
+    return null;
   }
 
-  const signatureIndex = buffer.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
-  return signatureIndex >= 0 ? buffer.subarray(signatureIndex) : buffer;
+  const maxCommentLength = 0xffff;
+  const searchStart = Math.max(0, buffer.length - (minRecordLength + maxCommentLength));
+  const signature = 0x06054b50;
+
+  for (let index = buffer.length - minRecordLength; index >= searchStart; index -= 1) {
+    if (buffer.readUInt32LE(index) !== signature) {
+      continue;
+    }
+
+    const commentLength = buffer.readUInt16LE(index + 20);
+    const recordEnd = index + minRecordLength + commentLength;
+    if (recordEnd <= buffer.length) {
+      return recordEnd;
+    }
+  }
+
+  return null;
 }
 
 function sha256(buffer: Buffer): string {
@@ -401,6 +430,16 @@ function formatDownloadError(titleNumber: number, url: string, error: Error): st
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+async function isReadableZipBuffer(buffer: Buffer): Promise<boolean> {
+  try {
+    const zipFile = await openZipFromBuffer(buffer);
+    zipFile.close();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function openZipFromPath(path: string): Promise<ZipFile> {
