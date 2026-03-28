@@ -31,9 +31,9 @@ export async function runConstitutionBackfill(target: string): Promise<BackfillS
   }
 
   let pushResult: 'pushed' | 'skipped-local-only' = 'skipped-local-only';
-  if (prepared.hasConfiguredPushRemote) {
+  if (prepared.pushRemoteName !== null) {
     try {
-      await git(prepared.repoPath, ['push']);
+      await git(prepared.repoPath, ['push', '--set-upstream', prepared.pushRemoteName, prepared.branch]);
       pushResult = 'pushed';
     } catch (error) {
       throw new Error(`failed to push Constitution backfill to configured remote: ${error instanceof Error ? error.message : String(error)}`);

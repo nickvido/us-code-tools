@@ -6,7 +6,7 @@ import { git } from './git-adapter.js';
 export interface PreparedTargetRepo {
   repoPath: string;
   branch: string;
-  hasConfiguredPushRemote: boolean;
+  pushRemoteName: string | null;
   matchingPrefixLength: number;
 }
 
@@ -121,11 +121,38 @@ export async function detectMatchingPrefix(repoPath: string, plan: HistoricalEve
   return prefixLength;
 }
 
+async function detectPushRemoteName(repoPath: string, branch: string): Promise<string | null> {
+  const remotes = (await git(repoPath, ['remote']))
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (remotes.length === 0) {
+    return null;
+  }
+
+  const branchPushRemote = await git(repoPath, ['config', '--get', `branch.${branch}.pushRemote`]).catch(() => '');
+  if (branchPushRemote.trim() !== '') {
+    return branchPushRemote.trim();
+  }
+
+  const branchRemote = await git(repoPath, ['config', '--get', `branch.${branch}.remote`]).catch(() => '');
+  if (branchRemote.trim() !== '') {
+    return branchRemote.trim();
+  }
+
+  if (remotes.includes('origin')) {
+    return 'origin';
+  }
+
+  return remotes[0] ?? null;
+}
+
 export async function prepareTargetRepo(targetPath: string, plan: HistoricalEvent[]): Promise<PreparedTargetRepo> {
   const repoPath = await ensureGitRepo(targetPath);
   const branch = await ensureAttachedHead(repoPath);
   await ensureCleanWorkingTree(repoPath);
   const matchingPrefixLength = await detectMatchingPrefix(repoPath, plan);
-  const hasConfiguredPushRemote = (await git(repoPath, ['remote'])).trim() !== '';
-  return { repoPath, branch, hasConfiguredPushRemote, matchingPrefixLength };
+  const pushRemoteName = await detectPushRemoteName(repoPath, branch);
+  return { repoPath, branch, pushRemoteName, matchingPrefixLength };
 }
