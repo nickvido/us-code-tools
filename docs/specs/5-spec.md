@@ -58,8 +58,8 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
 ### 1) Shared infrastructure
 - [ ] `src/index.ts` adds a `fetch` command that implements the valid/invalid CLI contract above.
   <!-- Touches: src/index.ts, tests/cli/fetch.test.ts -->
-- [ ] New shared infrastructure modules provide typed interfaces with no `any` for: cache I/O, manifest I/O, structured logging, retry/backoff, and rate limiting.
-  <!-- Touches: src/utils/cache.ts, src/utils/manifest.ts, src/utils/logger.ts, src/utils/retry.ts, src/utils/rate-limit.ts, tests/utils/* -->
+- [ ] New shared infrastructure modules provide typed interfaces with no `any` for: cache I/O, manifest I/O, structured logging, retry/backoff, rate limiting, and fetch configuration constants.
+  <!-- Touches: src/utils/cache.ts, src/utils/manifest.ts, src/utils/logger.ts, src/utils/retry.ts, src/utils/rate-limit.ts, src/utils/fetch-config.ts, tests/utils/* -->
 - [ ] Raw artifacts are written only under `data/cache/{source}/`; acquisition status is written only to `data/manifest.json`.
   <!-- Touches: src/utils/cache.ts, src/utils/manifest.ts, tests/utils/cache.test.ts -->
 - [ ] Cache entries with a still-fresh TTL are reused without issuing a network request unless `--force` is set.
@@ -94,19 +94,22 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
 ### 4) Congress.gov acquisition
 - [ ] A new typed client module `src/sources/congress.ts` implements methods for: paginated bill-list fetch (`GET /bill/{congress}`), bill detail (`GET /bill/{congress}/{type}/{number}`), bill actions, bill cosponsors, paginated member-list fetch (`GET /member`), member detail (`GET /member/{bioguideId}`), and paginated committee-list fetch (`GET /committee/{congress}`).
   <!-- Touches: src/sources/congress.ts, tests/sources/congress.test.ts -->
+- [ ] Congress member acquisition is a separate **global member snapshot** within the Congress cache domain rather than a per-congress artifact set. Its cache identity is independent of `<congress>`, and a non-`--force` command reuses a fresh global snapshot without reissuing `GET /member` or `GET /member/{bioguideId}` requests.
+  <!-- Touches: src/sources/congress.ts, src/utils/manifest.ts, tests/sources/congress-members.test.ts -->
 - [ ] `fetch --source=congress --congress=<n>` performs the following acquisition set and caches every raw response under `data/cache/congress/`:
   1. every paginated `GET /bill/{n}` response until the API indicates there is no next page;
   2. for every bill enumerated from those list pages, its bill-detail, actions, and cosponsors responses;
   3. every paginated `GET /committee/{n}` response until there is no next page;
-  4. every paginated `GET /member` response until there is no next page;
-  5. `GET /member/{bioguideId}` for every enumerated member whose `bioguideId` is non-empty.
-  <!-- Touches: src/sources/congress.ts, tests/sources/congress.test.ts -->
-- [ ] The manifest records, for each congress fetch, the requested congress number and counts for bill-list pages, bill-detail responses, bill-action responses, bill-cosponsor responses, committee pages, member pages, member-detail responses, and failed bill/member detail fetches.
-  <!-- Touches: src/utils/manifest.ts, tests/sources/congress.test.ts -->
-- [ ] If any required bill artifact or member-detail artifact for an enumerated entity fails after retries, the source exits `1`, the JSON summary names the failed entities, and the manifest may reference only fully written artifacts.
-  <!-- Touches: src/sources/congress.ts, tests/sources/congress.test.ts -->
-- [ ] **Bulk historical contract:** `fetch --all` without `--congress` must include Congress.gov acquisition for every congress integer in the inclusive range `93..CURRENT_CONGRESS`, where `CURRENT_CONGRESS` is the highest congress value hard-coded in this repository’s fetch configuration or fixtures for the current release and is emitted in the JSON summary as `bulk_scope.congress.current`.
+  4. the global Congress member snapshot **only if** no fresh global member snapshot already exists in cache or `--force` is set, where that snapshot consists of every paginated `GET /member` response until there is no next page and `GET /member/{bioguideId}` for every enumerated member whose `bioguideId` is non-empty.
+  <!-- Touches: src/sources/congress.ts, tests/sources/congress.test.ts, tests/sources/congress-members.test.ts -->
+- [ ] The manifest records, for each congress fetch, the requested congress number and counts for bill-list pages, bill-detail responses, bill-action responses, bill-cosponsor responses, committee pages, and failed bill detail fetches; the global member snapshot is recorded separately with member-page count, member-detail count, freshness metadata, and failed member-detail fetches.
+  <!-- Touches: src/utils/manifest.ts, tests/sources/congress.test.ts, tests/sources/congress-members.test.ts -->
+- [ ] If any required bill artifact for an enumerated bill or any required member-detail artifact within a global member snapshot fails after retries, the source exits `1`, the JSON summary names the failed entities, and the manifest may reference only fully written artifacts.
+  <!-- Touches: src/sources/congress.ts, tests/sources/congress.test.ts, tests/sources/congress-members.test.ts -->
+- [ ] `fetch --all` performs the global Congress member snapshot at most once per command invocation and reuses that snapshot across all congress numbers processed in the same run.
   <!-- Touches: src/index.ts, src/sources/congress.ts, tests/cli/fetch.test.ts -->
+- [ ] **Bulk historical contract:** `fetch --all` without `--congress` must include Congress.gov acquisition for every congress integer in the inclusive range `93..CURRENT_CONGRESS`, where `CURRENT_CONGRESS` is exported from the single runtime source of truth `src/utils/fetch-config.ts` and is emitted in the JSON summary as `bulk_scope.congress.current`.
+  <!-- Touches: src/index.ts, src/sources/congress.ts, src/utils/fetch-config.ts, tests/cli/fetch.test.ts -->
 - [ ] `fetch --all --congress=<n>` narrows Congress.gov acquisition to exactly the same behavior as `fetch --source=congress --congress=<n>`.
   <!-- Touches: src/index.ts, tests/cli/fetch.test.ts -->
 
@@ -115,14 +118,18 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
   <!-- Touches: src/sources/govinfo.ts, tests/sources/govinfo.test.ts -->
 - [ ] `fetch --source=govinfo` uses this exact default query contract: collection `PLAW`, no congress filter, upstream natural pagination order, continue listing until there is no next page **or** the shared rate budget is exhausted, then fetch summary and granules for every listed package returned before termination.
   <!-- Touches: src/sources/govinfo.ts, tests/sources/govinfo.test.ts -->
+- [ ] GovInfo listing progress is checkpointed in the manifest with enough information for a later non-`--force` run to resume instead of restarting from page 1. The checkpoint must include: the next listing cursor/URL to request, the retained package IDs discovered but not yet finalized, and the query scope (`unfiltered` or `congress=<n>`).
+  <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo-resume.test.ts -->
 - [ ] `fetch --source=govinfo --congress=<n>` uses the same PLAW walk but retains only packages whose `packageId` matches congress `<n>` by parsing the contiguous decimal digits immediately following the `PLAW-` prefix and stopping at the first non-digit character.
   <!-- Touches: src/sources/govinfo.ts, tests/sources/govinfo.test.ts -->
 - [ ] The GovInfo manifest records `query_scope`, listing parameters, whether termination was `complete` or `rate_limit_exhausted`, listed package count, retained package count, summary count, granule count, and any malformed/unparseable `packageId` values skipped by the congress filter.
   <!-- Touches: src/utils/manifest.ts, tests/sources/govinfo.test.ts -->
 - [ ] For both GovInfo modes there are exactly two valid terminal paths:
-  1. **complete** — the listing reaches a page with no next page and all required summary/granule artifacts for the retained package set are written;
-  2. **rate_limit_exhausted** — the shared Congress.gov/GovInfo budget depletes mid-run, the source exits `1`, reports `rate_limit_exhausted: true`, and the manifest references only artifacts fully written before exhaustion.
-  <!-- Touches: src/sources/govinfo.ts, tests/sources/govinfo.test.ts -->
+  1. **complete** — the listing reaches a page with no next page, all required summary/granule artifacts for the retained package set are written, and any prior GovInfo resume checkpoint for the same query scope is cleared;
+  2. **rate_limit_exhausted** — the shared Congress.gov/GovInfo budget depletes mid-run, the source exits `1`, reports `rate_limit_exhausted: true`, persists the resume checkpoint for the unfinished query scope, and the manifest references only artifacts fully written before exhaustion.
+  <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo.test.ts, tests/sources/govinfo-resume.test.ts -->
+- [ ] A subsequent non-`--force` GovInfo run with the same query scope resumes from the persisted checkpoint, does not re-fetch already finalized package summaries/granules, and advances to either a later checkpoint or a `complete` terminal state.
+  <!-- Touches: src/sources/govinfo.ts, src/utils/manifest.ts, tests/sources/govinfo-resume.test.ts -->
 - [ ] **Bulk historical contract:** `fetch --all` without `--congress` includes GovInfo acquisition in the same unfiltered PLAW mode as `fetch --source=govinfo`; `fetch --all --congress=<n>` includes GovInfo acquisition in the same congress-filtered mode as `fetch --source=govinfo --congress=<n>`.
   <!-- Touches: src/index.ts, src/sources/govinfo.ts, tests/cli/fetch.test.ts -->
 
@@ -183,39 +190,40 @@ These exit `2`, write no cache or manifest changes, and print one JSON usage err
 2. Run `npx us-code-tools fetch --status --force`. Verify exit code `2`, stderr JSON contains `error.code="invalid_arguments"`, and neither cache nor manifest changes.
 3. Run `npx us-code-tools fetch --source=olrc` against fixtures that expose 54 title ZIP links. Verify 54 ZIPs plus extracted XML trees exist under `data/cache/olrc/` and the manifest has one success entry per title.
 4. Run `npx us-code-tools fetch --source=congress --congress=119` with `API_DATA_GOV_KEY` unset. Verify exit code `1`, `error.code="missing_api_data_gov_key"`, zero outbound requests, and no Congress success manifest entry.
-5. Run `npx us-code-tools fetch --source=congress --congress=119` with fixture responses spanning multiple bill pages, committee pages, member pages, and member details. Verify every listed bill also has cached detail/actions/cosponsors artifacts and every enumerated member with a non-empty `bioguideId` has a cached member-detail artifact.
-6. Run `npx us-code-tools fetch --source=govinfo` with fixtures and a rate-limit budget large enough to complete. Verify the unfiltered PLAW listing reaches a page with no next page, all retained package summaries/granules are cached, and the manifest records `termination="complete"`.
-7. Run `npx us-code-tools fetch --source=govinfo` again with fixtures/budget that exhaust the shared limiter mid-run. Verify exit code `1`, summary contains `rate_limit_exhausted: true`, `next_request_at`, and the manifest references only artifacts fully written before exhaustion.
-8. Run `npx us-code-tools fetch --source=govinfo --congress=118` with a mixed fixture listing containing `packageId` values for multiple congresses plus malformed values. Verify only package IDs whose digits immediately after `PLAW-` equal `118` are retained and malformed IDs are reported as skipped.
-9. Run `npx us-code-tools fetch --source=voteview`. Verify exactly three CSV files are cached. Then run the VoteView index tests and verify repeated congress/member lookups do not require reparsing the raw CSV fixtures each time.
-10. Run `npx us-code-tools fetch --source=legislators` without cached Congress member data. Verify the YAML files are cached and the manifest records `cross_reference_status: "skipped_missing_congress_cache"`.
-11. Populate Congress member cache, then re-run `npx us-code-tools fetch --source=legislators`. Verify `data/cache/legislators/bioguide-crosswalk.json` is written and manifest crosswalk counts match fixture expectations.
-12. Run `npx us-code-tools fetch --all` with fixtures/config declaring `CURRENT_CONGRESS=119`. Verify source order is `olrc`, `congress`, `govinfo`, `voteview`, `legislators`; Congress.gov covers congresses `93..119`; GovInfo runs in unfiltered mode; and the JSON summary publishes `bulk_scope.congress.start=93` and `bulk_scope.congress.current=119`.
-13. Run `npx us-code-tools fetch --all --congress=118`. Verify Congress.gov and GovInfo are narrowed to congress `118`, while OLRC/VoteView/legislators still run their full-source behavior.
-14. Start two concurrent fetches targeting the same source/cache path using fixtures. Verify the final manifest remains valid JSON and references only complete artifacts; if one command loses, it fails with the deterministic conflict/runtime error rather than corrupting state.
-15. Run `npm test` in default mode. Verify the suite passes without live-network access. Enable the live-test env flag and verify one real call per source is exercised, gated so CI can skip it.
+5. Run `npx us-code-tools fetch --source=congress --congress=119` with fixture responses spanning multiple bill pages, committee pages, member pages, and member details. Verify every listed bill also has cached detail/actions/cosponsors artifacts, a global Congress member snapshot is written once, and a second non-`--force` run for a different congress reuses that fresh member snapshot without issuing new `GET /member` or `GET /member/{bioguideId}` requests.
+6. Run `npx us-code-tools fetch --source=govinfo` with fixtures and a rate-limit budget large enough to complete. Verify the unfiltered PLAW listing reaches a page with no next page, all retained package summaries/granules are cached, the manifest records `termination="complete"`, and any prior resume checkpoint for the same query scope is absent.
+7. Run `npx us-code-tools fetch --source=govinfo` with fixtures/budget that exhaust the shared limiter mid-run. Verify exit code `1`, summary contains `rate_limit_exhausted: true`, `next_request_at`, and the manifest references only artifacts fully written before exhaustion while persisting the next-listing checkpoint and unfinished retained package IDs.
+8. Re-run the same `npx us-code-tools fetch --source=govinfo` command without `--force` against fixtures that allow completion. Verify it resumes from the saved checkpoint instead of requesting page 1 again, skips already finalized package summaries/granules, and clears the checkpoint on completion.
+9. Run `npx us-code-tools fetch --source=govinfo --congress=118` with a mixed fixture listing containing `packageId` values for multiple congresses plus malformed values. Verify only package IDs whose digits immediately after `PLAW-` equal `118` are retained and malformed IDs are reported as skipped.
+10. Run `npx us-code-tools fetch --source=voteview`. Verify exactly three CSV files are cached. Then run the VoteView index tests and verify repeated congress/member lookups do not require reparsing the raw CSV fixtures each time.
+11. Run `npx us-code-tools fetch --source=legislators` without cached Congress member data. Verify the YAML files are cached and the manifest records `cross_reference_status: "skipped_missing_congress_cache"`.
+12. Populate Congress member cache, then re-run `npx us-code-tools fetch --source=legislators`. Verify `data/cache/legislators/bioguide-crosswalk.json` is written and manifest crosswalk counts match fixture expectations.
+13. Run `npx us-code-tools fetch --all` with fixtures/config exporting `CURRENT_CONGRESS=119` from `src/utils/fetch-config.ts`. Verify source order is `olrc`, `congress`, `govinfo`, `voteview`, `legislators`; Congress.gov covers congresses `93..119`; the global Congress member snapshot runs at most once for the whole command; GovInfo runs in unfiltered mode; and the JSON summary publishes `bulk_scope.congress.start=93` and `bulk_scope.congress.current=119`.
+14. Run `npx us-code-tools fetch --all --congress=118`. Verify Congress.gov and GovInfo are narrowed to congress `118`, while OLRC/VoteView/legislators still run their full-source behavior.
+15. Start two concurrent fetches targeting the same source/cache path using fixtures. Verify the final manifest remains valid JSON and references only complete artifacts; if one command loses, it fails with the deterministic conflict/runtime error rather than corrupting state.
+16. Run `npm test` in default mode. Verify the suite passes without live-network access. Enable the live-test env flag and verify one real call per source is exercised, gated so CI can skip it.
 
 ## Edge Case Catalog
 - Invalid CLI combinations, unknown sources, malformed congress values, empty strings, and numbers outside `Number.isSafeInteger`
 - Missing/empty `API_DATA_GOV_KEY`, rejected credentials (`401`/`403`), and `Retry-After` handling
-- Shared-rate-budget exhaustion during Congress.gov/GovInfo bulk runs
+- Shared-rate-budget exhaustion during Congress.gov/GovInfo bulk runs, including checkpoint persistence and later resume
 - Truncated/partial ZIP, XML, JSON, CSV, or YAML payloads; content-type mismatches; BOM markers; invalid UTF-8
-- Upstream pagination anomalies: duplicate next-page URLs, empty middle pages, missing terminal marker, duplicated bill/member/package IDs
-- Missing `bioguideId` values, malformed GovInfo `packageId` values, partial bill artifact sets, and empty granule collections
+- Upstream pagination anomalies: duplicate next-page URLs, empty middle pages, missing terminal marker, duplicated bill/member/package IDs, and resume cursors pointing at already-finalized GovInfo pages/packages
+- Missing `bioguideId` values, malformed GovInfo `packageId` values, partial bill artifact sets, stale-vs-fresh Congress member snapshots, and empty granule collections
 - Concurrent writers against the same cache path or manifest
 - Interrupted writes, cache-directory creation failures, and manifest corruption recovery
 - Large OLRC/VoteView artifacts, streaming/heap pressure, and checksum mismatches
 
 ## Verification Strategy
-- **Pure core:** CLI argument validation, cache-key derivation, congress-range expansion for bulk mode, GovInfo `packageId` congress parsing, manifest merge/update logic, TTL freshness checks, retry scheduling decisions, and rate-budget arithmetic.
-- **Properties:** deterministic cache paths from the same request identity; no network on fresh cache hit without `--force`; manifest success entries only reference complete artifacts; Congress/GovInfo limiter never schedules above configured capacity; GovInfo congress filtering is a pure function of `packageId`; repeated VoteView index lookups do not require reparsing the raw files.
+- **Pure core:** CLI argument validation, cache-key derivation, congress-range expansion for bulk mode, `CURRENT_CONGRESS` fetch configuration, GovInfo `packageId` congress parsing, GovInfo resume-state transitions, manifest merge/update logic, TTL freshness checks, global-member-snapshot freshness checks, retry scheduling decisions, and rate-budget arithmetic.
+- **Properties:** deterministic cache paths from the same request identity; no network on fresh cache hit without `--force`; manifest success entries only reference complete artifacts; Congress/GovInfo limiter never schedules above configured capacity; GovInfo congress filtering is a pure function of `packageId`; non-`--force` GovInfo resume never restarts from page 1 when a valid checkpoint exists; repeated VoteView index lookups do not require reparsing the raw files; repeated Congress per-congress fetches reuse a fresh global member snapshot rather than duplicating global member downloads.
 - **Purity boundary:** filesystem, environment variables, clocks, HTTP calls, ZIP extraction, and YAML/CSV/XML parsing adapters remain thin effectful shells around pure planning/state logic.
 
 ## Infrastructure Requirements
 - **Database:** none
 - **API endpoints:** no new internal HTTP endpoints
 - **Infrastructure:** local filesystem storage under `data/cache/` plus `data/manifest.json`
-- **Environment variables / secrets:** `API_DATA_GOV_KEY` for Congress.gov/GovInfo; one explicit live-test opt-in env flag for networked integration tests; repository fetch configuration/fixtures must publish `CURRENT_CONGRESS` for the release under test
+- **Environment variables / secrets:** `API_DATA_GOV_KEY` for Congress.gov/GovInfo; one explicit live-test opt-in env flag for networked integration tests; `CURRENT_CONGRESS` is a repository constant exported from `src/utils/fetch-config.ts` and consumed by fixtures/tests rather than defined independently there
 
 ## Complexity Estimate
 XL — umbrella epic requiring decomposition into the child slices listed above.
