@@ -245,7 +245,7 @@ async function fetchGovInfoResponse(url: string, options: { force: boolean }): P
   }
   if (response.status === 429) {
     const retryAt = parseRetryAfter(response.retryAfter);
-    throw Object.assign(new Error('rate_limit_exhausted: GovInfo returned 429'), { code: 'rate_limit_exhausted' as const, nextRequestAt: retryAt ? new Date(retryAt).toISOString() : null });
+    throw Object.assign(new Error('rate_limit_exhausted: GovInfo returned 429'), { code: 'rate_limit_exhausted' as const, nextRequestAt: retryAt });
   }
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`upstream_request_failed: GovInfo request failed with HTTP ${response.status}`);
