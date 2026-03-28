@@ -7,6 +7,7 @@
 - Test suite: `npm test`
 - Run transformer after build: `node dist/index.js transform --title 1 --output ./out`
 - Public CLI entry in `package.json`: `us-code-tools -> ./dist/index.js`
+- CI must run `npm run build` before `npx vitest run` because `tests/integration/transform-cli.test.ts` shells out to `dist/index.js`; `npx tsc --noEmit` alone is not sufficient.
 
 ## Tech Stack
 - Runtime: Node.js 22+

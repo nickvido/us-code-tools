@@ -23,7 +23,8 @@
   - duplicate merged `sectionNumber` values are detected in `src/index.ts` via `seenSectionNumbers`, reported as `INVALID_XML`, omitted from output, and cause the transform to exit non-zero
   - `_title.md` write failures are converted into `OUTPUT_WRITE_FAILED` parse errors in `src/transforms/write-output.ts`, preserving the final JSON report and partial-success exit semantics when section files were written
   - unreadable PK-prefixed ZIP artifacts are rejected during both cache validation and post-download promotion in `src/sources/olrc.ts`
-- Verified at branch head `bf7e32b` (`origin/df2/issue-1`): `npx vitest run` (38 passing), `npx tsc --noEmit`, and `npm run build` all succeed.
+- Verified at implementation fix commit `bf7e32b`: `npx vitest run` (38 passing), `npx tsc --noEmit`, and `npm run build` all succeed.
+- Follow-up CI fix landed at branch head `8db0aba`: `.github/workflows/ci.yml` now runs `npm run build` before `npx vitest run` because the integration suite executes `dist/index.js`.
 - PR #2 (`[DF2] #1: USLM XML to Markdown Transformer`) remains the active implementation PR for this branch.
 
 ## Phase 1 Scope (Current)

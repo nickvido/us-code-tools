@@ -43,6 +43,7 @@
 
 ## Known Test Helpers / Behaviors
 - `transform-cli.test.ts` builds a temporary ZIP from committed XML files using `zip` CLI during the test.
+- `transform-cli.test.ts` executes the compiled CLI at `dist/index.js`, so local/CI test runs must build first (`npm run build`) rather than relying on `npx tsc --noEmit`.
 - `olrc.test.ts` can monkeypatch `globalThis.fetch` to verify retry counts and cache invalidation.
 - Integration test parses frontmatter with `gray-matter` to verify emitted files remain parseable.
 
