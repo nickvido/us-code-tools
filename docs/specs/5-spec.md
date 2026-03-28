@@ -1,7 +1,7 @@
 # Data Acquisition — API Clients & Initial Source Download
 
 ## Summary
-Add a new `fetch` CLI workflow that downloads, caches, and reports on source data needed for downstream US Code ingestion. The implementation must extend the current Node/TypeScript CLI in `src/index.ts`, preserve the existing OLRC title-download capability, and add typed source clients for OLRC, Congress.gov, GovInfo, VoteView, and the `unitedstates/congress-legislators` dataset. The feature is complete when the repository can fetch each source independently, persist raw artifacts under `data/cache/`, track state in `data/manifest.json`, and expose enough typed client behavior for later backfill and sync stages to consume without reimplementing HTTP, retry, caching, or rate-limit logic.
+Define the parent acquisition epic for a new `fetch` CLI workflow that downloads, caches, and reports on source data needed for downstream US Code ingestion. The implementation must extend the current Node/TypeScript CLI in `src/index.ts`, preserve the existing OLRC title-download capability, and add typed source clients for OLRC, Congress.gov, GovInfo, VoteView, and the `unitedstates/congress-legislators` dataset. Because this work spans shared infrastructure plus five heterogeneous source integrations, this issue is the umbrella specification for decomposition: the repository-level feature is complete only when each delivery slice defined below is implemented and the repository can fetch each source independently, persist raw artifacts under `data/cache/`, track state in `data/manifest.json`, and expose enough typed client behavior for later backfill and sync stages to consume without reimplementing HTTP, retry, caching, or rate-limit logic.
 
 ## Context
 - The repository currently contains:
@@ -13,6 +13,8 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 - Downstream issues depend on stable, repeatable access to raw source data before they can implement title backfill, public law ingestion, member profiles, and vote history.
 - This spec must match the existing repo structure rather than the aspirational `scripts/src/...` layout shown in `SPEC.md`; new work should land under the current top-level `src/`, `tests/`, and `docs/` directories unless later architecture changes explicitly move it.
 - Congress.gov and GovInfo share the same `api.data.gov` credential and therefore must share a coordinated request budget.
+- Interactive fetch runs need deterministic behavior when that shared hourly budget is exhausted mid-run.
+- This issue is intentionally treated as an umbrella epic for decomposition. The numbered acceptance sections below are the required child delivery slices for implementation/review, and the parent issue should not be considered implementation-ready as a single atomic coding task.
 - Cached data must be excluded from Git.
 
 ## Acceptance Criteria
@@ -62,7 +64,11 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   <!-- Touches: src/utils/rate-limit.ts or equivalent, src/sources/congress.ts, src/sources/govinfo.ts, tests/unit/utils/rate-limit.test.ts -->
 - [ ] The shared limiter can be configured to a ceiling of `5000` requests per hour and refuses to schedule more requests within the same window than the configured budget allows.
   <!-- Touches: src/utils/rate-limit.ts or equivalent, tests/unit/utils/rate-limit.test.ts -->
-- [ ] Rate-limit state changes are observable in logs or returned diagnostics and include the source operation, remaining tokens/slots after reservation, and next-available time when a caller must wait.
+- [ ] When a Congress.gov or GovInfo acquisition run exhausts the shared hourly budget before finishing, that source run does not block waiting for the next window and does not exceed the configured ceiling; instead it terminates that source with a deterministic rate-limit-exhausted failure code, records `rate_limit_exhausted: true` plus the next-available timestamp in the JSON summary/diagnostics, and records success in the manifest only for artifacts that were fully written before exhaustion.
+  <!-- Touches: src/index.ts, src/utils/rate-limit.ts or equivalent, src/utils/manifest.ts, tests/unit/utils/rate-limit.test.ts, tests/integration/fetch-cli.test.ts -->
+- [ ] During `fetch --all --congress=<n>`, if Congress.gov or GovInfo stops early because the shared hourly budget is exhausted, the overall command still attempts the remaining requested sources, exits non-zero, and marks the exhausted source independently as a failure with `rate_limit_exhausted: true` in the final JSON summary.
+  <!-- Touches: src/index.ts, src/utils/rate-limit.ts or equivalent, tests/integration/fetch-cli.test.ts -->
+- [ ] Rate-limit state changes are observable in logs or returned diagnostics and include the source operation, remaining tokens/slots after reservation, and next-available time when a caller must wait or when exhaustion forces the source to stop.
   <!-- Touches: src/utils/rate-limit.ts or equivalent, src/utils/logger.ts, tests/unit/utils/rate-limit.test.ts -->
 
 ### 4. Cache and manifest behavior
@@ -226,7 +232,8 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 13. Run `npx us-code-tools fetch --source=congress --congress=119` with the API key unset. Verify the command exits `1`, emits the documented missing-credential error, performs no outbound request, and does not write a success manifest entry for Congress.gov.
 14. Run `npx us-code-tools fetch --all --congress=119` with the API key unset. Verify OLRC, VoteView, and legislators still run, while Congress.gov and GovInfo are reported as source-specific failures in the final JSON summary.
 15. Run the concurrent-write cache/manifest test (or equivalent integration test) with two fetch operations targeting the same source/cache root. Verify the resulting `data/manifest.json` is valid JSON, every manifest success entry points only to fully written artifacts, and any losing writer fails deterministically rather than leaving corrupted cache state.
-16. Run `npm test`. Verify all default tests pass and live tests remain skipped unless their env flag is provided.
+16. Run a fixture-backed rate-limit exhaustion test with the shared Congress/GovInfo limiter configured below the number of requests needed for a source fetch. Verify the source exits with a deterministic rate-limit-exhausted failure, emits `rate_limit_exhausted: true` plus a next-available timestamp, does not wait for the next hourly window, and records only fully written artifacts in the manifest.
+17. Run `npm test`. Verify all default tests pass and live tests remain skipped unless their env flag is provided.
 
 ## Edge Case Catalog
 - Invalid CLI combinations: duplicate flags, unknown flags, unknown source names, missing `--congress`, non-integer congress numbers, `--congress=0`.
@@ -236,6 +243,7 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 - Encoding issues: XML/CSV/YAML with BOM markers, mixed newline styles, unicode names, emoji or non-ASCII committee/member names, invalid UTF-8 bytes in downloaded files.
 - Subsystem failure: cache directory cannot be created, manifest file is corrupt JSON, filesystem rename fails, DNS failure, TLS failure, network timeout, 429 throttling, 5xx upstream failures.
 - Partial failure during `fetch --all --congress=<n>`: one source fails after others succeeded; later sources must still run and the final summary must distinguish per-source success/failure.
+- Rate-limit exhaustion mid-run: Congress.gov or GovInfo depletes the shared `5000/hour` budget before finishing; the source must stop deterministically with a rate-limit-exhausted result, must not wait for the next hourly window inside the same interactive command, and must preserve already finalized artifacts.
 - Recovery: if a prior failed run left temp files behind, the next run can complete successfully and only finalized artifacts are reflected in the manifest.
 - Concurrency: two fetch commands targeting the same source/cache path run simultaneously; readers must see either the pre-existing valid state or a fully finalized replacement, never a torn artifact or malformed manifest.
 - Time: TTL expiry boundary conditions around exact expiry timestamps and clock skew between manifest timestamps and system time.
@@ -253,6 +261,7 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   - VoteView index lookups are deterministic for the same downloaded CSV inputs and requested congress/member keys
   - legislators bioguide cross-reference produces the same matched/unmatched sets for the same Congress cache inputs and YAML inputs
   - Congress/GovInfo shared limiter never grants more reservations than its configured hourly ceiling
+  - once the shared limiter reports no remaining budget in the current window, the active source run deterministically stops with a rate-limit-exhausted result rather than making extra requests or sleeping until the next window
 - **Purity boundary:** all filesystem writes, clock reads, environment-variable reads, and HTTP requests live in thin effectful adapters invoked by orchestration code; unit tests cover pure logic and integration tests cover the adapters.
 
 ## Infrastructure Requirements
@@ -267,13 +276,20 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 ## Complexity Estimate
 XL
 
+## Delivery Model
+This issue is an **umbrella epic**, not a single implementation-sized coding task. The numbered acceptance sections above define the child delivery slices that must be decomposed and implemented separately. Parent-issue completion means all slices are complete; failure in one slice must not block spec clarity for the others.
+
+Required child slices for decomposition/review:
+1. shared fetch/cache/retry/rate-limit/logging/manifest infrastructure
+2. OLRC bulk acquisition and extraction hardening
+3. Congress.gov acquisition, including bill/member detail backfill, shared-budget handling, and auth failures
+4. GovInfo acquisition, congress filtering, and shared-budget handling
+5. VoteView download/parse/index contract
+6. UnitedStates download/parse/bioguide-crosswalk contract
+7. CLI/status orchestration, all-sources summary behavior, concurrency safety, and repository hygiene/tests
+
 ## Decomposition Notes
-This issue touches CLI parsing, shared acquisition infrastructure, five source clients, manifest/reporting, and test coverage across multiple external formats. It should be decomposed at least into:
-1. shared fetch/cache/rate-limit/logging infrastructure
-2. OLRC bulk acquisition
-3. Congress.gov + GovInfo clients and shared API-key budget wiring
-4. VoteView + legislators static-source acquisition
-5. CLI/status integration and repository hygiene/tests
+This issue touches CLI parsing, shared acquisition infrastructure, five source clients, manifest/reporting, and test coverage across multiple external formats. It must be decomposed along the child-slice boundaries above before implementation so each slice can be implemented, reviewed, and rolled back independently.
 
 ## Required Skills
 - TypeScript
