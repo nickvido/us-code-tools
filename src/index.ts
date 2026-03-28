@@ -6,6 +6,7 @@ import type { ParseError, TitleIR } from './domain/model.js';
 import { parseUslmToIr } from './transforms/uslm-to-ir.js';
 import { writeTitleOutput } from './transforms/write-output.js';
 import { runConstitutionBackfill } from './backfill/orchestrator.js';
+import { runFetchCommand } from './commands/fetch.js';
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const [command, ...args] = argv;
@@ -16,6 +17,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   if (command === 'backfill') {
     return runBackfillCommand(args);
+  }
+
+  if (command === 'fetch') {
+    return runFetchCommand(args);
   }
 
   usage('Unknown command');
@@ -242,7 +247,7 @@ async function validateOutputDirectory(outputDir: string): Promise<string | null
 }
 
 function usage(error: string): void {
-  process.stderr.write(`Usage: transform --title <number> --output <dir>\nUsage: backfill --phase <name> --target <dir>\nError: ${error}\n`);
+  process.stderr.write(`Usage: transform --title <number> --output <dir>\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nError: ${error}\n`);
 }
 
 function transformUsage(error: string): void {
