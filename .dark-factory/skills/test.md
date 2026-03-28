@@ -4,58 +4,63 @@
 - Framework: Vitest (`vitest.config.ts`)
 - Test include pattern: `tests/**/*.test.ts`
 - Setup file: `tests/setup.ts`
-- Default suite is intended to run without outbound network access.
+- Default suite is intended to run offline; Constitution backfill tests use temp local repos and local bare remotes only.
 
 ## Test Layout
-- `tests/unit/bootstrap-and-cli.test.ts` — package metadata, strict TS, CLI usage/validation.
-- `tests/unit/sources/olrc.test.ts` — URL resolution, ZIP lexical ordering, archive hardening, retry behavior, cache semantics.
-- `tests/unit/transforms/uslm-to-ir.test.ts` — IR extraction, array normalization, string section ids, parse errors.
-- `tests/unit/transforms/markdown.test.ts` — frontmatter contract, hierarchy rendering, note preservation, snapshots.
-- `tests/unit/transforms/write-output.test.ts` — output path derivation.
-- `tests/integration/transform-cli.test.ts` — built CLI against committed Title 1 fixture ZIP assembled from fixture XML.
-- `tests/adversary-round1-issue1.test.ts` — chapter-contained sections + symlinked output regression coverage.
-- `tests/adversary-round2-issue1.test.ts` — early `--output` validation + cache-manifest/SHA validation regressions.
-- `tests/adversary-round3-issue1.test.ts` — source-credit separation + oversized-field parse-bound regressions.
-- `tests/adversary-round4-issue1.test.ts` — duplicate merged-section detection in `src/index.ts` plus `_title.md` write-failure partial-success/structured-report semantics.
-- `tests/adversary-round5-issue1.test.ts` — unreadable ZIP regression coverage for both cache reuse and freshly downloaded payloads.
-- `tests/unit/transforms/write-output.test.ts` still only covers path derivation; failure semantics are currently exercised through CLI/adversary coverage instead of direct writer-unit mocks.
+- `tests/unit/bootstrap-and-cli.test.ts` — package metadata, strict TS, transform CLI validation.
+- `tests/unit/backfill-cli-args.test.ts` — `backfill` flag validation, duplicate/unknown flags, file-target rejection, and transform CLI non-regression.
+- `tests/unit/backfill-dataset.test.ts` — 7 articles / 27 amendments completeness, date/source validation, deterministic author identities.
+- `tests/unit/backfill-renderer.test.ts` — frontmatter validation, deterministic article/amendment markdown, snapshots.
+- `tests/unit/backfill-messages.test.ts` — exact Constitution and Amendment XIV commit-message formatting + snapshots.
+- `tests/unit/backfill-planner.test.ts` — 28-event chronology, stable Bill of Rights ordering, suffix/resume expectations.
+- `tests/unit/backfill-git-env.test.ts` — exact UTC-midnight git env strings and malformed-date rejection.
+- `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures.
+- `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
+- `tests/adversary-round1-issue3.test.ts` — configured remote without upstream must still push current branch explicitly.
 
-## Fixtures
-- `tests/fixtures/title-01/manifest.json` — expected output filenames / parse-error codes for integration assertions.
-- `tests/fixtures/title-01/title-01.zip` — committed ZIP used by unit tests.
-- `tests/fixtures/xml/title-01/*.xml` — XML snippets used to build the integration ZIP and unit parser fixtures.
+## Fixtures / Test Data
+- Constitution backfill uses production static data in `src/backfill/constitution/dataset.ts`; there is no separate fixture copy.
+- Transform tests still use:
+  - `tests/fixtures/title-01/manifest.json`
+  - `tests/fixtures/title-01/title-01.zip`
+  - `tests/fixtures/xml/title-01/*.xml`
+- `tests/utils/module-helpers.ts` provides safe dynamic imports for source-module unit tests.
 
 ## Patterns to Follow
-- For module tests, import source files directly from `src/` using helper utilities in `tests/utils/module-helpers.ts`.
-- For CLI tests, run `dist/index.js` with `spawnSync` after building.
-- Preserve network-free defaults by using fixtures, env overrides, or mocked `globalThis.fetch`.
-- Prefer adversary regression tests for every bug fixed from review comments.
-- Snapshot tests already exist for three representative section shapes:
-  - nested hierarchy
-  - flat section
-  - cross-reference/editorial note retention
+- For pure backfill modules, import source files directly and assert behavior without shelling out where possible.
+- For CLI tests, build first and run `dist/index.js` with `spawnSync`.
+- For git behavior, prefer temp repos created in the test rather than mocks when validating actual history semantics.
+- Preserve adversary regression files once added; issue #3 already has a dedicated configured-remote regression.
+- Snapshot only stable text contracts:
+  - Article I markdown
+  - Amendment I markdown
+  - Constitution commit message
+  - Amendment XIV commit message
 
 ## What Good Coverage Looks Like Here
-- Parser changes: add fixture XML and assert `TitleIR` / `SectionIR` shape + `ParseError[]` behavior.
-- Renderer changes: assert frontmatter with `gray-matter` and snapshot the body.
-- ZIP/cache changes: test explicit rejection paths (duplicate destinations, symlinks, oversize entries, invalid sidecars).
-- CLI changes: assert stderr usage text, exit code, and absence/presence of output files.
+- Dataset changes: verify counts, numbering, dates, official URLs, and representative author mappings.
+- Renderer changes: parse with `gray-matter`, assert key order/content behavior, snapshot representative outputs.
+- Planner changes: assert exactly 28 events, non-decreasing dates, stable `1791-12-15` ordering, and suffix behavior after slicing a prefix.
+- Git/repo changes: cover empty-dir bootstrap, populated-dir rejection, dirty-tree rejection, unrelated-history rejection, prefix resume, idempotent rerun, and explicit remote push semantics.
+- CLI changes: assert usage/error text and no-side-effect behavior for bad invocations.
 
-## Known Test Helpers / Behaviors
-- `transform-cli.test.ts` builds a temporary ZIP from committed XML files using `zip` CLI during the test.
-- `transform-cli.test.ts` executes the compiled CLI at `dist/index.js`, so local/CI test runs must build first (`npm run build`) rather than relying on `npx tsc --noEmit`.
-- `olrc.test.ts` can monkeypatch `globalThis.fetch` to verify retry counts and cache invalidation.
-- Integration test parses frontmatter with `gray-matter` to verify emitted files remain parseable.
+## Known Test Behaviors
+- `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.
+- Integration tests inspect commits using `git cat-file -p` / `git rev-list`, not just `git log`, to avoid locale/time-format drift.
+- Backfill integration verifies the working tree is clean at the end of the run.
+- The adversary regression creates a local bare remote and confirms remote HEAD matches the local branch after `git push --set-upstream <remote> <branch>`.
+- Full suite still depends on a built `dist/index.js` because both transform and backfill CLI integration tests execute the compiled entrypoint.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
-  - unit coverage across CLI/source/parser/renderer/writer
-  - fixture-backed integration run for Title 1
-  - adversary regression suites for all prior review cycles
-  - snapshot coverage for representative markdown shapes
+  - unit coverage for backfill args, dataset, renderer, messages, planner, and commit env
+  - end-to-end temp-repo Constitution backfill integration coverage
+  - adversary regression for configured remote without upstream
+  - existing transform regression coverage remains intact
 - What's intentionally deferred:
-  - live OLRC verification in default CI
-  - end-to-end tests for future sync/backfill/git workflows
+  - live external Constitution-source verification during tests
+  - force-push / repair-history failure-mode suites beyond current spec
+  - downstream `us-code` GitHub automation tests
 - What's a test double vs production:
-  - mocked fetch and fixture ZIP/XML artifacts are intentional test doubles
-  - they should not be flagged as missing production integration; they enforce deterministic CI
+  - temp repos and bare remotes are intentional doubles for downstream repositories/remotes
+  - static Constitution dataset is production content used directly in tests
