@@ -38,3 +38,6 @@ coverage/
 # Logs
 *.log
 logs/
+
+# Legacy compatibility
+.env.local
