@@ -10,9 +10,12 @@ dist/
 .env.*
 !.env.example
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 .env.local
 >>>>>>> 04d1b88 (Add .gitignore)
+=======
+>>>>>>> 81e1d23 (Add .gitignore)
 
 # OS
 .DS_Store
@@ -31,7 +34,6 @@ Thumbs.db
 # Cache
 .cache/
 *.zip
-!tests/fixtures/title-01/title-01.zip
 
 # Test coverage
 coverage/
