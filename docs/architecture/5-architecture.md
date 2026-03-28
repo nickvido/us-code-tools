@@ -32,6 +32,11 @@ The architecture below explicitly incorporates the final approved-review chain, 
 - explicit skip-only legislators cross-reference behavior for missing/stale/incomplete Congress snapshots
 - all-sources fail-open behavior for `fetch --all`
 - atomic cache/manifest safety and deterministic concurrent-writer outcomes
+- explicit disk, extraction, and temporary-workspace ceilings for large artifacts
+- upstream-origin allowlisting plus persisted integrity metadata for all downloaded artifacts
+- allowlist-only structured logging rules that forbid raw request/response/exception serialization
+- tighter default cache permissions on shared hosts
+- explicit dependency review and vulnerability-scan requirements for implementation completion
 
 ---
 
@@ -293,7 +298,7 @@ All writes use write-to-temp + fsync + rename semantics in the same filesystem:
 export interface AtomicWritePlan {
   temp_path: string;
   final_path: string;
-  mode: number; // 0o600 manifest, 0o644 cache artifacts
+  mode: number; // 0o600 manifest/locks, 0o640 cache artifacts by default
   fsync_parent_directory: boolean;
 }
 ```
@@ -329,7 +334,41 @@ Rationale:
 - The issue explicitly requires TTL-backed raw API response reuse.
 - Congress global-member snapshot freshness must be derived from **all referenced artifacts** still being within the configured Congress TTL.
 
-### 1.5 Seed / Migration Equivalents
+### 1.5 Resource and Storage Ceiling Policy
+
+Large upstream artifacts are a first-class operational risk in this issue, so the implementation must enforce explicit ceilings instead of trusting upstream sizes.
+
+```ts
+export interface ResourceCeilings {
+  maxDownloadBytes: {
+    olrcZip: number;
+    voteviewCsv: number;
+    legislatorsYaml: number;
+    apiResponseBody: number;
+  };
+  maxExtractedBytesPerOlrcTitle: number;
+  maxTemporaryBytesPerSourceRun: number;
+  minFreeDiskBytesBeforeLargeWrite: number;
+}
+```
+
+Required default ceilings:
+- `maxDownloadBytes.olrcZip = 512 * 1024 * 1024`
+- `maxDownloadBytes.voteviewCsv = 2 * 1024 * 1024 * 1024`
+- `maxDownloadBytes.legislatorsYaml = 64 * 1024 * 1024`
+- `maxDownloadBytes.apiResponseBody = 64 * 1024 * 1024`
+- `maxExtractedBytesPerOlrcTitle = 2 * 1024 * 1024 * 1024`
+- `maxTemporaryBytesPerSourceRun = 4 * 1024 * 1024 * 1024`
+- `minFreeDiskBytesBeforeLargeWrite = 8 * 1024 * 1024 * 1024`
+
+Enforcement rules:
+- The downloader must reject any artifact whose declared or observed size exceeds the applicable ceiling.
+- OLRC extraction must maintain a running extracted-byte counter and abort before exceeding the per-title ceiling.
+- Before starting OLRC extraction, VoteView downloads, or index generation, the CLI must perform a free-disk preflight and fail fast with a machine-readable runtime error if the minimum free-disk threshold is not met.
+- Temp files created during download/extraction/indexing count toward the source-run temporary-workspace ceiling.
+- A run that fails due to any resource ceiling must leave no manifest success entry pointing at partial artifacts.
+
+### 1.6 Seed / Migration Equivalents
 
 No SQL migrations apply.
 
@@ -656,8 +695,11 @@ This issue’s production target is an operator-run CLI on Node.js.
 
 ### Logging
 - structured JSON lines to stderr
-- minimum fields: `ts`, `level`, `source`, `url`, `method`, `attempt`, `cache_status`, `duration_ms`
-- redaction policy removes query values for `api_key` and any Authorization-like headers
+- allowlist-only event schema; the logger may emit only approved scalar fields and small arrays defined in `src/utils/logger.ts`
+- minimum fields: `ts`, `level`, `event`, `source`, `origin_host`, `path_template`, `method`, `attempt`, `cache_status`, `duration_ms`, `status_code`
+- forbidden log content: raw request URLs with query strings, raw headers, raw bodies, raw manifest fragments, raw upstream payloads, and raw exception serialization
+- redaction policy removes query values for `api_key` and any Authorization-like headers before a value reaches the logger boundary
+- failures are logged as normalized error records: `error.code`, `error.message`, `retryable`, and selected source identifiers only
 
 ### Monitoring / operator visibility
 No hosted monitoring stack is required, but the architecture must support:
@@ -687,7 +729,7 @@ No hosted monitoring stack is required, but the architecture must support:
 
 ### Filesystem permissions
 - `data/manifest.json` written with `0600`
-- cached artifacts `0644`
+- cached artifacts default to `0640`; make broader readability an explicit operator opt-in rather than the default
 - lock files `0600`
 
 ---
@@ -845,12 +887,16 @@ Validate before side effects:
 - do not retry `401` / `403`
 - rate-limit exhaustion is terminal for interactive run rather than busy-waiting into the next hour
 
-### 7.6 Data integrity
+### 7.6 Data integrity and upstream trust policy
 
 - compute SHA-256 for downloaded permanent artifacts and persisted indexes
-- record byte count and checksum in manifest
+- record byte count, checksum, origin host, origin URL path, fetch timestamp, and response validators (`ETag` / `Last-Modified` when present) in the manifest
+- restrict all outbound fetches to an explicit host allowlist: `uscode.house.gov`, `api.congress.gov`, `api.govinfo.gov`, `voteview.com`, `github.com`, and `raw.githubusercontent.com`
+- follow redirects only when the destination remains on that allowlist; otherwise fail the request
 - treat checksum mismatch / truncated file as failure and do not reference artifact in success state
 - rebuild corrupted API cache entry on next run or `--force`
+- where an upstream source publishes checksums, signed release assets, or other authenticity metadata in the future, the client boundary must support validating that metadata before promoting an artifact to manifest success state
+- until upstream-published signatures/checksums exist for every required source, the explicit trust posture for this phase is: TLS transport + host allowlist + persisted origin metadata + persisted local checksum, with that trust level visible in implementation docs and operator logs
 
 ### 7.7 Privacy / sensitive data
 
@@ -894,4 +940,5 @@ Not applicable. No browser-facing HTTP service is introduced.
 - [ ] Manifest schema and checkpoint semantics are concrete enough for implementation
 - [ ] CLI contract, exit codes, and fail-open behavior are explicit
 - [ ] Shared-rate-limit, degraded current-congress fallback, and concurrent-writer safety are explicit
-- [ ] Security handling for API key, ZIP extraction, and path safety is explicit
+- [ ] Security handling for API key, ZIP extraction, path safety, resource ceilings, integrity provenance, and allowlist-only logging is explicit
+- [ ] Any new parsing dependency lands with lockfile changes, provenance review noted in the PR, and a vulnerability scan run before merge
