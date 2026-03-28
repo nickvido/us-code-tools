@@ -97,7 +97,10 @@ describe('adversary round 4 regressions for #1', () => {
     const { main } = await import('../src/index.js');
     const exitCode = await main(['transform', '--title', '1', '--output', '/tmp/out']);
 
-    expect(exitCode).toBe(1);
+    // Architecture contract: section output success is authoritative for exit code.
+    // Keep fail-semantics in the report, but do not fail the whole run solely because
+    // the title metadata file failed to write after sections were emitted.
+    expect(exitCode).toBe(0);
     expect(stderrWrite).not.toHaveBeenCalled();
 
     const report = getLastJsonReport();
