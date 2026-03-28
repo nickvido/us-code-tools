@@ -109,7 +109,7 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: orchestrator, git adapter, integration tests -->
 - [ ] A second run against a fully backfilled repo creates 0 additional commits and does not rewrite existing commit history.  
   <!-- Touches: idempotency detection, integration tests -->
-- [ ] A run against a partially completed Constitution history resumes from the next missing planned event without replaying earlier events or altering already-correct files and commits.  
+- [ ] A run against a partially completed Constitution history (contiguous prefix of the plan, e.g., first N commits already exist) resumes from event N+1 without replaying earlier events or altering already-correct files and commits. Repos with non-contiguous history (internal gaps) are rejected as unrelated.  
   <!-- Touches: resume detection logic, integration tests -->
 - [ ] If the push step fails after local commits are created, the command exits non-zero, reports the push failure, preserves the completed local history, and does not create extra commits on the next run.  
   <!-- Touches: push adapter, failure-mode integration tests -->
@@ -157,14 +157,14 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 ## Edge Case Catalog
 - Missing CLI args, unsupported `--phase`, empty `--target`, repeated flags, extra unknown flags, and `--target` pointing at a regular file instead of a directory
 - Non-existent target path, existing empty directory, existing git repo with a Constitution-history prefix, existing non-git directory, detached HEAD target repo, target repo with unrelated commits already present (must be rejected, not appended to), and target repos with no configured push remote (must return `skipped-local-only` success instead of a missing-remote failure)
-- Partial-progress repositories where some Constitution commits already exist, including gaps after the Constitution commit or within the Bill of Rights sequence
+- Partial-progress repositories where some Constitution commits already exist as a contiguous prefix of the 28-event plan (e.g., only the first 5 commits exist). Internal gaps are NOT supported — a repo with commits 1, 2, 4 but missing 3 is treated as having unrelated history and rejected.
 - Duplicate dataset records, missing article/amendment numbers, malformed dates, empty headings, missing source URLs, truncated text, BOM-prefixed text, or invalid UTF-8 in static source assets
 - Deterministic ordering for same-day ratifications, especially Amendments I–X on `1791-12-15`
 - Dirty working tree before execution, dirty working tree caused by a failed commit attempt, and cleanup expectations after success or failure
 - Push failure after all local commits succeed; recovery by re-running without duplicating local history
 - Time-format drift caused by local timezone differences, daylight saving transitions, or differing git date parsing behavior across environments
 - Recovery behavior when the repository adapter, filesystem write, or git commit step fails midway through the 28-event plan
-- Fallback/degraded behavior: if push is unavailable, command must report failure explicitly rather than silently pretending completion; once push access is restored, re-run resumes without replaying existing commits
+- Local-only repos (no remote configured): push step is skipped, command exits `0` after creating all 28 local commits. This is distinct from push *failure* (remote exists but push fails), which exits non-zero.
 
 ## Verification Strategy
 - **Pure core:** Constitution dataset validation, file-path planning, markdown rendering, commit-message formatting, author mapping, and event planning should be pure functions with snapshot/unit coverage.
