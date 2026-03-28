@@ -97,13 +97,13 @@
 - Current branch status after the latest local code changes:
   - Congress and GovInfo now both use the shared limiter singleton from `src/utils/rate-limit.ts`
   - `tests/adversary-round2-issue5.test.ts` was updated to mock that shared-module seam and verify immediate Congress termination when no shared budget remains
-  - branch is still **rejected** on the narrower remaining issue #5 gap: `Retry-After` is parsed, but both source modules still convert `nextRequestAt` to an ISO string before throwing on `429`, so `normalizeError()` can still drop the public `next_request_at`
+  - Congress and GovInfo now throw numeric `nextRequestAt` values from their `429` paths, and `normalizeError()` serializes those into the public `next_request_at` field
 - Most recent code/branch evidence captured for future agents:
   - `src/sources/congress.ts` and `src/sources/govinfo.ts` now call `getSharedApiDataGovLimiter()` and `markRateLimitUse()` directly
-  - both modules still call `parseRetryAfter()` and then throw `{ code: 'rate_limit_exhausted', nextRequestAt: <ISO string or null> }` in their `429` branches; the normalizers only preserve numeric timestamps
+  - both modules call `parseRetryAfter()` and throw `{ code: 'rate_limit_exhausted', nextRequestAt: <number|null> }` in their `429` branches; `normalizeError()` preserves that timestamp as ISO in the final result
   - `src/utils/retry.ts` is still a minimal retry loop and does not own HTTP retry-header translation
 
-- This knowledge-capture update documents the branch after the shared-limiter wiring landed but before the `Retry-After` numeric/ISO mismatch is fixed.
+- This knowledge-capture update corrects the stale branch notes that previously described the `Retry-After` serialization bug as still open after it had already been fixed.
 
 ## Phase 1 Scope (Current)
 - What's implemented:

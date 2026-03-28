@@ -64,9 +64,9 @@
 ### If you're modifying... → Read these first:
 - `src/index.ts` → `src/commands/fetch.ts`, `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts`
 - `src/commands/fetch.ts` → `src/utils/manifest.ts`, `src/utils/fetch-config.ts`, every `src/sources/*.ts` fetch entrypoint (this file owns CLI contract + deterministic `--all` ordering)
-- `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source now uses `getSharedApiDataGovLimiter()`; the remaining 429 bug is that the parsed `Retry-After` horizon is converted to ISO too early in `fetchCongressResponse()`)
+- `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source uses `getSharedApiDataGovLimiter()` and throws numeric `nextRequestAt` values that `normalizeError()` serializes into the public `next_request_at` field)
 - `src/sources/congress-member-snapshot.ts` → `src/utils/manifest.ts` (freshness derives from manifest snapshot metadata + artifact existence)
-- `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (this source now uses `getSharedApiDataGovLimiter()` too; the remaining 429 bug is the same early ISO conversion of parsed `Retry-After` in `fetchGovInfoResponse()`)
+- `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (this source also uses `getSharedApiDataGovLimiter()` and preserves numeric `nextRequestAt` through `normalizeError()`)
 - `src/sources/unitedstates.ts` → `src/utils/manifest.ts`, `src/sources/congress-member-snapshot.ts`, current Congress cache layout in `src/sources/congress.ts`
 - `src/sources/voteview.ts` → `src/utils/manifest.ts` and its in-memory index cache (`inMemoryIndexes`)
 - `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, manifest expectations for selected vintage + per-title state
@@ -100,14 +100,14 @@ src/index.ts (main)
             → readFreshRawResponseCache() / writeRawResponseCache()
             → getSharedApiDataGovLimiter()
             → isRateLimitExhausted() / markRateLimitUse()
-            → parseRetryAfter() on HTTP 429 (currently throws ISO-string `nextRequestAt`, which `normalizeError()` does not preserve)
+            → parseRetryAfter() on HTTP 429, then throw numeric `nextRequestAt` for `normalizeError()` to serialize
         → writeManifest()
       → fetchGovInfoSource()
         → fetchGovInfoResponse()
           → readFreshRawResponseCache() / writeRawResponseCache()
           → getSharedApiDataGovLimiter()
           → isRateLimitExhausted() / markRateLimitUse()
-          → parseRetryAfter() on HTTP 429 (currently throws ISO-string `nextRequestAt`, which `normalizeError()` does not preserve)
+          → parseRetryAfter() on HTTP 429, then throw numeric `nextRequestAt` for `normalizeError()` to serialize
         → writeManifest()
       → fetchVoteViewSource()
         → fetchWithTimeout()
@@ -155,7 +155,7 @@ src/index.ts (main)
   - `src/utils/manifest.ts` is permissive on read/normalize but all writers should emit the canonical shape
   - Congress/GovInfo raw API caching goes through `src/utils/cache.ts`; cache keys normalize away `api_key`
   - Congress and GovInfo both call `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()` from `src/utils/rate-limit.ts`; update tests and any mocks at that shared-module seam rather than assuming per-source limiter state
-  - `src/utils/rate-limit.ts` owns `parseRetryAfter()`, but `src/sources/congress.ts` and `src/sources/govinfo.ts` currently convert the parsed numeric retry horizon to ISO before throwing on `429`; `normalizeError()` expects `number | null`, so keep the timestamp numeric until the result-normalization boundary
+  - `src/utils/rate-limit.ts` owns `parseRetryAfter()`, and both `src/sources/congress.ts` and `src/sources/govinfo.ts` now keep the parsed retry horizon numeric until `normalizeError()` converts it into the public ISO `next_request_at` field
   - `src/utils/retry.ts` still exposes only a minimal `withRetry()` loop and does not own HTTP `Retry-After` translation today
   - legislators cross-reference must delete stale `bioguide-crosswalk.json` whenever the result status is not `completed`
   - VoteView indexes are currently in-memory only via `inMemoryIndexes`, so repeated lookups in one process avoid reparsing but cross-process persistence is not implemented

@@ -60,7 +60,7 @@
 - Issue #5 tests assume offline-by-default behavior; `src/commands/fetch.ts` has a VITEST/live-test shortcut path for `--all` CLI tests.
 - The round-9 adversary regression asserts that a later skipped legislators run must remove any pre-existing `data/cache/legislators/bioguide-crosswalk.json` rather than only updating manifest state.
 - `tests/adversary-round2-issue5.test.ts` now mocks `src/utils/rate-limit.ts` at the shared-module seam and verifies Congress stops immediately with `rate_limit_exhausted` when the shared limiter reports zero remaining budget.
-- The branch still lacks regression coverage for the specific `429 Retry-After` serialization bug: both sources parse the header, but they currently throw ISO-string `nextRequestAt` values that `normalizeError()` drops because it only preserves numeric timestamps.
+- There is still no dedicated regression that forces a real upstream `429 Retry-After` response through Congress/GovInfo end-to-end; current confidence comes from the source implementations plus the targeted adversary regressions that now pass locally.
 - Full suite still depends on a built `dist/index.js` because transform/backfill/fetch CLI tests execute the compiled entrypoint.
 
 ## Phase 1 Scope (Current)

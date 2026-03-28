@@ -126,11 +126,11 @@
 - **Consequence:** One process now enforces a single rolling-window budget across both sources; tests should mock the shared helper module rather than assuming per-source limiter state.
 - **Feature:** #5 Data Acquisition
 
-### ADR-019: Upstream `Retry-After` must stay numeric until result normalization
-- **Status:** Proposed / partially implemented on current branch
-- **Context:** Congress/GovInfo now parse `Retry-After` via `parseRetryAfter()`, but their `429` branches still throw `nextRequestAt` as an ISO string. `normalizeError()` in both modules only serializes numeric timestamps into the public `next_request_at` field.
-- **Decision:** Keep `nextRequestAt` as `number | null` when throwing `rate_limit_exhausted` errors from the source modules, and convert to ISO only once inside the source-level normalizer that emits the public result shape.
-- **Consequence:** Until this numeric-through-normalization contract is fixed, real upstream `429 Retry-After` responses can still produce `rate_limit_exhausted: true` with `next_request_at: null`, leaving the branch adversary-rejected.
+### ADR-019: Upstream `Retry-After` stays numeric until result normalization
+- **Status:** Active
+- **Context:** Congress/GovInfo share the `API_DATA_GOV_KEY` limiter and need a machine-readable retry horizon whenever preflight exhaustion or upstream `429` responses occur.
+- **Decision:** Keep `nextRequestAt` as `number | null` inside `src/sources/congress.ts` and `src/sources/govinfo.ts`, and convert it to ISO only inside each module’s `normalizeError()` when emitting the public `next_request_at` field.
+- **Consequence:** `rate_limit_exhausted` results now preserve `next_request_at` consistently across shared-budget exhaustion and parsed `Retry-After` responses; future agents should not reintroduce early ISO conversion in the throw path.
 - **Feature:** #5 Data Acquisition
 
 ## Phase 1 Scope (Current)

@@ -103,7 +103,7 @@
 - Local-only repos with no remote are valid success cases (`pushResult: skipped-local-only`).
 - `git fast-import` is intentional for historical author/date control; do not replace it casually with ordinary `git commit` without revalidating exact-history guarantees.
 - Congress and GovInfo no longer keep separate module-local limiter instances; both sources now import the shared singleton from `src/utils/rate-limit.ts`, so future agents should treat duplicate per-source limiter state as obsolete branch knowledge.
-- Congress and GovInfo parse upstream `Retry-After`, but the current `429` throw path still converts the parsed timestamp to an ISO string before normalization; because `normalizeError()` only serializes numeric `nextRequestAt`, the machine-readable `next_request_at` contract can still be lost, and that remains the active adversary finding.
+- Congress and GovInfo parse upstream `Retry-After` and preserve the parsed numeric `nextRequestAt` until `normalizeError()` serializes the public `next_request_at` field; future changes should keep that boundary intact.
 - VoteView indexing is currently in-memory only; lack of on-disk index files is an implementation choice, not accidental data loss.
 - The fallback current-congress path is expected to mark runs degraded/operator-review-required; that warning path is part of the contract.
 

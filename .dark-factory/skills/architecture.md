@@ -120,7 +120,7 @@
   - Congress/GovInfo stop immediately on limiter exhaustion and return `next_request_at` instead of sleeping until the next window
   - legislators skip states must not leave a stale `data/cache/legislators/bioguide-crosswalk.json` on disk
   - Congress and GovInfo now both consult the shared in-process limiter singleton from `src/utils/rate-limit.ts`, so one process no longer keeps separate per-source budgets for the same `API_DATA_GOV_KEY`
-  - open adversary gap on this branch: `Retry-After` headers from Congress.gov/GovInfo are parsed, but `src/sources/congress.ts` and `src/sources/govinfo.ts` still throw `nextRequestAt` as an ISO string in the `429` path; `normalizeError()` only serializes numeric timestamps, so the public `next_request_at` summary can still be lost
+  - Congress/GovInfo `429` handling now keeps `nextRequestAt` numeric through the throw path and converts it to ISO only in `normalizeError()`, preserving the public `next_request_at` summary
 
 ## Things Future Agents Should Notice
 - `docs/architecture/3-architecture.md` proposes an `authors.ts` split, but the current implementation keeps author identity inside `src/backfill/constitution/dataset.ts`; do not assume a separate author module exists.
