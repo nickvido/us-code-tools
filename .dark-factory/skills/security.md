@@ -2,74 +2,88 @@
 
 ## Trust Boundary
 - Untrusted inputs:
-  - CLI flags (`--title`, `--output`)
-  - remote OLRC ZIP payloads
-  - XML content inside accepted ZIP entries
-  - filesystem state under cache/output roots
-- No secrets, auth tokens, or PII in this phase.
+  - CLI flags (`transform` and `backfill`)
+  - target path contents and git metadata in the downstream repo
+  - existing target-repo history/branch state
+  - configured remote behavior during `git push`
+  - remote OLRC ZIP/XML payloads for the transform flow
+- Trusted application data:
+  - committed Constitution dataset in `src/backfill/constitution/dataset.ts`
 
 ## Implemented Controls
 
-### Download / Network
-- `src/sources/olrc.ts`
-  - `resolveTitleUrl()` constrains fetches to OLRC releasepoint URLs.
-  - `fetchWithRetry()` applies a 30s timeout via `AbortController`.
-  - retries transient timeout / connection-reset failures exactly once.
-  - download errors are rethrown with title number + URL context.
+### Backfill Target Safety
+- `src/backfill/target-repo.ts`
+  - rejects `--target` when it resolves to a non-directory filesystem object
+  - initializes missing target paths with `git init`
+  - initializes existing empty non-git directories in place
+  - rejects populated non-git directories before writing files or initializing git
+  - rejects detached HEAD targets
+  - rejects any dirty working tree via `git status --porcelain`
 
-### Cache Integrity
-- Full cache artifact set is validated before trusting reuse:
-  - ZIP file exists and is non-zero
-  - `manifest.json` exists and parses
-  - `<zip>.sha256` exists and matches computed SHA-256
-  - manifest title/source URL/cache key/filename/size/SHA must agree with the ZIP
-- Invalid cache sets are deleted before redownload.
-- Note: cache SHA protects local integrity / torn writes, not upstream authenticity.
+### History Integrity / Idempotency
+- `detectMatchingPrefix()` only accepts:
+  - empty history, or
+  - an exact contiguous prefix of the 28-event Constitution plan
+- Existing history is matched by:
+  - author name
+  - author email
+  - ratified date
+  - normalized full commit message
+- Repos with unrelated commits or internal gaps are rejected rather than repaired in place.
+- Push failure preserves local commits and causes a non-zero exit instead of retrying or rewriting history automatically.
 
-### ZIP / XML Hardening
-- `extractXmlEntriesFromZip()` in `src/sources/olrc.ts`:
-  - accepts only `.xml` entries
-  - rejects unsafe paths, duplicate normalized destinations, and non-regular entries
-  - rejects symlink-like/special entries using `externalFileAttributes`
-  - enforces 64 MiB max per XML entry and 256 MiB total extracted bytes
-  - returns XML entries sorted lexically by normalized path
-- `parseUslmToIr()` in `src/transforms/uslm-to-ir.ts`:
-  - uses explicit `fast-xml-parser` config
-  - strips UTF-8 BOM
-  - caps normalized field text at 1 MiB
-  - emits bounded `UNSUPPORTED_STRUCTURE` / `INVALID_XML` parse errors instead of crashing
+### Historical Timestamp Safety
+- `buildGitCommitEnv()` in `src/backfill/git-adapter.ts` validates `YYYY-MM-DD` dates and produces exact UTC-midnight strings:
+  - `GIT_AUTHOR_DATE=YYYY-MM-DDT00:00:00+0000`
+  - `GIT_COMMITTER_DATE=YYYY-MM-DDT00:00:00+0000`
+- Actual historical commit creation uses `git fast-import` with Unix timestamps derived from the same UTC date, preventing local-time drift.
 
-### Output Filesystem Safety
-- `validateOutputDirectory()` in `src/index.ts` rejects existing non-directory `--output` targets before download/transform work.
-- `assertSafeOutputPath()` in `src/utils/fs.ts`:
-  - verifies resolved target stays under output root
-  - refuses symlinked intermediate directories
-- `atomicWriteFile()` uses temp file + rename to avoid partial output files.
-- `_title.md` write failures are now trapped inside `src/transforms/write-output.ts` and surfaced as `OUTPUT_WRITE_FAILED` parse errors, preserving structured JSON report emission after partial success.
+### Git Execution Safety
+- `src/backfill/git-adapter.ts`
+  - shells out only to `git`
+  - sets deterministic fallback committer identity (`us-code-tools <sync@us-code-tools.local>`) if the operator has none configured
+  - creates historical commits without amend/rebase/force-push behavior
+- `src/backfill/orchestrator.ts`
+  - pushes only when a remote is configured
+  - uses explicit branch push: `git push --set-upstream <remote> <branch>`
+  - reports `skipped-local-only` for repos without remotes instead of failing
+
+### Existing Transform Controls
+- `src/sources/olrc.ts` still enforces ZIP/XML hardening:
+  - rejects unsafe/non-regular entries
+  - rejects duplicate normalized destinations
+  - enforces extraction-size caps
+  - validates cached/downloaded ZIP openability with `yauzl`
+- `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale
-- **No blind ZIP extraction** — required to avoid path traversal and special-entry writes from untrusted archives.
-- **Minimal section filename normalization** — only `/` → `-`, preserving legal identifiers while blocking path escapes.
-- **ZIP reuse requires openability, not just magic bytes** — cached/downloaded artifacts must be readable by `yauzl` before trust or promotion.
-- **Network-free default tests** — keeps CI deterministic and avoids treating third-party availability as security/reliability proof.
-- **Bounded parser behavior** — malformed or oversized fields become parse errors, not crashes or unbounded allocations.
+- **Strict non-git directory handling:** avoids initializing over pre-existing content and accidentally mutating unrelated operator files.
+- **Clean-tree preflight:** avoids mixing historical backfill writes with operator changes and makes failures easier to inspect.
+- **Contiguous-prefix-only resume:** prevents ambiguous repair behavior and stops the tool from silently appending foundational history after unrelated commits.
+- **Explicit branch push:** prevents configured-remote repos without upstream from failing at the final network step.
+- **Static Constitution dataset:** keeps the backfill path offline and deterministic; no runtime trust in external text sources.
 
 ## Things Future Agents Should Not Mislabel as Bugs
-- Lack of database/auth/RLS is intentional; this feature is a local CLI only.
-- Fixture-backed integration tests are intentional; live network is deferred from default CI.
-- Hardcoded OLRC releasepoint pattern is acceptable for Phase 1; dynamic releasepoint discovery is future work.
-- Duplicate merged sections are intentionally treated as deterministic failures in `src/index.ts`; do not “fix” this by silently keeping first-or-last wins.
+- No database/auth/RLS: intentional; this repo is a local CLI, not a service.
+- Populated non-git directory rejection is a feature, not an inconvenience to remove.
+- Rejection of non-prefix history is intentional; this phase does not repair or rewrite history.
+- Local-only repos with no remote are valid success cases (`pushResult: skipped-local-only`).
+- `git fast-import` is intentional for historical author/date control; do not replace it casually with ordinary `git commit` without revalidating exact-history guarantees.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
-  - archive path and entry-type hardening
-  - bounded extraction and parser limits
-  - output-root containment and symlink refusal
-  - early CLI validation for invalid output targets
+  - strict target bootstrap rules
+  - dirty-tree and detached-HEAD rejection
+  - exact-prefix history validation
+  - deterministic UTC historical commit dating
+  - explicit-branch remote push behavior
+  - legacy transform ZIP/output hardening remains in place
 - What's intentionally deferred:
-  - upstream signature/checksum verification from OLRC (not available in current scope)
-  - sandboxing or process isolation for parsing
-  - broader supply-chain verification beyond npm lockfile / CI norms
+  - signed-commit enforcement
+  - remote authenticity verification beyond operator-configured git remotes
+  - automatic recovery/repair for malformed target histories
+  - runtime fetching/verification of Constitution text from remote sources
 - What's a test double vs production:
-  - mocked fetch and fixture ZIPs validate security-sensitive failure paths in CI
-  - production path is the same parser/writer/download code, just fed by live OLRC instead of fixtures
+  - temp repos and bare remotes in tests are doubles for downstream targets
+  - actual repo-preflight and git execution code paths are production paths exercised in integration tests

@@ -5,18 +5,109 @@ import { getTitleZipPath, extractXmlEntriesFromZip, resolveTitleUrl } from './so
 import type { ParseError, TitleIR } from './domain/model.js';
 import { parseUslmToIr } from './transforms/uslm-to-ir.js';
 import { writeTitleOutput } from './transforms/write-output.js';
+import { runConstitutionBackfill } from './backfill/orchestrator.js';
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const [command, ...args] = argv;
 
-  if (command !== 'transform') {
-    usage('Unknown command');
+  if (command === 'transform') {
+    return runTransformCommand(args);
+  }
+
+  if (command === 'backfill') {
+    return runBackfillCommand(args);
+  }
+
+  usage('Unknown command');
+  return 1;
+}
+
+async function runBackfillCommand(args: string[]): Promise<number> {
+  const parsed = parseBackfillArgs(args);
+  if (!parsed.ok) {
+    backfillUsage(parsed.error);
     return 1;
   }
 
-  const parsed = parseArgs(args);
+  try {
+    const summary = await runConstitutionBackfill(parsed.value.target);
+    process.stdout.write(`${JSON.stringify(summary)}\n`);
+    return 0;
+  } catch (error) {
+    process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
+    return 1;
+  }
+}
+
+function parseBackfillArgs(args: string[]): { ok: true; value: { phase: 'constitution'; target: string } } | { ok: false; error: string } {
+  let phase: string | null = null;
+  let target: string | null = null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === '--phase') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --phase flag' };
+      }
+
+      if (phase !== null) {
+        return { ok: false, error: 'Duplicate --phase flag' };
+      }
+
+      phase = value;
+      index += 1;
+      continue;
+    }
+
+    if (token === '--target') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --target flag' };
+      }
+
+      if (target !== null) {
+        return { ok: false, error: 'Duplicate --target flag' };
+      }
+
+      target = value;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith('--')) {
+      return { ok: false, error: `Unknown flag '${token}'` };
+    }
+
+    return { ok: false, error: `Unknown argument '${token}'` };
+  }
+
+  if (phase === null) {
+    return { ok: false, error: 'Missing required --phase flag' };
+  }
+
+  if (target === null) {
+    return { ok: false, error: 'Missing required --target flag' };
+  }
+
+  if (phase !== 'constitution') {
+    return { ok: false, error: `Unsupported --phase '${phase}'; expected 'constitution'` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      phase: 'constitution',
+      target: resolve(target),
+    },
+  };
+}
+
+async function runTransformCommand(args: string[]): Promise<number> {
+  const parsed = parseTransformArgs(args);
   if (!parsed.ok) {
-    usage(parsed.error);
+    transformUsage(parsed.error);
     return 1;
   }
 
@@ -24,7 +115,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const outputValidationError = await validateOutputDirectory(outputDir);
   if (outputValidationError) {
-    usage(outputValidationError);
+    transformUsage(outputValidationError);
     return 1;
   }
 
@@ -106,7 +197,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 }
 
-function parseArgs(args: string[]): { ok: true; value: { titleNumber: number; outputDir: string } } | { ok: false; error: string } {
+function parseTransformArgs(args: string[]): { ok: true; value: { titleNumber: number; outputDir: string } } | { ok: false; error: string } {
   const titleIndex = args.indexOf('--title');
   const outputIndex = args.indexOf('--output');
 
@@ -151,7 +242,15 @@ async function validateOutputDirectory(outputDir: string): Promise<string | null
 }
 
 function usage(error: string): void {
+  process.stderr.write(`Usage: transform --title <number> --output <dir>\nUsage: backfill --phase <name> --target <dir>\nError: ${error}\n`);
+}
+
+function transformUsage(error: string): void {
   process.stderr.write(`Usage: transform --title <number> --output <dir>\nError: ${error}\n`);
+}
+
+function backfillUsage(error: string): void {
+  process.stderr.write(`Usage: backfill --phase <name> --target <dir>\nError: ${error}\n`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
