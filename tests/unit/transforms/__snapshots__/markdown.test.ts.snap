@@ -1,0 +1,48 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`markdown renderer > snapshot: cross-reference and note text is kept 1`] = `
+"---
+title: 1
+section: '2'
+heading: Section notes
+status: in-force
+source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section2'
+---
+# § 2. Section notes
+(1) See 10 U.S.C. § 101 for definition.
+  Inline cross-reference to 10 U.S.C. § 101.
+
+## Notes
+- Historical and legal note retained.
+"
+`;
+
+exports[`markdown renderer > snapshot: flat section paragraph 1`] = `
+"---
+title: 1
+section: 36B
+heading: Protection for private blocking and screening of offensive material
+status: in-force
+source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section36B'
+---
+# § 36B. Protection for private blocking and screening of offensive material
+(1) A section that only has a flat paragraph.
+"
+`;
+
+exports[`markdown renderer > snapshot: nested hierarchy with subsection and nested clause/item shapes 1`] = `
+"---
+title: 1
+section: '1'
+heading: 'Words denoting number, gender, and so forth'
+status: in-force
+source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section1'
+---
+# § 1. Words denoting number, gender, and so forth
+## (a) Definitions
+(1) The word "person" means all living persons.
+  (A) An individual natural person.
+    (i) This is the nested clause.
+      (I) Legal note: this branch stays stable.
+"
+`;

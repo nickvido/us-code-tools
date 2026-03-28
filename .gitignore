@@ -1,14 +1,17 @@
-# Dependencies
 node_modules/
-
-# Build output
 dist/
 *.tsbuildinfo
-
-# Environment & secrets
 .env
+<<<<<<< HEAD
 .env.*
 !.env.example
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+.env.local
+>>>>>>> 04d1b88 (Add .gitignore)
+=======
+>>>>>>> 81e1d23 (Add .gitignore)
 
 # OS
 .DS_Store
@@ -29,8 +32,7 @@ Thumbs.db
 *.zip
 
 # Test coverage
+=======
+.env.local
+>>>>>>> 39f0976 (scaffold: project scaffolding for #1)
 coverage/
-
-# Logs
-*.log
-logs/

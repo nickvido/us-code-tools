@@ -1,0 +1,24 @@
+{
+  "name": "us-code-tools",
+  "version": "0.1.0",
+  "description": "US Code tooling utilities",
+  "type": "module",
+  "bin": {
+    "us-code-tools": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0",
+    "gray-matter": "^4.0.3",
+    "yauzl": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

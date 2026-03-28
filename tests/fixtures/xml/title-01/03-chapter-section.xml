@@ -1,0 +1,20 @@
+<uslm>
+  <title>
+    <num>1</num>
+    <heading>General Provisions</heading>
+    <chapter>
+      <num>I</num>
+      <heading>General Provisions</heading>
+      <section>
+        <num>999</num>
+        <heading>Chapter-contained section</heading>
+        <status>in-force</status>
+        <source>https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section999</source>
+        <paragraph>
+          <num>(1)</num>
+          <text>Text for chapter-contained section.</text>
+        </paragraph>
+      </section>
+    </chapter>
+  </title>
+</uslm>
