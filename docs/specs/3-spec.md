@@ -24,6 +24,10 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: CLI parser/validator, CLI tests -->
 - [ ] The CLI accepts either: (a) an existing local git repository whose history is empty or already matches a prefix of the 28-event Constitution plan, or (b) a non-existent target path that the workflow will `git init` as a new local repository before backfilling. It must reject a target repository containing unrelated pre-existing commits with a deterministic non-zero exit and error message, rather than appending Constitution history after unrelated commits.  
   <!-- Touches: repository opener/precondition validator, integration tests -->
+- [ ] If `--target` points to an existing empty directory that is not already a git repository, the workflow must `git init` in that directory and proceed with Constitution backfill. If `--target` points to an existing non-git directory that already contains files or subdirectories, the workflow must reject it with a deterministic non-zero exit and error message and must not initialize git over that pre-existing content.  
+  <!-- Touches: repository opener/precondition validator, integration tests -->
+- [ ] Before writing any Constitution files or creating any commits in an existing git repository, the workflow must verify that the working tree is clean (no staged changes, unstaged tracked-file changes, or untracked files). If the repo is dirty, the command exits non-zero with a deterministic error message and creates 0 new commits.  
+  <!-- Touches: repository preflight validator, integration tests -->
 - [ ] If the target repo has no configured remote (e.g., a freshly `git init`'d repo or `--target ./test-repo`), the push step is skipped and the command exits `0` after all 28 local commits are created. The CLI must NOT fail because push has no remote to push to.  
   <!-- Touches: push adapter, integration tests -->
 
@@ -149,10 +153,13 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 8. Run `git log --reverse --format="%ai %s"`; verify the first entry begins `1788-06-21 00:00:00 +0000`, the last begins `1992-05-07 00:00:00 +0000`, Amendments I–X appear in numeric order on `1791-12-15`, and dates never decrease.
 9. Re-run `npx us-code-tools backfill --phase=constitution --target <temp-repo>`; verify commit count remains `28`.
 10. Simulate a partial repo by resetting to an early Constitution commit or preparing a repo with only the first N planned events; rerun backfill and verify only missing later events are added.
-11. Simulate a target repo with unrelated pre-existing commits; verify the command exits non-zero with the documented error and does not append Constitution commits after that history.
-12. Run the command against a freshly initialized local repo with no remote configured; verify it still exits `0` after creating 28 commits and that the repository adapter reports `skipped-local-only`.
-13. Simulate a push failure in tests via the repository adapter and verify local commits remain intact while the command exits non-zero.
-14. Run `npm test`; expect unit, snapshot, and integration suites to pass.
+11. Run the command with `--target` pointing at an existing empty non-git directory; verify the workflow initializes git there and completes successfully.
+12. Run the command with `--target` pointing at an existing populated non-git directory; verify the command exits non-zero with the documented error and does not initialize git in that directory.
+13. Simulate a target repo with unrelated pre-existing commits; verify the command exits non-zero with the documented error and does not append Constitution commits after that history.
+14. Dirty an otherwise valid target git repo before execution; verify the command exits non-zero with the documented error and creates 0 new commits.
+15. Run the command against a freshly initialized local repo with no remote configured; verify it still exits `0` after creating 28 commits and that the repository adapter reports `skipped-local-only`.
+16. Simulate a push failure in tests via the repository adapter and verify local commits remain intact while the command exits non-zero.
+17. Run `npm test`; expect unit, snapshot, and integration suites to pass.
 
 ## Edge Case Catalog
 - Missing CLI args, unsupported `--phase`, empty `--target`, repeated flags, extra unknown flags, and `--target` pointing at a regular file instead of a directory
@@ -167,7 +174,7 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 - Partial-progress repositories are supported only when existing Constitution commits form a contiguous prefix of the 28-event plan (e.g., only the first 5 commits exist). Internal gaps are NOT supported — a repo with commits 1, 2, 4 but missing 3 is treated as unrelated/non-prefix history and rejected rather than repaired.
 - Duplicate dataset records, missing article/amendment numbers, malformed dates, empty headings, missing source URLs, truncated text, BOM-prefixed text, or invalid UTF-8 in static source assets
 - Deterministic ordering for same-day ratifications, especially Amendments I–X on `1791-12-15`
-- Dirty working tree before execution, dirty working tree caused by a failed commit attempt, and cleanup expectations after success or failure
+- Dirty working tree before execution: reject before any new files or commits are created. Dirty state introduced by a failed internal write/commit step: surface the failure explicitly; do not add extra recovery commits, and leave the repo in an inspectable state for rerun after the operator cleans it up.
 - Configured-remote push failure after all local commits succeed (for example authentication or network failure after the adapter attempts `push`); recovery by re-running without duplicating local history
 - Time-format drift caused by local timezone differences, daylight saving transitions, or differing git date parsing behavior across environments
 - Recovery behavior when the repository adapter, filesystem write, or git commit step fails midway through the 28-event plan
