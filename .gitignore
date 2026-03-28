@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dark Factory pipeline artifacts
+.df2-verdict
+.df2-*
+
+# Cache
+.cache/
+*.zip
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+logs/
