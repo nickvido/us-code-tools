@@ -103,7 +103,7 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
   <!-- Touches: commit message formatter, snapshot tests -->
 
 ### 6. Repository Orchestration and Idempotency
-- [ ] ⚡ Implement repository orchestration that can open or prepare the target repository, apply planned file writes, create commits, and invoke a push step through a repository adapter that is mockable in tests. The success contract is explicit: the command exits `0` only after all 28 planned local commits have been created (or found already present on a re-run) and the adapter’s push step reports success; any push error must make the command exit non-zero after local history creation completes.  
+- [ ] ⚡ Implement repository orchestration that can open or prepare the target repository, apply planned file writes, create commits, and invoke a push step through a repository adapter that is mockable in tests. The success contract is explicit: the command exits `0` only after all 28 planned local commits have been created (or found already present on a re-run) and the adapter reports either `pushed` success for a repo with a configured push remote or `skipped-local-only` success for a repo with no configured push remote. Any actual push attempt that fails after local history creation must make the command exit non-zero while preserving local commits.  
   <!-- Touches: repository adapter, backfill orchestrator, integration tests -->
 - [ ] Running Constitution backfill against an empty temp git repository creates exactly 28 commits on the current branch, leaves all 34 Constitution markdown files present in the working tree, and leaves the working tree clean at process exit.  
   <!-- Touches: orchestrator, git adapter, integration tests -->
@@ -150,12 +150,13 @@ Add a new `backfill --phase=constitution --target <path>` workflow to `us-code-t
 9. Re-run `npx us-code-tools backfill --phase=constitution --target <temp-repo>`; verify commit count remains `28`.
 10. Simulate a partial repo by resetting to an early Constitution commit or preparing a repo with only the first N planned events; rerun backfill and verify only missing later events are added.
 11. Simulate a target repo with unrelated pre-existing commits; verify the command exits non-zero with the documented error and does not append Constitution commits after that history.
-12. Simulate a push failure in tests via the repository adapter and verify local commits remain intact while the command exits non-zero.
-13. Run `npm test`; expect unit, snapshot, and integration suites to pass.
+12. Run the command against a freshly initialized local repo with no remote configured; verify it still exits `0` after creating 28 commits and that the repository adapter reports `skipped-local-only`.
+13. Simulate a push failure in tests via the repository adapter and verify local commits remain intact while the command exits non-zero.
+14. Run `npm test`; expect unit, snapshot, and integration suites to pass.
 
 ## Edge Case Catalog
 - Missing CLI args, unsupported `--phase`, empty `--target`, repeated flags, extra unknown flags, and `--target` pointing at a regular file instead of a directory
-- Non-existent target path, existing empty directory, existing git repo with a Constitution-history prefix, existing non-git directory, detached HEAD target repo, and target repo with unrelated commits already present (must be rejected, not appended to)
+- Non-existent target path, existing empty directory, existing git repo with a Constitution-history prefix, existing non-git directory, detached HEAD target repo, target repo with unrelated commits already present (must be rejected, not appended to), and target repos with no configured push remote (must return `skipped-local-only` success instead of a missing-remote failure)
 - Partial-progress repositories where some Constitution commits already exist, including gaps after the Constitution commit or within the Bill of Rights sequence
 - Duplicate dataset records, missing article/amendment numbers, malformed dates, empty headings, missing source URLs, truncated text, BOM-prefixed text, or invalid UTF-8 in static source assets
 - Deterministic ordering for same-day ratifications, especially Amendments I–X on `1791-12-15`
