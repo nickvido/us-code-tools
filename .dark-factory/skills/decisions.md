@@ -18,7 +18,7 @@
 - **Status:** Active
 - **Context:** Title ZIPs may contain multiple XML files and nested paths.
 - **Decision:** `extractXmlEntriesFromZip()` returns all accepted XML entries sorted lexically; `src/index.ts` merges all parsed sections into one `TitleIR`.
-- **Consequence:** Multi-file archives remain deterministic and CI-testable, but the implementation is currently incomplete versus architecture: merge logic still needs exact `sectionNumber` de-duplication across XML entries with `INVALID_XML` reporting and omission of colliding sections.
+- **Consequence:** Multi-file archives remain deterministic and CI-testable. Exact `sectionNumber` collisions are now treated as `INVALID_XML`, the colliding section is omitted, and the run exits non-zero to avoid ambiguous output.
 - **Feature:** #1 USLM XML to Markdown Transformer
 
 ### ADR-004: Treat malformed sections as partial failures, not process-fatal failures
@@ -50,10 +50,10 @@
 - **Feature:** #1 USLM XML to Markdown Transformer
 
 ### ADR-008: Preserve structured report semantics when `_title.md` write fails
-- **Status:** Required by architecture, not yet fully implemented
-- **Context:** Section file writes already accumulate `OUTPUT_WRITE_FAILED` parse errors, but `_title.md` is still written outside that error boundary in `src/transforms/write-output.ts`.
-- **Decision:** Title metadata write failures must be converted into `OUTPUT_WRITE_FAILED` parse errors and returned in `writeResult.parseErrors` so `src/index.ts` can still emit the final JSON report.
-- **Consequence:** Future dev work should extend the current section-write partial-failure pattern to the title metadata write instead of relying on the top-level catch.
+- **Status:** Active
+- **Context:** Section file writes already accumulated `OUTPUT_WRITE_FAILED` parse errors; title metadata writes needed the same partial-failure behavior.
+- **Decision:** `_title.md` write failures are converted into `OUTPUT_WRITE_FAILED` parse errors in `src/transforms/write-output.ts` and returned in `writeResult.parseErrors` so `src/index.ts` still emits the final JSON report.
+- **Consequence:** Partial success is preserved: if section files were written, the CLI can exit `0` even when title metadata failed, while still surfacing the failure in `parse_errors`.
 - **Feature:** #1 USLM XML to Markdown Transformer
 
 ## Phase 1 Scope (Current)

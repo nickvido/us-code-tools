@@ -46,14 +46,14 @@
 - Source-credit notes are stored separately from `editorialNotes`.
 - Markdown renderer uses `gray-matter` for parseable YAML frontmatter.
 - Section body formatting is depth-driven by node type, not by source indentation.
-- Current merge behavior in `src/index.ts` still appends `result.titleIr.sections` across XML entries without `sectionNumber` de-duplication; latest adversary review requires duplicate detection and omission with an `INVALID_XML` parse error.
+- `src/index.ts` now merges XML-entry results with a `seenSectionNumbers` set; duplicate merged `sectionNumber` values add an `INVALID_XML` parse error, omit the colliding section, and force exit code `1` for deterministic failure.
 
 ## Output Contract
 - Section files: `uscode/title-{NN}/section-{sectionId}.md`
 - Title metadata file: `uscode/title-{NN}/_title.md`
 - File normalization is intentionally minimal: `sectionFileSafeId()` only replaces `/` → `-`.
-- `files_written` includes `_title.md`.
-- Current gap: `writeTitleOutput()` catches section write failures, but `_title.md` is still written outside a local error boundary. If the title metadata write fails after some section writes, `src/index.ts` falls into the top-level catch and loses structured JSON report emission; latest adversary review requires `_title.md` failures to be converted into `OUTPUT_WRITE_FAILED` parse errors and preserved in the final report.
+- `files_written` includes `_title.md` when the title metadata file is written successfully.
+- `writeTitleOutput()` now catches `_title.md` write failures locally and converts them into `OUTPUT_WRITE_FAILED` parse errors with `sectionHint: '_title.md'`, allowing `src/index.ts` to preserve final structured JSON reporting after partial success.
 
 ## Security-Relevant Architecture Notes
 - ZIP intake is hardened in `src/sources/olrc.ts`:

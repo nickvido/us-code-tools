@@ -16,9 +16,9 @@
 - `tests/adversary-round1-issue1.test.ts` — chapter-contained sections + symlinked output regression coverage.
 - `tests/adversary-round2-issue1.test.ts` — early `--output` validation + cache-manifest/SHA validation regressions.
 - `tests/adversary-round3-issue1.test.ts` — source-credit separation + oversized-field parse-bound regressions.
-- No adversary-round4 regression tests exist yet for the current open findings (duplicate section merge handling, `_title.md` write-failure report preservation).
-  - `tests/unit/transforms/write-output.test.ts` currently covers only path derivation, so the `_title.md` failure case still needs either a new writer-unit test with mocked `atomicWriteFile()`/`assertSafeOutputPath()` or an adversary regression test that exercises structured-report preservation through `src/index.ts`.
-  - duplicate-merge coverage should target `src/index.ts` multi-XML aggregation, asserting duplicate `sectionNumber` values add an `INVALID_XML` parse error and do not overwrite earlier section output.
+- `tests/adversary-round4-issue1.test.ts` — duplicate merged-section detection in `src/index.ts` plus `_title.md` write-failure partial-success/structured-report semantics.
+- `tests/adversary-round5-issue1.test.ts` — unreadable ZIP regression coverage for both cache reuse and freshly downloaded payloads.
+- `tests/unit/transforms/write-output.test.ts` still only covers path derivation; failure semantics are currently exercised through CLI/adversary coverage instead of direct writer-unit mocks.
 
 ## Fixtures
 - `tests/fixtures/title-01/manifest.json` — expected output filenames / parse-error codes for integration assertions.

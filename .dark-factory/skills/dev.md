@@ -77,11 +77,11 @@ src/index.ts (main)
 ## Practical Notes
 - `README.md` is broader product vision and is ahead of current implementation; follow `docs/specs/1-spec.md` + actual code for this feature.
 - `tsconfig.json` uses `rootDir: "src"`; tests are not compiled into `dist`.
-- `files_written > 1` in `src/index.ts` currently drives exit code 0 (at least one section plus `_title.md`).
+- `src/index.ts` now tracks `seenSectionNumbers` across all extracted XML entries; duplicate merged `sectionNumber` values add an `INVALID_XML` parse error, omit the colliding section from output, and force exit code `1` even if other sections were written.
+- `src/index.ts` computes success from section-file writes, not just total `files_written`; if `_title.md` fails but one or more section files are written, the CLI still emits the final JSON report and exits `0`.
 - `resolveTitleUrl()` currently hardcodes the OLRC `118/200` releasepoint URL pattern.
-- Latest adversary review left two active implementation gaps:
-  - duplicate `sectionNumber` values across multiple XML entries are not yet detected during merge in `src/index.ts`; the open merge loop currently does `mergedTitle.sections.push(...result.titleIr.sections)` without a `Set<string>` guard
-  - `_title.md` write failures are not yet folded into `writeResult.parseErrors` in `src/transforms/write-output.ts`; `writeTitleOutput()` still writes title metadata after the section loop without a local `try/catch`
+- `src/transforms/write-output.ts` now wraps `_title.md` writes in the same partial-failure pattern as section writes, returning `OUTPUT_WRITE_FAILED` with `sectionHint: '_title.md'` instead of throwing past the structured report path.
+- `src/sources/olrc.ts` validates ZIP openability with `yauzl` both when reusing cache and after download; ZIP magic bytes alone are intentionally insufficient.
 
 ## Phase 1 Scope (Current)
 - What's implemented:

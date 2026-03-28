@@ -45,11 +45,12 @@
   - verifies resolved target stays under output root
   - refuses symlinked intermediate directories
 - `atomicWriteFile()` uses temp file + rename to avoid partial output files.
-- Current reporting gap: `_title.md` is still written outside the section-write error collection path in `src/transforms/write-output.ts`, so metadata-write failures can bypass structured report emission even though section files are already preserved on disk.
+- `_title.md` write failures are now trapped inside `src/transforms/write-output.ts` and surfaced as `OUTPUT_WRITE_FAILED` parse errors, preserving structured JSON report emission after partial success.
 
 ## Security Decisions with Rationale
 - **No blind ZIP extraction** — required to avoid path traversal and special-entry writes from untrusted archives.
 - **Minimal section filename normalization** — only `/` → `-`, preserving legal identifiers while blocking path escapes.
+- **ZIP reuse requires openability, not just magic bytes** — cached/downloaded artifacts must be readable by `yauzl` before trust or promotion.
 - **Network-free default tests** — keeps CI deterministic and avoids treating third-party availability as security/reliability proof.
 - **Bounded parser behavior** — malformed or oversized fields become parse errors, not crashes or unbounded allocations.
 
@@ -57,7 +58,7 @@
 - Lack of database/auth/RLS is intentional; this feature is a local CLI only.
 - Fixture-backed integration tests are intentional; live network is deferred from default CI.
 - Hardcoded OLRC releasepoint pattern is acceptable for Phase 1; dynamic releasepoint discovery is future work.
-- Do not treat the current duplicate-section merge behavior as acceptable just because XML entries are lexically ordered; architecture requires exact `sectionNumber` de-duplication across entries and omission/reporting on collision.
+- Duplicate merged sections are intentionally treated as deterministic failures in `src/index.ts`; do not “fix” this by silently keeping first-or-last wins.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
