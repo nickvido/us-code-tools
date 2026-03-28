@@ -1,0 +1,21 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`backfill-messages > formats Constitution commit message exactly as required 1`] = `
+"Constitution of the United States
+
+Signed: 1787-09-17 by Constitutional Convention
+Ratified: 1788-06-21 (9th state: New Hampshire)
+
+Source: https://constitution.congress.gov/constitution/
+"
+;
+
+exports[`backfill-messages > formats Amendment XIV commit message with proposed and ratified metadata 1`] = `
+"Amendment XIV: Citizenship, equal protection, due process
+
+Proposed: 1866-06-13 by 39th Congress
+Ratified: 1868-07-09
+
+Source: https://constitution.congress.gov/browse/amendment-14/
+"
+;

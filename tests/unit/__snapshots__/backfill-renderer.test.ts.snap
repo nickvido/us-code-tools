@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`backfill-renderer > produces snapshot coverage for Article I markdown 1`] = `
+"---
+type: "article"
+number: 1
+heading: "Legislative Powers"
+ratified: "1788-06-21"
+proposed: "1787-09-17"
+proposing_body: "Constitutional Convention"
+source: "https://constitution.congress.gov/browse/article-1/"
+---
+## Article I
+
+Section 1. All legislative Powers herein granted shall be vested in a Congress of the United States.
+"
+;
+
+exports[`backfill-renderer > produces snapshot coverage for Amendment I markdown 1`] = `
+"---
+type: "amendment"
+number: 1
+heading: "Freedom of Religion, Speech, Assembly, and Petition"
+ratified: "1791-12-15"
+proposed: "1789-09-25"
+proposing_body: "1st Congress"
+source: "https://constitution.congress.gov/browse/amendment-1/"
+---
+Congress shall make no law respecting an establishment of religion, or prohibiting the free exercise thereof...
+"
+;
