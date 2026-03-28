@@ -80,8 +80,8 @@ src/index.ts (main)
 - `files_written > 1` in `src/index.ts` currently drives exit code 0 (at least one section plus `_title.md`).
 - `resolveTitleUrl()` currently hardcodes the OLRC `118/200` releasepoint URL pattern.
 - Latest adversary review left two active implementation gaps:
-  - duplicate `sectionNumber` values across multiple XML entries are not yet detected during merge in `src/index.ts`
-  - `_title.md` write failures are not yet folded into `writeResult.parseErrors` in `src/transforms/write-output.ts`
+  - duplicate `sectionNumber` values across multiple XML entries are not yet detected during merge in `src/index.ts`; the open merge loop currently does `mergedTitle.sections.push(...result.titleIr.sections)` without a `Set<string>` guard
+  - `_title.md` write failures are not yet folded into `writeResult.parseErrors` in `src/transforms/write-output.ts`; `writeTitleOutput()` still writes title metadata after the section loop without a local `try/catch`
 
 ## Phase 1 Scope (Current)
 - What's implemented:

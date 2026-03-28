@@ -25,6 +25,7 @@
     - `src/index.ts` does not yet detect duplicate `sectionNumber` collisions across multiple XML entries during merge
     - `src/transforms/write-output.ts` does not yet convert `_title.md` write failures into `OUTPUT_WRITE_FAILED` parse errors, so structured JSON report emission can be lost on metadata-write failure
   - knowledge files were corrected after stale docs incorrectly stated adversary approval
+  - as of branch head `3f5a9b1`, PR #2 (`[DF2] #1: USLM XML to Markdown Transformer`) remains open while those two round-4 spec violations are still unresolved
 
 ## Phase 1 Scope (Current)
 - What's implemented:
