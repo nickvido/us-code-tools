@@ -37,18 +37,37 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
     let mergedTitle: TitleIR | null = null;
     const parseErrors: ParseError[] = [];
+    const seenSectionNumbers = new Set<string>();
 
     for (const entry of xmlEntries) {
       const result = parseUslmToIr(entry.xml, entry.xmlPath);
       parseErrors.push(...result.parseErrors);
       if (!mergedTitle) {
-        mergedTitle = result.titleIr;
-      } else {
-        mergedTitle.sections.push(...result.titleIr.sections);
-        for (const chapter of result.titleIr.chapters) {
-          if (!mergedTitle.chapters.some((existing) => existing.number === chapter.number && existing.heading === chapter.heading)) {
-            mergedTitle.chapters.push(chapter);
-          }
+        mergedTitle = {
+          ...result.titleIr,
+          chapters: [...result.titleIr.chapters],
+          sections: [],
+        };
+      }
+
+      for (const section of result.titleIr.sections) {
+        if (seenSectionNumbers.has(section.sectionNumber)) {
+          parseErrors.push({
+            code: 'INVALID_XML',
+            message: `Duplicate section number '${section.sectionNumber}' encountered across XML files`,
+            xmlPath: entry.xmlPath,
+            sectionHint: section.sectionNumber,
+          });
+          continue;
+        }
+
+        seenSectionNumbers.add(section.sectionNumber);
+        mergedTitle.sections.push(section);
+      }
+
+      for (const chapter of result.titleIr.chapters) {
+        if (!mergedTitle.chapters.some((existing) => existing.number === chapter.number && existing.heading === chapter.heading)) {
+          mergedTitle.chapters.push(chapter);
         }
       }
     }

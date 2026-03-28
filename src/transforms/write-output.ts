@@ -25,9 +25,18 @@ export async function writeTitleOutput(outputRoot: string, titleIr: TitleIR): Pr
   }
 
   const titlePath = resolve(outputRoot, 'uscode', `title-${padTitleNumber(titleIr.titleNumber)}`, '_title.md');
-  await assertSafeOutputPath(outputRoot, titlePath);
-  await atomicWriteFile(titlePath, renderTitleMarkdown(titleIr));
-  filesWritten += 1;
+
+  try {
+    await assertSafeOutputPath(outputRoot, titlePath);
+    await atomicWriteFile(titlePath, renderTitleMarkdown(titleIr));
+    filesWritten += 1;
+  } catch (error) {
+    parseErrors.push({
+      code: 'OUTPUT_WRITE_FAILED',
+      message: error instanceof Error ? error.message : 'Failed to write title metadata output',
+      sectionHint: '_title.md',
+    });
+  }
 
   return { filesWritten, parseErrors };
 }
