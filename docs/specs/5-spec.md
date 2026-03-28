@@ -20,18 +20,24 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 ### 1. CLI surface and argument validation
 - [ ] `src/index.ts` accepts a new `fetch` command with these valid modes and exits `0` on success:
   - `npx us-code-tools fetch --all`
+  - `npx us-code-tools fetch --all --force`
   - `npx us-code-tools fetch --source=olrc`
+  - `npx us-code-tools fetch --source=olrc --force`
   - `npx us-code-tools fetch --source=congress --congress=<integer>`
+  - `npx us-code-tools fetch --source=congress --congress=<integer> --force`
   - `npx us-code-tools fetch --source=govinfo`
+  - `npx us-code-tools fetch --source=govinfo --force`
   - `npx us-code-tools fetch --source=govinfo --congress=<integer>`
+  - `npx us-code-tools fetch --source=govinfo --congress=<integer> --force`
   - `npx us-code-tools fetch --source=voteview`
+  - `npx us-code-tools fetch --source=voteview --force`
   - `npx us-code-tools fetch --source=legislators`
+  - `npx us-code-tools fetch --source=legislators --force`
   - `npx us-code-tools fetch --status`
-  - each of the above optionally with `--force`
   <!-- Touches: src/index.ts, tests/unit/fetch-cli-args.test.ts, tests/integration/fetch-cli.test.ts -->
 - [ ] `fetch` returns exit code `1` and prints a deterministic usage error when:
   - both `--all` and `--source` are present
-  - `--status` is combined with `--all`, `--source`, or `--congress`
+  - `--status` is combined with `--all`, `--source`, `--congress`, or `--force`
   - `--source=congress` is missing `--congress`
   - `--source` is not one of `olrc|congress|govinfo|voteview|legislators`
   - `--congress` is supplied for `--source=olrc`, `--source=voteview`, or `--source=legislators`
@@ -99,7 +105,11 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   <!-- Touches: src/sources/congress.ts, tests/unit/sources/congress.test.ts, tests/fixtures/congress/* -->
 - [ ] The bill-list method exposes deterministic pagination inputs and outputs so tests can request the first page, a follow-up page, and termination when the API returns no further pages.
   <!-- Touches: src/sources/congress.ts, tests/unit/sources/congress.test.ts -->
-- [ ] `fetch --source=congress --congress=<n>` writes raw responses for at least the bill list pages, member list pages, and committee list pages needed for that congress into `data/cache/congress/`, and the manifest records the requested congress number.
+- [ ] `fetch --source=congress --congress=<n>` writes raw responses under `data/cache/congress/` for:
+  - every paginated bill-list response returned by `GET /bill/{n}` until the API indicates there is no next page
+  - every paginated committee-list response returned by `GET /committee/{n}` until the API indicates there is no next page
+  - every paginated `GET /member` response required to enumerate the full member collection exposed by Congress.gov, continuing until the API indicates there is no next page; this member acquisition is global rather than congress-filtered because the endpoint itself is not scoped by congress
+  and the manifest records the requested congress number plus the page counts fetched for bills, committees, and members.
   <!-- Touches: src/index.ts, src/sources/congress.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
 - [ ] Integration tests for Congress.gov are skipped unless the configured env var for live external tests is set; when enabled, at least one live request to Congress.gov bill listing succeeds with the configured API key.
   <!-- Touches: tests/integration/congress-live.test.ts or equivalent -->
@@ -110,9 +120,14 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
   - fetching package summary by `packageId`
   - fetching package granules by `packageId`
   <!-- Touches: src/sources/govinfo.ts, tests/unit/sources/govinfo.test.ts, tests/fixtures/govinfo/* -->
-- [ ] `fetch --source=govinfo` enumerates public-law package IDs using the repository’s default GovInfo acquisition query, stores the raw collection/listing responses and package-level responses in `data/cache/govinfo/`, and records the query parameters plus package count in the manifest.
+- [ ] `fetch --source=govinfo` enumerates public-law package IDs using this exact default acquisition query contract:
+  - collection: `PLAW`
+  - no congress filter is applied
+  - the client pages through the collection in the upstream API's natural pagination order until there is no next page
+  - every returned package ID from that full unfiltered listing is then fetched for summary and granules
+  The command stores the raw collection/listing responses and package-level responses in `data/cache/govinfo/`, and the manifest records `query_scope: "all_plaw"`, the exact request parameters used for the listing calls, and the final package count.
   <!-- Touches: src/index.ts, src/sources/govinfo.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
-- [ ] `fetch --source=govinfo --congress=<n>` applies a congress filter to the same GovInfo acquisition flow, stores the filtered raw responses in `data/cache/govinfo/`, and records the requested congress number plus package count in the manifest.
+- [ ] `fetch --source=govinfo --congress=<n>` applies a congress filter to the same GovInfo acquisition flow: it pages through `PLAW` collection results until there is no next page, retains only packages whose collection metadata identifies congress `<n>`, fetches summary and granules for each retained package, stores the filtered raw responses in `data/cache/govinfo/`, and records `query_scope: "congress"`, the requested congress number, the exact request parameters used for the listing calls, and the final package count in the manifest.
   <!-- Touches: src/index.ts, src/sources/govinfo.ts, src/utils/manifest.ts, tests/integration/fetch-cli.test.ts -->
 - [ ] If GovInfo returns package summaries but granules are absent or empty for a package, the package is still recorded as fetched with `granule_count: 0` rather than causing the entire congress fetch to fail.
   <!-- Touches: src/sources/govinfo.ts, tests/unit/sources/govinfo.test.ts -->
@@ -172,16 +187,17 @@ Add a new `fetch` CLI workflow that downloads, caches, and reports on source dat
 ## Acceptance Tests (human-readable)
 1. Run `npx us-code-tools fetch --status` in a clean checkout. Verify it exits `0`, prints JSON, and shows all five sources with empty or not-yet-fetched status.
 2. Run `npx us-code-tools fetch --source=olrc`. Verify the command attempts titles 1 through 54, writes `data/cache/olrc/title-01/` through `title-54/`, and records title-level outcomes in `data/manifest.json`.
-3. Run `npx us-code-tools fetch --source=congress --congress=119` with a valid API key. Verify raw bill/member/committee responses are cached under `data/cache/congress/` and the manifest records congress `119`.
-4. Run `npx us-code-tools fetch --source=govinfo` with a valid API key. Verify public-law package listings are cached under `data/cache/govinfo/` and the manifest includes query metadata plus package counts.
-5. Run `npx us-code-tools fetch --source=govinfo --congress=119` with a valid API key. Verify the same cache path is used for the filtered fetch and the manifest records congress `119`.
+3. Run `npx us-code-tools fetch --source=congress --congress=119` with a valid API key. Verify raw bill and committee pages for congress `119` are cached under `data/cache/congress/`, verify member pages continue until the Congress.gov `GET /member` listing has no next page, and verify the manifest records congress `119` plus fetched page counts for bills, committees, and members.
+4. Run `npx us-code-tools fetch --source=govinfo` with a valid API key. Verify it walks the unfiltered `PLAW` collection until there is no next page, fetches summary and granules for each returned package, caches those responses under `data/cache/govinfo/`, and records `query_scope: "all_plaw"`, request parameters, and package count in the manifest.
+5. Run `npx us-code-tools fetch --source=govinfo --congress=119` with a valid API key. Verify it walks the same `PLAW` listing flow, retains only packages whose metadata identifies congress `119`, uses the same cache root, and records `query_scope: "congress"`, congress `119`, request parameters, and package count in the manifest.
 6. Run `npx us-code-tools fetch --source=voteview`. Verify exactly the three required CSV files exist under `data/cache/voteview/` and their metadata appears in the manifest.
 7. Run `npx us-code-tools fetch --source=legislators`. Verify exactly the three required YAML files exist under `data/cache/legislators/` and the manifest includes them.
 8. Re-run one of the API-backed fetches without `--force`. Verify logs/status indicate a cache hit and no network request is made for fresh cached entries.
 9. Re-run the same command with `--force`. Verify the artifact timestamps in `data/manifest.json` change.
-10. Run `npx us-code-tools fetch --source=congress --congress=119` with the API key unset. Verify the command exits `1`, emits the documented missing-credential error, performs no outbound request, and does not write a success manifest entry for Congress.gov.
-11. Run `npx us-code-tools fetch --all` with the API key unset. Verify OLRC, VoteView, and legislators still run, while Congress.gov and GovInfo are reported as source-specific failures in the final JSON summary.
-12. Run `npm test`. Verify all default tests pass and live tests remain skipped unless their env flag is provided.
+10. Run `npx us-code-tools fetch --status --force`. Verify the command exits `1` with the documented usage error for an invalid flag combination.
+11. Run `npx us-code-tools fetch --source=congress --congress=119` with the API key unset. Verify the command exits `1`, emits the documented missing-credential error, performs no outbound request, and does not write a success manifest entry for Congress.gov.
+12. Run `npx us-code-tools fetch --all` with the API key unset. Verify OLRC, VoteView, and legislators still run, while Congress.gov and GovInfo are reported as source-specific failures in the final JSON summary.
+13. Run `npm test`. Verify all default tests pass and live tests remain skipped unless their env flag is provided.
 
 ## Edge Case Catalog
 - Invalid CLI combinations: duplicate flags, unknown flags, unknown source names, missing `--congress`, non-integer congress numbers, `--congress=0`.
