@@ -55,3 +55,46 @@ export function sectionFileSafeId(sectionNumber: string): string {
 export function sortSections<T extends { sectionNumber: string }>(sections: T[]): T[] {
   return [...sections].sort((left, right) => compareSectionNumbers(left.sectionNumber, right.sectionNumber));
 }
+
+export function chapterFileSafeId(chapter: string): string {
+  const trimmed = chapter.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    return trimmed.padStart(3, '0');
+  }
+
+  const normalized = trimmed
+    .replace(/[^A-Za-z0-9]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '')
+    .toLowerCase();
+
+  return normalized || 'unnamed';
+}
+
+export function chapterOutputFilename(chapter: string): string {
+  return `chapter-${chapterFileSafeId(chapter)}.md`;
+}
+
+export function compareChapterIdentifiers(left: string, right: string): number {
+  const leftTrimmed = left.trim();
+  const rightTrimmed = right.trim();
+  const leftIsNumeric = /^\d+$/u.test(leftTrimmed);
+  const rightIsNumeric = /^\d+$/u.test(rightTrimmed);
+
+  if (leftIsNumeric && rightIsNumeric) {
+    return Number.parseInt(leftTrimmed, 10) - Number.parseInt(rightTrimmed, 10);
+  }
+
+  if (leftIsNumeric !== rightIsNumeric) {
+    return leftIsNumeric ? -1 : 1;
+  }
+
+  const leftSafeId = chapterFileSafeId(leftTrimmed);
+  const rightSafeId = chapterFileSafeId(rightTrimmed);
+
+  if (leftSafeId < rightSafeId) return -1;
+  if (leftSafeId > rightSafeId) return 1;
+  if (leftTrimmed < rightTrimmed) return -1;
+  if (leftTrimmed > rightTrimmed) return 1;
+  return 0;
+}

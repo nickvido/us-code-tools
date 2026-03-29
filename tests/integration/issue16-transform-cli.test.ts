@@ -7,6 +7,7 @@ import {
   mkdirSync,
   writeFileSync,
   copyFileSync,
+  existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
@@ -143,7 +144,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
     );
     expect(duplicate.status).not.toBe(0);
     expect(`${duplicate.stdout}\n${duplicate.stderr}`).toMatch(/group-by|chapter|duplicate/i);
-    expect(readdirSync(outputDir).length).toBe(0);
+    expect(existsSync(outputDir) ? readdirSync(outputDir).length : 0).toBe(0);
 
     const unsupported = spawnSync(
       process.execPath,
@@ -152,7 +153,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
     );
     expect(unsupported.status).not.toBe(0);
     expect(`${unsupported.stdout}\n${unsupported.stderr}`).toMatch(/group-by|chapter|part/i);
-    expect(readdirSync(outputDir).length).toBe(0);
+    expect(existsSync(outputDir) ? readdirSync(outputDir).length : 0).toBe(0);
 
     rmSync(sandboxRoot, { recursive: true, force: true });
   });

@@ -3,14 +3,13 @@ import type { ContentNode, NoteIR, SectionIR, StatutoryNoteIR, TitleIR } from '.
 import { sortSections } from '../domain/normalize.js';
 
 export function renderSectionMarkdown(section: SectionIR): string {
-  const frontmatter: Record<string, string | number> = {
-    title: section.titleNumber,
-    section: section.sectionNumber,
-    heading: section.heading,
-    status: section.status,
-    source: section.source,
-  };
+  const frontmatter: Record<string, string | number> = {};
 
+  if (section.titleNumber !== undefined) frontmatter.title = section.titleNumber;
+  if (section.sectionNumber) frontmatter.section = section.sectionNumber;
+  if (section.heading) frontmatter.heading = section.heading;
+  if (section.source) frontmatter.source = section.source;
+  if (section.status) frontmatter.status = section.status;
   if (section.hierarchy?.subtitle) frontmatter.subtitle = section.hierarchy.subtitle;
   if (section.hierarchy?.part) frontmatter.part = section.hierarchy.part;
   if (section.hierarchy?.subpart) frontmatter.subpart = section.hierarchy.subpart;
@@ -50,6 +49,30 @@ export function renderSectionMarkdown(section: SectionIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
+export function renderChapterMarkdown(titleIr: TitleIR, chapter: string, sections: SectionIR[]): string {
+  const heading = titleIr.chapters.find((entry) => entry.number === chapter)?.heading ?? `Chapter ${chapter}`;
+  const frontmatter = {
+    title: titleIr.titleNumber,
+    chapter,
+    heading,
+    section_count: sections.length,
+    source: titleIr.sourceUrlTemplate,
+  };
+
+  return matter.stringify(renderEmbeddedSections(sections), frontmatter);
+}
+
+export function renderUncategorizedMarkdown(titleIr: TitleIR, sections: SectionIR[]): string {
+  const frontmatter = {
+    title: titleIr.titleNumber,
+    heading: 'Uncategorized',
+    section_count: sections.length,
+    source: titleIr.sourceUrlTemplate,
+  };
+
+  return matter.stringify(renderEmbeddedSections(sections), frontmatter);
+}
+
 export function renderTitleMarkdown(titleIr: TitleIR): string {
   const frontmatter: Record<string, string | number | boolean> = {
     title: titleIr.titleNumber,
@@ -79,9 +102,21 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
+function renderEmbeddedSections(sections: SectionIR[]): string {
+  const bodies = sections.map((section) => matter(renderSectionMarkdown(section)).content.trim());
+  return `${bodies.join('\n\n').trimEnd()}\n`;
+}
+
 function renderContentNode(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string {
-  if (node.type === 'text') {
-    const key = node.text.trim();
+  const runtimeNode = readRuntimeNode(node);
+  const nodeType = runtimeNode.type ?? runtimeNode.kind;
+  const children = runtimeNode.children ?? [];
+  const text = runtimeNode.text ?? '';
+  const label = runtimeNode.label ?? '';
+  const heading = runtimeNode.heading;
+
+  if (nodeType === 'text') {
+    const key = text.trim();
     const remaining = duplicateTextTracker.get(key) ?? 0;
     if (remaining > 1) {
       duplicateTextTracker.set(key, remaining - 1);
@@ -92,13 +127,13 @@ function renderContentNode(node: ContentNode, indent: number, duplicateTextTrack
       duplicateTextTracker.delete(key);
     }
 
-    return `${' '.repeat(indent)}${node.text.trimEnd()}`.trimEnd();
+    return `${' '.repeat(indent)}${text.trimEnd()}`.trimEnd();
   }
 
-  if (node.type === 'subsection') {
-    const headingLine = ['##', formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
+  if (nodeType === 'subsection') {
+    const headingLine = ['##', formatLabel(label), heading, text].filter(Boolean).join(' ');
     const lines = [headingLine.trimEnd()];
-    for (const child of node.children) {
+    for (const child of children) {
       const rendered = renderContentNode(child, 0, duplicateTextTracker);
       if (rendered) {
         lines.push(rendered);
@@ -107,9 +142,9 @@ function renderContentNode(node: ContentNode, indent: number, duplicateTextTrack
     return lines.join('\n');
   }
 
-  const labelLine = [formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
-  const lines = [`${' '.repeat(indent)}${labelLine}`.trimEnd()];
-  for (const child of node.children) {
+  const labelLine = [formatLabel(label), heading, text].filter(Boolean).join(' ').trim();
+  const lines = [labelLine ? `${' '.repeat(indent)}${labelLine}`.trimEnd() : `${' '.repeat(indent)}${text.trimEnd()}`.trimEnd()].filter(Boolean);
+  for (const child of children) {
     const rendered = renderContentNode(child, indent + 2, duplicateTextTracker);
     if (rendered) {
       lines.push(rendered);
@@ -130,17 +165,42 @@ function buildDuplicateTextTracker(nodes: ContentNode[]): Map<string, number> {
 }
 
 function collectTextNodeCounts(nodes: ContentNode[], counts: Map<string, number>): void {
+  if (!Array.isArray(nodes)) {
+    return;
+  }
+
   for (const node of nodes) {
-    if (node.type === 'text') {
-      const key = node.text.trim();
+    const runtimeNode = readRuntimeNode(node);
+    const nodeType = runtimeNode.type ?? runtimeNode.kind;
+    if (nodeType === 'text') {
+      const key = (runtimeNode.text ?? '').trim();
       if (key) {
         counts.set(key, (counts.get(key) ?? 0) + 1);
       }
       continue;
     }
 
-    collectTextNodeCounts(node.children, counts);
+    collectTextNodeCounts(runtimeNode.children ?? [], counts);
   }
+}
+
+function readRuntimeNode(node: ContentNode): {
+  type?: string;
+  kind?: string;
+  text?: string;
+  label?: string;
+  heading?: string;
+  children?: ContentNode[];
+} {
+  const value = Object(node) as Record<string, unknown>;
+  return {
+    type: typeof value.type === 'string' ? value.type : undefined,
+    kind: typeof value.kind === 'string' ? value.kind : undefined,
+    text: typeof value.text === 'string' ? value.text : undefined,
+    label: typeof value.label === 'string' ? value.label : undefined,
+    heading: typeof value.heading === 'string' ? value.heading : undefined,
+    children: Array.isArray(value.children) ? (value.children as ContentNode[]) : undefined,
+  };
 }
 
 function formatLabel(label: string): string {
@@ -150,24 +210,6 @@ function formatLabel(label: string): string {
   }
 
   return trimmed.startsWith('(') ? trimmed : `(${trimmed})`;
-}
-
-function indentationForNode(type: Exclude<ContentNode['type'], 'text'>): number {
-  switch (type) {
-    case 'subsection':
-    case 'paragraph':
-      return 0;
-    case 'subparagraph':
-      return 2;
-    case 'clause':
-      return 4;
-    case 'subclause':
-      return 6;
-    case 'item':
-      return 8;
-    case 'subitem':
-      return 10;
-  }
 }
 
 function renderStatutoryNote(note: StatutoryNoteIR): string {
