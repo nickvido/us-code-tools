@@ -24,13 +24,15 @@ Update the USLM-to-IR transform so title, chapter, and section numbers use the c
   <!-- Touches: src/transforms/uslm-to-ir.ts, tests/unit/transforms/uslm-to-ir.test.ts -->
 - [ ] If `@value` is present but normalizes to an empty or whitespace-only string, the parser behaves identically to the absent-attribute case and uses cleaned text content instead of emitting an empty number.
   <!-- Touches: src/transforms/uslm-to-ir.ts, tests/unit/transforms/uslm-to-ir.test.ts -->
+- [ ] When a `<num>` node has both non-empty `@value` and decorated text content that would clean to a different string, the parser treats `@value` as canonical and emits the normalized `@value` without cross-checking, rejecting, or rewriting it from display text.
+  <!-- Touches: src/transforms/uslm-to-ir.ts, tests/unit/transforms/uslm-to-ir.test.ts -->
 
 ### 2. Fixture and unit-test contract coverage
 - [ ] `tests/fixtures/xml/title-01/04-current-uscdoc.xml` is replaced or refreshed with a fixture that models the current OLRC/XSD contract: `uscDoc > meta + main`, `<title identifier="/us/usc/t1">`, at least one chapter with `/us/usc/t1/ch...`, 53 section nodes with identifiers matching `/us/usc/t1/s...`, decorated `<num>` text, and canonical clean `@value` attributes on title/chapter/section `<num>` elements.
   <!-- Touches: tests/fixtures/xml/title-01/04-current-uscdoc.xml, tests/unit/transforms/uslm-to-ir.test.ts, tests/integration/transform-cli.test.ts -->
-- [ ] `tests/unit/transforms/uslm-to-ir.test.ts` adds mechanically testable `<num>` contract cases for: (a) `@value` present with decorated text, (b) `@value` absent with decorated text only, and (c) `@value` present-but-empty with decorated text; each case asserts the parsed title/chapter/section number equals the expected clean value.
+- [ ] `tests/unit/transforms/uslm-to-ir.test.ts` adds mechanically testable `<num>` contract cases for: (a) `@value` present with decorated text, (b) `@value` absent with decorated text only, (c) `@value` present-but-empty with decorated text, and (d) non-empty `@value` that intentionally disagrees with the cleaned display text; each case asserts the parsed title/chapter/section number equals the expected canonical value, with case (d) proving `@value` wins.
   <!-- Touches: tests/unit/transforms/uslm-to-ir.test.ts -->
-- [ ] The refreshed `uscDoc` fixture coverage asserts all of the following in unit tests: parsed `titleIr.titleNumber === 1`; parsed chapter numbers equal the source `<num @value>` values; parsed section count is exactly 53; every parsed section number equals the corresponding source `<section><num @value>` value; and populated sections do not emit `MISSING_SECTION_NUMBER`.
+- [ ] The refreshed `uscDoc` fixture coverage asserts all of the following in unit tests: parsed `titleIr.titleNumber === 1`; parsed `titleIr.chapters.length === 1`; parsed chapter numbers equal the source `<chapter><num @value>` values; parsed section count is exactly 53; every parsed section number equals the corresponding source `<section><num @value>` value; and populated sections do not emit `MISSING_SECTION_NUMBER`.
   <!-- Touches: tests/unit/transforms/uslm-to-ir.test.ts, tests/fixtures/xml/title-01/04-current-uscdoc.xml -->
 - [ ] A structural conformance test inspects the refreshed fixture source and asserts: root element is `uscDoc`; it contains both `meta` and `main`; title/chapter/section nodes under test contain `<num>` immediately followed by `<heading>`; section identifiers match `/us/usc/t1/s[^\"]+/`; and sampled `<num>` nodes have decorated display text that differs from the clean `@value` string.
   <!-- Touches: tests/unit/transforms/uslm-to-ir.test.ts, tests/fixtures/xml/title-01/04-current-uscdoc.xml, docs/schemas/USLM-1.0.15.xsd -->
@@ -40,7 +42,9 @@ Update the USLM-to-IR transform so title, chapter, and section numbers use the c
 ### 3. CLI and filesystem regressions
 - [ ] `tests/integration/transform-cli.test.ts` verifies that a selected-vintage cache seeded with the refreshed current-format Title 1 fixture produces exit code `0`, writes `out/uscode/title-01/_title.md`, writes exactly 53 section markdown files, and reports `sections_found === 53` in the emitted JSON report.
   <!-- Touches: tests/integration/transform-cli.test.ts, tests/fixtures/xml/title-01/04-current-uscdoc.xml -->
-- [ ] The fixture-backed multi-title transform test for titles `1..54` excluding `53` continues to pass with current-format `uscDoc` inputs, and title `53` continues to surface the reserved-empty diagnostic already covered by the integration suite.
+- [ ] `tests/integration/transform-cli.test.ts` derives current-format `uscDoc` inputs for titles `2..54` (excluding reserved-empty `53`) by deterministic string substitutions applied to the refreshed committed Title 1 fixture at `tests/fixtures/xml/title-01/04-current-uscdoc.xml` inside the existing `buildCurrentFormatFixtureZip(...)` helper; no live OLRC downloads, extra committed XML fixtures, or non-fixture cache artifacts are introduced for this matrix.
+  <!-- Touches: tests/integration/transform-cli.test.ts, tests/fixtures/xml/title-01/04-current-uscdoc.xml -->
+- [ ] The fixture-backed multi-title transform test built from that derived-fixture strategy continues to pass for numeric titles `1..52` and `54`, and title `53` continues to surface the reserved-empty diagnostic already covered by the integration suite.
   <!-- Touches: tests/integration/transform-cli.test.ts -->
 - [ ] The CLI integration suite adds a regression assertion that output paths do not contain decorated display text by verifying the Title 1 run writes `title-01` and `section-1.md`, and writes no generated path containing `§`, `Title-1`, `Chapter-1`, `—`, or `..md`.
   <!-- Touches: tests/integration/transform-cli.test.ts -->
@@ -69,14 +73,15 @@ Update the USLM-to-IR transform so title, chapter, and section numbers use the c
 3. Parse inline XML containing `<section><num value="1">§ 1.</num></section>` and verify the parsed section number is `1`.
 4. Parse inline XML containing `<section><num>§ 1.</num></section>` and verify fallback stripping still yields `1`.
 5. Parse inline XML containing `<section><num value="   ">§ 1.</num></section>` and verify fallback stripping still yields `1`.
-6. Run the parser against the refreshed `tests/fixtures/xml/title-01/04-current-uscdoc.xml` and verify title number `1`, exactly 53 sections, and per-section numbers equal source `<num @value>` values.
-7. Inspect the same fixture in a structural test and verify `uscDoc > meta + main`, section identifiers use `/us/usc/t1/s...`, `<heading>` follows `<num>`, and decorated `<num>` text differs from clean `@value`.
-8. Run the existing legacy fixture tests for `01-base.xml` and `02-more.xml` and verify they still pass unchanged.
-9. Run the selected-vintage Title 1 CLI fixture test and verify `_title.md`, 53 `section-*.md` files, `sections_found === 53`, and no decorated characters in generated output paths.
-10. Run the title-matrix integration test and verify titles `1..52` and `54` still succeed while title `53` still fails with the reserved-empty diagnostic.
+6. Parse inline XML where `<num value="7">§ 8.</num>` (and equivalent title/chapter cases) and verify the emitted number is `7`, proving non-empty `@value` wins even when display text disagrees.
+7. Run the parser against the refreshed `tests/fixtures/xml/title-01/04-current-uscdoc.xml` and verify title number `1`, chapter count `1`, exactly 53 sections, and per-chapter/per-section numbers equal source `<num @value>` values.
+8. Inspect the same fixture in a structural test and verify `uscDoc > meta + main`, section identifiers use `/us/usc/t1/s...`, `<heading>` follows `<num>`, and decorated `<num>` text differs from clean `@value`.
+9. Run the existing legacy fixture tests for `01-base.xml` and `02-more.xml` and verify they still pass unchanged.
+10. Run the selected-vintage Title 1 CLI fixture test and verify `_title.md`, 53 `section-*.md` files, `sections_found === 53`, and no decorated characters in generated output paths.
+11. Run the title-matrix integration test that derives titles `2..54` from the refreshed committed Title 1 fixture via deterministic substitutions and verify titles `1..52` and `54` still succeed while title `53` still fails with the reserved-empty diagnostic.
 
 ## Edge Case Catalog
-- **Attribute-state edges:** `@value` missing, empty string, whitespace-only, or disagreeing with decorated text.
+- **Attribute-state edges:** `@value` missing, empty string, whitespace-only, or disagreeing with decorated text; when present and non-empty, `@value` remains authoritative even if the display text cleans to a different number.
 - **Decoration edges:** `§ 1.`, `Title 1—`, `Chapter 1—`, extra spaces, doubled punctuation, and mixed decoration such as `§ 1.—`.
 - **Legacy compatibility:** old fixtures with no attributes on `<num>`, sections nested directly under `<title>`, sections nested under `<chapter>`, and alphanumeric section numbers like `2/3` and `36B`.
 - **Malformed/partial XML:** missing `<num>`, `<num>` present but empty, missing `<heading>`, truncated XML, unclosed tags, and BOM-prefixed XML.
@@ -89,6 +94,7 @@ Update the USLM-to-IR transform so title, chapter, and section numbers use the c
 - **Properties:**
   - When `@value` is non-empty, parsed title/chapter/section numbers equal `@value` after whitespace normalization.
   - When `@value` is absent or empty, parsed numbers equal fallback text after deterministic decoration stripping.
+  - When non-empty `@value` and cleaned display text disagree, emitted title/chapter/section numbers still equal `@value`.
   - Decorated display text never appears in generated title directories or section markdown filenames.
   - Legacy fixtures without `@value` continue to produce the same `TitleIR` semantics as before.
 - **Purity boundary:** XML parsing and filesystem writes remain the effectful shell; `<num>` extraction, cleanup, and coercion remain unit-testable logic.
