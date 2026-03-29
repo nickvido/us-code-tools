@@ -510,6 +510,10 @@ async function fetchWithRetry(url: string, requestContext: OlrcRequestContext, b
       return response;
     } catch (error) {
       const normalizedError = toError(error);
+      if (bootstrapCookies) {
+        requestContext.hasBootstrapped = false;
+        requestContext.cookieHeader = null;
+      }
       logNetworkEvent({ level: 'error', event: 'network.request', source: 'olrc', method: 'GET', url, attempt: attempt + 1, cache_status: 'miss', duration_ms: Date.now() - startedAt });
       if (attempt >= DOWNLOAD_RETRY_COUNT || !isTransientDownloadError(normalizedError)) {
         throw new Error(`failed to download from ${url}: ${normalizedError.message}`);
@@ -535,11 +539,16 @@ async function fetchWithOlrcCookies(url: string, requestContext: OlrcRequestCont
 }
 
 async function bootstrapOlrcSession(requestContext: OlrcRequestContext, signal: AbortSignal): Promise<void> {
-  requestContext.hasBootstrapped = true;
-  const response = await fetch(OLRC_HOME_URL, { signal });
-  const cookieHeader = extractCookieHeader(response.headers);
-  if (cookieHeader) {
+  try {
+    const response = await fetch(OLRC_HOME_URL, { signal });
+    requestContext.hasBootstrapped = true;
+
+    const cookieHeader = extractCookieHeader(response.headers);
     requestContext.cookieHeader = cookieHeader;
+  } catch (error) {
+    requestContext.hasBootstrapped = false;
+    requestContext.cookieHeader = null;
+    throw error;
   }
 }
 
