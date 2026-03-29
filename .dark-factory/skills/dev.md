@@ -27,6 +27,9 @@
 - Focused issue #14 tests:
   - `npx vitest run tests/unit/transforms/uslm-to-ir.test.ts tests/unit/transforms/markdown.test.ts`
   - spot-check fixture sections: Title 42 § 10307 and Title 26 § 2
+- Focused issue #16 tests:
+  - `npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts`
+  - spot-checks: chapter filename normalization examples, `heading: Chapter {chapter}` fallback, collision rejection, and partial chapter write failure exit semantics
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
@@ -76,7 +79,7 @@
 ## Module Dependency Graph
 
 ### If you're modifying... → Read these first:
-- `src/index.ts` → `src/commands/fetch.ts`, `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts` (issue #8: `transform` now resolves OLRC ZIPs via manifest-backed selected-vintage cache state instead of the legacy `.cache/olrc/title-XX` layout)
+- `src/index.ts` → `src/commands/fetch.ts`, `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts` (issue #8/#16: `transform` now resolves OLRC ZIPs via manifest-backed selected-vintage cache state instead of the legacy `.cache/olrc/title-XX` layout, parses `--group-by chapter`, surfaces additive `warnings`, and must return non-zero on any `OUTPUT_WRITE_FAILED` from chapter-mode writes)
 - `src/commands/fetch.ts` → `src/utils/manifest.ts`, `src/utils/fetch-config.ts`, every `src/sources/*.ts` fetch entrypoint (this file owns CLI contract + deterministic `--all` ordering)
 - `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source uses `getSharedApiDataGovLimiter()` and throws numeric `nextRequestAt` values that `normalizeError()` serializes into the public `next_request_at` field)
 - `src/sources/congress-member-snapshot.ts` → `src/utils/manifest.ts` (freshness derives from manifest snapshot metadata + artifact existence)
@@ -93,8 +96,8 @@
 - `src/backfill/renderer.ts` → `src/backfill/constitution/dataset.ts`, `gray-matter`
 - `src/backfill/messages.ts` → no downstream state; keep pure and template-exact
 - `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10/#12/#14: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, canonical title/chapter/section numbers flow through `readCanonicalNumText(...)`, recursive traversal accumulates `subtitle`/`part`/`subpart`/`chapter`/`subchapter`, `parseNotes()` emits `sourceCredit` + `statutoryNotes`, and ordered-body helpers now preserve `chapeau`, inline body text, nested descendants, and `continuation` across `subsection -> ... -> subitem`)
-- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12/#14: section frontmatter now serializes hierarchy keys + `source_credit`, `_title.md` must use `sortSections()`, section prose may contain relative USC links generated from sanitized section ids, and labeled body rendering normalizes bare labels like `1` to `(1)` while keeping deterministic indentation)
-- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`, `src/domain/normalize.ts` (issue #12: all section file paths must use zero-padded `sectionFileSafeId()` output)
+- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12/#14/#16: section frontmatter now serializes hierarchy keys + `source_credit`, `_title.md` must use `sortSections()`, section prose may contain relative USC links generated from sanitized section ids, labeled body rendering normalizes bare labels like `1` to `(1)` while keeping deterministic indentation, and chapter-mode renderers must embed `renderSectionMarkdown()` output rather than re-render section bodies)
+- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`, `src/domain/normalize.ts` (issue #12/#16: all section file paths must use zero-padded `sectionFileSafeId()` output, chapter bucketing must use `section.hierarchy.chapter`, and collision detection must happen on `chapterOutputFilename()` before any chapter writes)
 
 ### Call Chain: Entry Point → Your Code
 ```text
@@ -172,7 +175,7 @@ src/index.ts (main)
 - `PreparedTargetRepo` in `src/backfill/target-repo.ts` — repo bootstrap + resume state handoff
 - `BackfillSummary` in `src/backfill/orchestrator.ts` — CLI success payload
 - `TitleIR`, `SectionIR`, `ParseError`, `XmlEntry`, `HierarchyIR`, `StatutoryNoteIR`, and the labeled `ContentNode` union in `src/domain/model.ts` — transform contracts, including issue #12 hierarchy/statutory-note metadata and issue #14 first-class `subclause` / `subitem` structured-body nodes
-- `splitSectionNumber(...)`, `compareSectionNumbers(...)`, `sectionFileSafeId(...)`, `sortSections(...)` in `src/domain/normalize.ts` — canonical section sort/pad/file-stem contract for issue #12
+- `splitSectionNumber(...)`, `compareSectionNumbers(...)`, `sectionFileSafeId(...)`, `sortSections(...)`, `chapterFileSafeId(...)`, `chapterOutputFilename(...)`, and `compareChapterIdentifiers(...)` in `src/domain/normalize.ts` — canonical section/chapter sort and filename contract for issues #12 and #16
 - `readCanonicalNumText(...)` / `cleanDecoratedNumText(...)` in `src/transforms/uslm-to-ir.ts` — the canonical `<num>` extraction boundary for issue #10; future parser changes should extend this seam instead of adding ad hoc cleanup elsewhere
 
 ## Conventions / Patterns
@@ -203,6 +206,7 @@ src/index.ts (main)
   - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; branch commit `07b954e` replaced locale-sensitive suffix sorting with direct codepoint comparison to keep that order deterministic
   - mixed-content inline ordering is now handled by the preserve-order parser path at head `2fb5c52`: `parseUslmToIr()` parses both the ordinary object tree and a `preserveOrder: true` tree, aligns sections with `collectOrderedSectionNodes(...)`, and routes section prose / `sourceCredit` / statutory-note extraction through ordered helpers instead of relying on the older object-entry traversal
   - issue #14 builds on that same preserve-order seam: `parseOrderedContentChildren(...)` and `parseLabeledNodeOrdered(...)` are now the production path for structured section bodies when ordered children are available; preserve the source-order contract `chapeau -> inline body -> nested labeled children -> continuation`
+  - issue #16 chapter mode must build on the existing transform contracts instead of bypassing them: group only on parsed `hierarchy.chapter`, order sections with `sortSections()`, derive chapter paths only through `chapterOutputFilename()`, and embed section output by stripping frontmatter from `renderSectionMarkdown()` results
   - when modifying `src/transforms/uslm-to-ir.ts`, treat `readOrderedRawText(...)` + `parseNotesOrdered(...)` as the production issue-#12 path and treat the ordered body helpers as the production issue-#14 path; keep legacy `readRawText(...)` behavior only where the ordered tree is unavailable, and avoid reintroducing per-tag bucket concatenation for mixed-content nodes
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
@@ -245,6 +249,11 @@ src/index.ts (main)
     - preserve `continuation` text after nested descendants in the same parent
     - render first-class `subclause` and `subitem` nodes instead of dropping deep hierarchy levels
     - normalize bare labels to parenthesized markdown output without disturbing already-parenthesized labels
+  - issue #16 chapter-grouped output work:
+    - additive `TransformGroupBy = 'section' | 'chapter'` CLI/output contract
+    - chapter files composed from existing section markdown with exact `heading: Chapter {chapter}` fallback when `TitleIR.chapters` lacks a match
+    - `_uncategorized.md` + report-only `warnings[]` for sections missing `hierarchy.chapter`
+    - pre-write normalized chapter filename collision rejection and non-zero exit on any chapter write failure
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories

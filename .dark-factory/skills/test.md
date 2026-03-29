@@ -22,8 +22,10 @@
 - `tests/unit/transforms/uslm-to-ir.test.ts` — legacy `uslm` fixtures plus current namespace-qualified `uscDoc` fixture coverage, canonical `<num @value>` precedence, empty-attribute fallback, disagreement cases, mixed punctuation cleanup, structural XSD-shape assertions, and issue #14 fixture regressions for section `chapeau`, paragraph body text, subsection body text, nested subclause bodies, and parent-level continuation text.
 - `tests/unit/transforms/issue12-recursive-metadata.test.ts` — real-fixture regression suite for recursive hierarchy walking, hierarchy frontmatter, singular `source_credit`, statutory notes, preserved `noteType`, relative USC ref rendering, canonical ordering, mixed-case suffix ordering, and zero-padded filename derivation.
 - `tests/unit/transforms/markdown.test.ts` — markdown rendering contracts, including issue #14 regression coverage for Title 42 § 10307 paragraph completeness, parenthesized label normalization, deterministic deep-hierarchy indentation/order, and continuation placement after nested children.
+- `tests/unit/issue16-chapter-mode.test.ts` — chapter-mode unit contracts for shared chapter filename normalization examples, exact fallback frontmatter (`heading: Chapter {chapter}`), and byte-identical section embedding through `renderChapterMarkdown()`.
 - `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures, selected-vintage cache lookup, path-safe output assertions, and derived current-format title matrix coverage for titles `1..52` and `54` with reserved-empty `53`.
 - `tests/integration/issue12-transform-cli.test.ts` — fixture-backed CLI coverage for titles 5/10/26, slash-separated USC ref links, and zero-padded filesystem output ordering.
+- `tests/integration/issue16-transform-cli.test.ts` — chapter-mode CLI coverage for `--group-by` validation, fewer-files-than-section-mode output, required chapter frontmatter/order, normalized chapter filename collision rejection, and non-zero exit on partial chapter write failures.
 - `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
 - `tests/adversary-round1-issue3.test.ts` — configured remote without upstream must still push current branch explicitly.
 - `tests/adversary-round1-issue5.test.ts` … `tests/adversary-round9-issue5.test.ts` — issue #5 regressions across fetch, cache, manifest, GovInfo/Congress behavior, and legislators crosswalk cleanup.
@@ -69,14 +71,19 @@
 - Issue #10 parser changes: assert `@value` beats display text for title/chapter/section nodes, whitespace-only attributes fall back cleanly, mixed trailing `.—` decoration is removed in fallback mode, Title 1 current-format fixture yields `titleIr.chapters.length === 1` + 53 canonical section numbers, and output paths never contain decorated `<num>` text.
 - Issue #12 transform changes: assert fixture `<section>` count equality for Titles 1/5/10/26, rendered hierarchy frontmatter for sampled deep-nesting sections, `source_credit` presence when `<sourceCredit>` exists, `## Statutory Notes` rendering when `<notes>` exists, preserved `noteType: 'uscNote'`, relative markdown links for transformable USC refs, canonical slash-ref mapping (`/us/usc/t10/s125/d` → `../title-10/section-00125d.md`), zero-padded filenames, canonical mixed-width/mixed-case section ordering (`106`, `106A`, `106a`, `106b`), and normalized mixed-content source-credit/note text retention (`Aug. 10, 1956, ch. 1041`, `70A Stat. 3`).
 - Issue #14 transform changes: assert Title 42 § 10307 preserves section `chapeau` plus all ten numbered paragraph bodies, Title 26 § 2 preserves subsection body text + nested subclause text + parent continuation text, rendered labels are parenthesized exactly once, and repeated renders are byte-identical for fixture-backed sections.
+- Issue #16 chapter-mode changes: assert numeric and non-numeric chapter filename normalization (`1` -> `chapter-001.md`, `IV` -> `chapter-iv.md`, `***` -> `chapter-unnamed.md`), exact fallback `heading: Chapter {chapter}`, `_title.md` retention in chapter mode, chapter bodies that contain standalone section markdown after frontmatter stripping, normalized chapter filename collision rejection before any chapter write, and non-zero exit when any chapter file write fails after another succeeds.
 - Latest issue #12 branch state at head `2fb5c52`: the earlier slash-ref / mixed-case-suffix regressions and the final mixed-content ordering seam are all covered and currently passing.
 - Latest issue #14 branch state at head `fa568ae`: the QA red regressions for missing paragraph/subsection bodies, bare labels, and dropped continuation text are all covered in `tests/unit/transforms/uslm-to-ir.test.ts` + `tests/unit/transforms/markdown.test.ts` and currently passing.
+- Latest issue #16 branch state at head `3c6f834`: the earlier collision-overwrite path and the final partial-chapter-write exit-code path are both covered in `tests/integration/issue16-transform-cli.test.ts` and currently passing.
 - Fastest focused verification for issue #12 now is:
   - `rtk test npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts tests/unit/transforms/write-output.test.ts`
   - expected result at current head: all tests pass, including the Title 10 assertions that require `Aug. 10, 1956, ch. 1041` and `70A Stat. 3` to survive around inline refs.
 - Fastest focused verification for issue #14 now is:
   - `rtk test npx vitest run tests/unit/transforms/uslm-to-ir.test.ts tests/unit/transforms/markdown.test.ts`
   - expected result at current head: all tests pass, including the Title 42 § 10307 completeness spot-check and the Title 26 § 2 continuation-order assertions.
+- Fastest focused verification for issue #16 now is:
+  - `rtk test npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts`
+  - expected result at current head: all tests pass, including the normalized filename collision regression and the partial chapter write non-zero exit regression.
 
 ## Known Test Behaviors
 - `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.
@@ -102,6 +109,7 @@
   - issue #8 OLRC regression coverage for cookie bootstrap, listing parsing, `uscDoc` parsing, selected-vintage transform lookup, Title 42 extraction, and Title 53 reserved-empty behavior
   - issue #10 transform regression coverage for canonical `@value` extraction, fallback decoration cleanup, Title 1 chapter/section equality against source fixture values, path-safe output names, and derived multi-title current-format fixtures
   - issue #12 regression coverage for recursive hierarchy fixtures, hierarchy markdown frontmatter, `source_credit`, statutory note wrapper metadata, relative USC refs, and zero-padded section filenames
+  - issue #16 regression coverage for additive chapter-mode CLI validation, chapter frontmatter/embedding contracts, filename normalization, collision rejection, and partial write exit semantics
   - existing transform regression coverage remains intact
 - What's intentionally deferred:
   - live external Constitution-source verification during tests

@@ -242,3 +242,38 @@
 - **Decision:** `src/transforms/markdown.ts` normalizes labels at render time with `formatLabel(...)`, adding parentheses only when they are absent and leaving already-parenthesized labels unchanged.
 - **Consequence:** Canonical parser values stay stable for IR/testing/path logic, while rendered markdown remains readable and deterministic. Future agents should not move this formatting concern into identifier parsing.
 - **Feature:** #14 Transform: render chapeau, paragraph content, and subsection body text
+
+### ADR-034: Transform output grouping is an extensible mode value, not a boolean
+- **Status:** Active
+- **Context:** Issue #16 adds chapter-grouped output while keeping section-per-file output as the default, and future grouping modes (`subchapter`, `part`) are explicitly contemplated by the spec.
+- **Decision:** `src/domain/model.ts` defines `TransformGroupBy = 'section' | 'chapter'`, `src/index.ts` defaults `parseTransformArgs()` to `'section'`, and `writeTitleOutput(...)` branches on that mode instead of on a bespoke boolean flag.
+- **Consequence:** Future grouping modes can extend the union without redefining the CLI/output contract or overloading a boolean with new meanings.
+- **Feature:** #16 Transform: chapter-level output mode
+
+### ADR-035: Chapter files are composed from rendered section markdown, not a second section renderer
+- **Status:** Active
+- **Context:** The spec and architecture treat rendering drift between section mode and chapter mode as the highest-risk correctness failure.
+- **Decision:** `src/transforms/markdown.ts` implements `renderChapterMarkdown(...)` / `renderUncategorizedMarkdown(...)` by stripping frontmatter from `renderSectionMarkdown(section)` output and concatenating those rendered bodies in canonical order.
+- **Consequence:** Section headings, body text, notes, source credits, and USC links stay aligned across output modes; future agents should not introduce a parallel raw-content rendering path for chapter mode.
+- **Feature:** #16 Transform: chapter-level output mode
+
+### ADR-036: Chapter filename normalization is centralized and collisions fail before any chapter write
+- **Status:** Active
+- **Context:** The spec requires one shared normalization contract for `chapter-{safe-id}.md`, and adversary review found that the normalization is intentionally many-to-one (`A-B` and `A / B` can both map to `chapter-a-b.md`).
+- **Decision:** `src/domain/normalize.ts` owns `chapterFileSafeId()`, `chapterOutputFilename()`, and `compareChapterIdentifiers()`, while `src/transforms/write-output.ts` precomputes normalized output filenames and records `OUTPUT_WRITE_FAILED` if distinct raw chapter ids collide before the write loop starts.
+- **Consequence:** Raw chapter identifiers never become filenames directly, and one bucket cannot silently overwrite another. Future agents must preserve the pre-write collision guard.
+- **Feature:** #16 Transform: chapter-level output mode
+
+### ADR-037: Uncategorized chapter-mode diagnostics are warnings, not parse errors
+- **Status:** Active
+- **Context:** The approved spec requires successful chapter-mode runs to preserve zero `parse_errors` even when some sections lack `hierarchy.chapter`.
+- **Decision:** `src/transforms/write-output.ts` routes chapter-less sections into `_uncategorized.md` and emits `TransformWarning { code: 'UNCATEGORIZED_SECTION', ... }` entries that `src/index.ts` surfaces via the additive `warnings` array in the JSON report.
+- **Consequence:** Successful chapter-mode runs can surface incomplete hierarchy metadata without failing parse success semantics. Future agents should not downgrade this warning path into `parseErrors`.
+- **Feature:** #16 Transform: chapter-level output mode
+
+### ADR-038: Any chapter-mode output write failure forces a non-zero transform exit
+- **Status:** Active
+- **Context:** Issue #16 adversary review found that partial chapter writes could still exit `0` if `_title.md` and one chapter file succeeded while another chapter file failed.
+- **Decision:** After emitting the JSON report, `src/index.ts` explicitly returns non-zero whenever `writeResult.parseErrors` contains any `OUTPUT_WRITE_FAILED`, not just duplicate-section collisions.
+- **Consequence:** Partial chapter writes are surfaced through the existing write-error path and cannot be mistaken for a successful transform.
+- **Feature:** #16 Transform: chapter-level output mode
