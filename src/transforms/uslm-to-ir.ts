@@ -4,8 +4,10 @@ import { asArray, normalizeWhitespace, sectionFileSafeId } from '../domain/norma
 
 const MAX_NORMALIZED_FIELD_LENGTH = 1_048_576;
 const HIERARCHY_TAGS = ['subtitle', 'part', 'subpart', 'chapter', 'subchapter'] as const;
+const SECTION_BODY_TAGS = ['subsection', 'paragraph', 'subparagraph', 'clause', 'subclause', 'item', 'subitem'] as const;
 
 type HierarchyTag = typeof HIERARCHY_TAGS[number];
+type SectionBodyTag = typeof SECTION_BODY_TAGS[number];
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -151,6 +153,7 @@ interface XmlNode {
   continuation?: XmlNode | XmlNode[];
   chapeau?: XmlNode | XmlNode[];
   subclause?: XmlNode | XmlNode[];
+  subitem?: XmlNode | XmlNode[];
   'cross-reference'?: XmlNode | XmlNode[];
 }
 
@@ -349,8 +352,9 @@ function parseContent(
     if (text) content.push({ type: 'text', text });
   }
 
-  content.push(...asArray(contentRoot.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
-  content.push(...asArray(contentRoot.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
+  for (const tag of SECTION_BODY_TAGS) {
+    content.push(...asArray(contentRoot[tag]).map((child) => parseLabeledNode(tag, child, parseErrors, xmlPath, sectionHint)));
+  }
 
   if (content.length === 0) {
     const text = optionalText(parseErrors, contentRoot.p ?? contentRoot.text ?? contentRoot, xmlPath, 'section text', sectionHint);
@@ -397,8 +401,8 @@ function parseOrderedContentChildren(
       continue;
     }
 
-    if (tag === 'subsection' || tag === 'paragraph') {
-      content.push(parseLabeledNodeOrdered(tag, entry, parseErrors, xmlPath, sectionHint));
+    if (SECTION_BODY_TAGS.includes(tag as SectionBodyTag)) {
+      content.push(parseLabeledNodeOrdered(tag as SectionBodyTag, entry, parseErrors, xmlPath, sectionHint));
       continue;
     }
 
@@ -415,7 +419,7 @@ function parseOrderedContentChildren(
 }
 
 function parseLabeledNode(
-  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'item',
+  type: SectionBodyTag,
   node: XmlNode,
   parseErrors: ParseError[],
   xmlPath: string | undefined,
@@ -428,12 +432,9 @@ function parseLabeledNode(
     if (text) children.push({ type: 'text', text });
   }
 
-  children.push(...asArray(node.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.subparagraph).map((child) => parseLabeledNode('subparagraph', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.clause).map((child) => parseLabeledNode('clause', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.subclause).map((child) => parseLabeledNode('item', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.item).map((child) => parseLabeledNode('item', child, parseErrors, xmlPath, sectionHint)));
+  for (const tag of SECTION_BODY_TAGS) {
+    children.push(...asArray(node[tag]).map((child) => parseLabeledNode(tag, child, parseErrors, xmlPath, sectionHint)));
+  }
 
   const inlineText = optionalText(parseErrors, node.content ?? node.text ?? node.p, xmlPath, `${type} text`, sectionHint);
 
@@ -447,7 +448,7 @@ function parseLabeledNode(
 }
 
 function parseLabeledNodeOrdered(
-  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'item',
+  type: SectionBodyTag,
   entry: OrderedEntry,
   parseErrors: ParseError[],
   xmlPath: string | undefined,
@@ -471,8 +472,8 @@ function parseLabeledNodeOrdered(
       continue;
     }
 
-    if (tag === 'subsection' || tag === 'paragraph' || tag === 'subparagraph' || tag === 'clause' || tag === 'subclause' || tag === 'item') {
-      children.push(parseLabeledNodeOrdered(tag === 'subclause' ? 'item' : tag, child, parseErrors, xmlPath, sectionHint));
+    if (SECTION_BODY_TAGS.includes(tag as SectionBodyTag)) {
+      children.push(parseLabeledNodeOrdered(tag as SectionBodyTag, child, parseErrors, xmlPath, sectionHint));
       continue;
     }
 

@@ -74,36 +74,44 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-function renderContentNode(node: ContentNode, depth = 0): string {
+function renderContentNode(node: ContentNode): string {
   if (node.type === 'text') {
-    return `${' '.repeat(depth)}${node.text}`.trimEnd();
-  }
-
-  if (node.type === 'subsection') {
-    const heading = [node.label, node.heading].filter(Boolean).join(' ');
-    const parts = [`## ${heading}`.trim()];
-    if (node.text) parts.push(node.text);
-    for (const child of node.children) parts.push(renderContentNode(child, 0));
-    return parts.join('\n');
+    return node.text.trimEnd();
   }
 
   const indent = indentationForNode(node.type);
-  const labelLine = [`${node.label}`, node.heading, node.text].filter(Boolean).join(' ');
+  const labelLine = [formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
   const lines = [`${' '.repeat(indent)}${labelLine}`.trimEnd()];
-  for (const child of node.children) lines.push(renderContentNode(child, depth + 2));
+  for (const child of node.children) {
+    lines.push(renderContentNode(child));
+  }
   return lines.join('\n');
 }
 
-function indentationForNode(type: Exclude<ContentNode['type'], 'text' | 'subsection'>): number {
+function formatLabel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed.startsWith('(') ? trimmed : `(${trimmed})`;
+}
+
+function indentationForNode(type: Exclude<ContentNode['type'], 'text'>): number {
   switch (type) {
+    case 'subsection':
     case 'paragraph':
       return 0;
     case 'subparagraph':
       return 2;
     case 'clause':
       return 4;
-    case 'item':
+    case 'subclause':
       return 6;
+    case 'item':
+      return 8;
+    case 'subitem':
+      return 10;
   }
 }
 

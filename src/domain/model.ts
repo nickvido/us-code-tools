@@ -39,7 +39,7 @@ export interface StatutoryNoteIR {
 }
 
 interface BaseLabeledNode {
-  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'item';
+  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'subclause' | 'item' | 'subitem';
   label: string;
   heading?: string;
   text?: string;
@@ -50,14 +50,16 @@ export interface SubsectionNode extends BaseLabeledNode { type: 'subsection'; }
 export interface ParagraphNode extends BaseLabeledNode { type: 'paragraph'; }
 export interface SubparagraphNode extends BaseLabeledNode { type: 'subparagraph'; }
 export interface ClauseNode extends BaseLabeledNode { type: 'clause'; }
+export interface SubclauseNode extends BaseLabeledNode { type: 'subclause'; }
 export interface ItemNode extends BaseLabeledNode { type: 'item'; }
+export interface SubitemNode extends BaseLabeledNode { type: 'subitem'; }
 
 export interface TextBlockNode {
   type: 'text';
   text: string;
 }
 
-export type ContentNode = SubsectionNode | ParagraphNode | SubparagraphNode | ClauseNode | ItemNode | TextBlockNode;
+export type ContentNode = SubsectionNode | ParagraphNode | SubparagraphNode | ClauseNode | SubclauseNode | ItemNode | SubitemNode | TextBlockNode;
 
 export interface SectionIR {
   titleNumber: number;
