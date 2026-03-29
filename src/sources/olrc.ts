@@ -94,6 +94,7 @@ export async function resolveCachedOlrcTitleZipPath(titleNumber: number, dataDir
 interface OlrcVintagePlan {
   selectedVintage: string;
   titleUrls: Map<number, string>;
+  titleUrlsByVintage: Map<string, Map<number, string>>;
   missingTitles: number[];
   listingUrl: string;
   availableVintages: string[];
@@ -268,6 +269,7 @@ export async function fetchOlrcVintagePlan(
   return {
     selectedVintage,
     titleUrls,
+    titleUrlsByVintage: byVintage,
     missingTitles,
     listingUrl: listing.listingUrl,
     availableVintages,
@@ -352,15 +354,19 @@ function selectVintagePlan(discovery: OlrcVintagePlan, vintage: string): OlrcVin
     return null;
   }
 
-  const titleUrls = new Map<number, string>();
-  for (const [title, url] of extractVintageTitleEntries(discovery, vintage)) {
-    titleUrls.set(title, url);
+  const discoveredTitleUrls = discovery.titleUrlsByVintage.get(vintage);
+  if (!discoveredTitleUrls) {
+    return null;
   }
+
+  const titleUrls = new Map(discoveredTitleUrls);
+  const missingTitles = computeMissingTitles(titleUrls);
 
   return {
     selectedVintage: vintage,
     titleUrls,
-    missingTitles: computeMissingTitles(titleUrls),
+    titleUrlsByVintage: discovery.titleUrlsByVintage,
+    missingTitles,
     listingUrl: discovery.listingUrl,
     availableVintages: discovery.availableVintages,
     discoveredAt: discovery.discoveredAt,
@@ -368,25 +374,13 @@ function selectVintagePlan(discovery: OlrcVintagePlan, vintage: string): OlrcVin
       return {
         selectedVintage: vintage,
         titleUrls: Object.fromEntries(titleUrls),
-        missingTitles: computeMissingTitles(titleUrls),
+        missingTitles,
         listingUrl: discovery.listingUrl,
         availableVintages: discovery.availableVintages,
         discoveredAt: discovery.discoveredAt,
       };
     },
   };
-}
-
-function extractVintageTitleEntries(discovery: OlrcVintagePlan, vintage: string): Array<[number, string]> {
-  if (discovery.selectedVintage === vintage) {
-    return [...discovery.titleUrls.entries()];
-  }
-
-  const entries: Array<[number, string]> = [];
-  for (let title = TITLE_RANGE.start; title <= TITLE_RANGE.end; title += 1) {
-    entries.push([title, resolveTitleUrl(title, vintage)]);
-  }
-  return entries;
 }
 
 async function fetchDiscoveredOlrcVintage(
@@ -892,11 +886,7 @@ async function isZipEmpty(buffer: Buffer): Promise<boolean> {
   });
 }
 
-function classifyReservedEmptyPayload(titleNumber: number, buffer: Buffer, contentType: string | null): ReservedEmptyClassification | null {
-  if (titleNumber !== RESERVED_EMPTY_TITLE) {
-    return null;
-  }
-
+function classifyReservedEmptyPayload(_titleNumber: number, buffer: Buffer, contentType: string | null): ReservedEmptyClassification | null {
   if (buffer.byteLength === 0) {
     return { classification_reason: 'empty_zip' };
   }
@@ -913,11 +903,7 @@ function classifyReservedEmptyPayload(titleNumber: number, buffer: Buffer, conte
   return null;
 }
 
-function classifyReservedEmptyError(titleNumber: number, error: unknown): ReservedEmptyClassification | null {
-  if (titleNumber !== RESERVED_EMPTY_TITLE) {
-    return null;
-  }
-
+function classifyReservedEmptyError(_titleNumber: number, error: unknown): ReservedEmptyClassification | null {
   const message = error instanceof Error ? error.message : String(error);
   const reservedMatch = message.match(/reserved_empty:([a-z_]+)/i);
   if (reservedMatch) {
@@ -943,8 +929,8 @@ function classifyReservedEmptyError(titleNumber: number, error: unknown): Reserv
   return null;
 }
 
-function classifyReservedEmptyXmlEntries(titleNumber: number, xmlEntries: XmlEntry[]): ReservedEmptyClassification | null {
-  if (titleNumber === RESERVED_EMPTY_TITLE && xmlEntries.length === 0) {
+function classifyReservedEmptyXmlEntries(_titleNumber: number, xmlEntries: XmlEntry[]): ReservedEmptyClassification | null {
+  if (xmlEntries.length === 0) {
     return { classification_reason: 'no_xml_entries' };
   }
 
