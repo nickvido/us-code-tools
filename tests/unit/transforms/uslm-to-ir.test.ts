@@ -398,6 +398,23 @@ describe('uslm-to-ir parser', () => {
     ).toBe(true);
     expect(result.parseErrors).toEqual([]);
   });
+
+  it('extracts subsection body text from nested <content><p> blocks without collapsing later structured children', async () => {
+    const result = await parseXmlFixture(readFixtureFrom('title-26', '26-deep-hierarchy-sections.xml'));
+    const section = result.titleIr.sections.find((entry: any) => entry.sectionNumber === '1');
+
+    expect(section).toBeTruthy();
+
+    const subsection = section.content.find((node: any) => node.type === 'subsection' && node.label === 'b');
+    expect(subsection).toBeTruthy();
+    expect(String(subsection.text ?? '')).toContain('There is hereby imposed on the taxable income of every head of a household');
+    expect(String(subsection.text ?? '')).toContain('The tax is:');
+    expect(subsection.children).toEqual([]);
+
+    const subsectionWithNestedChildren = section.content.find((node: any) => node.type === 'subsection' && node.label === 'f');
+    expect(subsectionWithNestedChildren).toBeTruthy();
+    expect(subsectionWithNestedChildren.children.some((node: any) => node.type === 'paragraph' && node.label === '2')).toBe(true);
+  });
 });
 
 function parenLabelIsNormalized(label: string): boolean {
