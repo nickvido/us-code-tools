@@ -7,7 +7,14 @@ import type { XmlEntry } from '../domain/model.js';
 import { padTitleNumber } from '../domain/normalize.js';
 import { getCachePaths } from '../utils/cache.js';
 import { getDataDirectory, readManifest, writeManifest } from '../utils/manifest.js';
-import type { DownloadedFileManifestEntry, OlrcTitleReservedEmptyState, OlrcTitleState } from '../utils/manifest.js';
+import type {
+  DownloadedFileManifestEntry,
+  OlrcAvailableVintagesState,
+  OlrcManifestState,
+  OlrcTitleReservedEmptyState,
+  OlrcTitleState,
+  OlrcVintageState,
+} from '../utils/manifest.js';
 import { logNetworkEvent } from '../utils/logger.js';
 
 const DOWNLOAD_TIMEOUT_MS = 500;
@@ -31,6 +38,22 @@ export interface OlrcFetchResult {
   missing_titles?: number[];
   reserved_empty_titles?: Array<{ title: number; status: 'reserved_empty'; classification_reason: OlrcTitleReservedEmptyState['classification_reason'] }>;
   error?: { code: string; message: string };
+}
+
+export interface OlrcListVintagesResult {
+  source: 'olrc';
+  ok: boolean;
+  available_vintages?: string[];
+  latest_vintage?: string;
+  error?: { code: string; message: string };
+}
+
+export interface OlrcAllVintagesResult {
+  source: 'olrc';
+  ok: boolean;
+  mode: 'all_vintages';
+  available_vintages: string[];
+  results: Array<OlrcFetchResult & { vintage: string; selected_vintage: string }>;
 }
 
 export async function getTitleZipPath(titleNumber: number, cacheRoot: string): Promise<string> {
@@ -73,7 +96,9 @@ interface OlrcVintagePlan {
   titleUrls: Map<number, string>;
   missingTitles: number[];
   listingUrl: string;
-  toJSON(): { selectedVintage: string; titleUrls: Record<string, string>; missingTitles: number[]; listingUrl: string };
+  availableVintages: string[];
+  discoveredAt: string;
+  toJSON(): { selectedVintage: string; titleUrls: Record<string, string>; missingTitles: number[]; listingUrl: string; availableVintages: string[]; discoveredAt: string };
 }
 
 interface OlrcRequestContext {
@@ -94,139 +119,124 @@ export function resolveTitleUrl(titleNumber: number, selectedVintage = '118-200'
 }
 
 export async function fetchOlrcSource(invocation?: { force?: boolean; cacheRoot?: string }): Promise<OlrcFetchResult> {
-  const force = invocation?.force ?? false;
-  const sourceDirectory = invocation?.cacheRoot ?? getCachePaths('olrc').sourceDirectory;
-  await mkdir(sourceDirectory, { recursive: true });
-
   const requestContext = createOlrcRequestContext();
 
-  let plan: OlrcVintagePlan;
+  let discovery: OlrcVintagePlan;
   try {
-    plan = await fetchOlrcVintagePlan(requestContext, 'current');
+    discovery = await fetchOlrcVintagePlan(requestContext, 'current');
   } catch (error) {
     return await recordOlrcFailure('upstream_request_failed', error instanceof Error ? error.message : 'OLRC fetch failed');
   }
 
-  const manifest = await readManifest();
-  manifest.sources.olrc.selected_vintage = plan.selectedVintage;
-  const titlesState: Record<string, OlrcTitleState> = { ...manifest.sources.olrc.titles };
+  return fetchDiscoveredOlrcVintage(discovery, {
+    force: invocation?.force ?? false,
+    cacheRoot: invocation?.cacheRoot,
+    requestContext,
+    updateSelectedVintageMirror: true,
+  });
+}
 
-  let titlesDownloaded = 0;
+export async function listOlrcVintages(): Promise<OlrcListVintagesResult> {
   try {
-    for (const [titleNumber, url] of plan.titleUrls) {
-      const titleDirectory = resolve(sourceDirectory, 'vintages', plan.selectedVintage, `title-${padTitleNumber(titleNumber)}`);
-
-      try {
-        const zipPath = await getOrCreateZipPath({
-          titleNumber,
-          url,
-          titleDirectory,
-          force,
-          requestContext,
-          bootstrapCookies: plan.listingUrl === OLRC_LISTING_URL,
-        });
-        const xmlEntries = await extractXmlEntriesFromZip(zipPath);
-
-        const reservedEmpty = classifyReservedEmptyXmlEntries(titleNumber, xmlEntries);
-        if (reservedEmpty) {
-          await removeTitleDirectoryIfPresent(titleDirectory);
-          applyReservedEmptyState(titlesState, titleNumber, plan.selectedVintage, url, reservedEmpty.classification_reason);
-          continue;
-        }
-
-        const extractionDirectory = resolve(titleDirectory, 'extracted');
-        await mkdir(extractionDirectory, { recursive: true });
-
-        const fetchedAt = new Date().toISOString();
-        const extractedArtifacts: DownloadedFileManifestEntry[] = [];
-        for (const entry of xmlEntries) {
-          const outputPath = resolve(extractionDirectory, entry.xmlPath);
-          await mkdir(resolve(outputPath, '..'), { recursive: true });
-          await writeFile(outputPath, entry.xml, { encoding: 'utf8', mode: 0o640 });
-          extractedArtifacts.push({
-            path: outputPath,
-            byte_count: Buffer.byteLength(entry.xml, 'utf8'),
-            checksum_sha256: sha256(Buffer.from(entry.xml, 'utf8')),
-            fetched_at: fetchedAt,
-          });
-        }
-
-        const zipBytes = await readFile(zipPath);
-        titlesState[String(titleNumber)] = {
-          title: titleNumber,
-          vintage: plan.selectedVintage,
-          status: 'downloaded',
-          zip_path: zipPath,
-          extraction_path: extractionDirectory,
-          byte_count: zipBytes.byteLength,
-          fetched_at: fetchedAt,
-          extracted_xml_artifacts: extractedArtifacts,
-        };
-        titlesDownloaded += 1;
-      } catch (error) {
-        const classification = classifyReservedEmptyError(titleNumber, error);
-        if (classification) {
-          await removeTitleDirectoryIfPresent(titleDirectory);
-          applyReservedEmptyState(titlesState, titleNumber, plan.selectedVintage, url, classification.classification_reason);
-          continue;
-        }
-
-        throw error;
-      }
-    }
-
-    manifest.sources.olrc.titles = titlesState;
-    manifest.sources.olrc.last_success_at = new Date().toISOString();
-
-    const reservedEmptyTitles = summarizeReservedEmptyTitles(titlesState);
-    if (plan.listingUrl === OLRC_LEGACY_LISTING_URL && plan.missingTitles.length > 0) {
-      manifest.sources.olrc.last_failure = {
-        code: 'missing_from_vintage',
-        message: `Selected OLRC vintage ${plan.selectedVintage} is missing titles: ${plan.missingTitles.join(', ')}`,
-      };
-      await writeManifest(manifest);
-      return {
-        source: 'olrc',
-        ok: false,
-        requested_scope: { titles: '1..54' },
-        selected_vintage: plan.selectedVintage,
-        counts: { titles_downloaded: titlesDownloaded },
-        missing_titles: plan.missingTitles,
-        reserved_empty_titles: reservedEmptyTitles,
-        error: manifest.sources.olrc.last_failure,
-      };
-    }
-
-    manifest.sources.olrc.last_failure = null;
-    await writeManifest(manifest);
-
+    const discovery = await fetchOlrcVintagePlan(createOlrcRequestContext(), 'current');
     return {
       source: 'olrc',
       ok: true,
-      requested_scope: { titles: '1..54' },
-      selected_vintage: plan.selectedVintage,
-      counts: { titles_downloaded: titlesDownloaded },
-      missing_titles: plan.missingTitles,
-      reserved_empty_titles: reservedEmptyTitles,
+      available_vintages: discovery.availableVintages,
+      latest_vintage: discovery.selectedVintage,
     };
   } catch (error) {
-    manifest.sources.olrc.titles = titlesState;
-    manifest.sources.olrc.last_failure = {
-      code: 'upstream_request_failed',
-      message: error instanceof Error ? error.message : 'OLRC fetch failed',
+    return {
+      source: 'olrc',
+      ok: false,
+      error: {
+        code: 'upstream_request_failed',
+        message: error instanceof Error ? error.message : 'OLRC fetch failed',
+      },
     };
-    await writeManifest(manifest);
+  }
+}
+
+export async function fetchSpecificOlrcVintage(invocation: { vintage: string; force?: boolean; cacheRoot?: string }): Promise<OlrcFetchResult> {
+  const requestContext = createOlrcRequestContext();
+
+  let discovery: OlrcVintagePlan;
+  try {
+    discovery = await fetchOlrcVintagePlan(requestContext, 'current');
+  } catch (error) {
+    return await recordOlrcFailure('upstream_request_failed', error instanceof Error ? error.message : 'OLRC fetch failed');
+  }
+
+  const requestedPlan = selectVintagePlan(discovery, invocation.vintage);
+  if (requestedPlan === null) {
     return {
       source: 'olrc',
       ok: false,
       requested_scope: { titles: '1..54' },
-      selected_vintage: plan.selectedVintage,
-      counts: { titles_downloaded: titlesDownloaded },
-      missing_titles: plan.missingTitles,
-      reserved_empty_titles: summarizeReservedEmptyTitles(titlesState),
-      error: manifest.sources.olrc.last_failure,
+      selected_vintage: invocation.vintage,
+      error: {
+        code: 'unknown_vintage',
+        message: `Requested OLRC vintage ${invocation.vintage} was not present in the releasepoint listing`,
+      },
     };
   }
+
+  return fetchDiscoveredOlrcVintage(requestedPlan, {
+    force: invocation.force ?? false,
+    cacheRoot: invocation.cacheRoot,
+    requestContext,
+    updateSelectedVintageMirror: false,
+  });
+}
+
+export async function fetchAllOlrcVintages(invocation?: { force?: boolean; cacheRoot?: string }): Promise<OlrcAllVintagesResult> {
+  const requestContext = createOlrcRequestContext();
+
+  let discovery: OlrcVintagePlan;
+  try {
+    discovery = await fetchOlrcVintagePlan(requestContext, 'current');
+  } catch (error) {
+    return {
+      source: 'olrc',
+      ok: false,
+      mode: 'all_vintages',
+      available_vintages: [],
+      results: [{
+        source: 'olrc',
+        ok: false,
+        requested_scope: { titles: '1..54' },
+        vintage: '',
+        selected_vintage: '',
+        error: {
+          code: 'upstream_request_failed',
+          message: error instanceof Error ? error.message : 'OLRC fetch failed',
+        },
+      }],
+    };
+  }
+
+  const results: Array<OlrcFetchResult & { vintage: string; selected_vintage: string }> = [];
+  for (const vintage of discovery.availableVintages) {
+    const plan = selectVintagePlan(discovery, vintage);
+    if (plan === null) {
+      continue;
+    }
+    const result = await fetchDiscoveredOlrcVintage(plan, {
+      force: invocation?.force ?? false,
+      cacheRoot: invocation?.cacheRoot,
+      requestContext,
+      updateSelectedVintageMirror: false,
+    });
+    results.push({ ...result, vintage, selected_vintage: result.selected_vintage ?? vintage });
+  }
+
+  return {
+    source: 'olrc',
+    ok: results.every((result) => result.ok),
+    mode: 'all_vintages',
+    available_vintages: discovery.availableVintages,
+    results,
+  };
 }
 
 export async function fetchOlrcVintagePlan(
@@ -236,6 +246,7 @@ export async function fetchOlrcVintagePlan(
   const listing = await fetchPreferredOlrcListing(requestContext, preferredListing);
   const html = await listing.response.text();
   const byVintage = new Map<string, Map<number, string>>();
+  const discoveredAt = new Date().toISOString();
 
   for (const link of extractReleasepointLinks(html, listing.listingUrl)) {
     const titles = byVintage.get(link.vintage) ?? new Map<number, string>();
@@ -249,26 +260,26 @@ export async function fetchOlrcVintagePlan(
     throw new Error('OLRC listing did not expose any releasepoint title ZIP links');
   }
 
-  const selectedVintage = [...byVintage.keys()].sort(compareVintageDescending)[0] ?? '';
+  const availableVintages = [...byVintage.keys()].sort(compareVintageDescending);
+  const selectedVintage = availableVintages[0] ?? '';
   const titleUrls = byVintage.get(selectedVintage) ?? new Map<number, string>();
-  const missingTitles: number[] = [];
-  for (let title = TITLE_RANGE.start; title <= TITLE_RANGE.end; title += 1) {
-    if (title !== RESERVED_EMPTY_TITLE && !titleUrls.has(title)) {
-      missingTitles.push(title);
-    }
-  }
+  const missingTitles = computeMissingTitles(titleUrls);
 
   return {
     selectedVintage,
     titleUrls,
     missingTitles,
     listingUrl: listing.listingUrl,
+    availableVintages,
+    discoveredAt,
     toJSON() {
       return {
         selectedVintage,
         titleUrls: Object.fromEntries(titleUrls),
         missingTitles,
         listingUrl: listing.listingUrl,
+        availableVintages,
+        discoveredAt,
       };
     },
   };
@@ -326,6 +337,227 @@ function extractReleasepointLinks(html: string, baseUrl: string): Array<{ title:
   return links;
 }
 
+function computeMissingTitles(titleUrls: Map<number, string>): number[] {
+  const missingTitles: number[] = [];
+  for (let title = TITLE_RANGE.start; title <= TITLE_RANGE.end; title += 1) {
+    if (title !== RESERVED_EMPTY_TITLE && !titleUrls.has(title)) {
+      missingTitles.push(title);
+    }
+  }
+  return missingTitles;
+}
+
+function selectVintagePlan(discovery: OlrcVintagePlan, vintage: string): OlrcVintagePlan | null {
+  if (!discovery.availableVintages.includes(vintage)) {
+    return null;
+  }
+
+  const titleUrls = new Map<number, string>();
+  for (const [title, url] of extractVintageTitleEntries(discovery, vintage)) {
+    titleUrls.set(title, url);
+  }
+
+  return {
+    selectedVintage: vintage,
+    titleUrls,
+    missingTitles: computeMissingTitles(titleUrls),
+    listingUrl: discovery.listingUrl,
+    availableVintages: discovery.availableVintages,
+    discoveredAt: discovery.discoveredAt,
+    toJSON() {
+      return {
+        selectedVintage: vintage,
+        titleUrls: Object.fromEntries(titleUrls),
+        missingTitles: computeMissingTitles(titleUrls),
+        listingUrl: discovery.listingUrl,
+        availableVintages: discovery.availableVintages,
+        discoveredAt: discovery.discoveredAt,
+      };
+    },
+  };
+}
+
+function extractVintageTitleEntries(discovery: OlrcVintagePlan, vintage: string): Array<[number, string]> {
+  if (discovery.selectedVintage === vintage) {
+    return [...discovery.titleUrls.entries()];
+  }
+
+  const entries: Array<[number, string]> = [];
+  for (let title = TITLE_RANGE.start; title <= TITLE_RANGE.end; title += 1) {
+    entries.push([title, resolveTitleUrl(title, vintage)]);
+  }
+  return entries;
+}
+
+async function fetchDiscoveredOlrcVintage(
+  plan: OlrcVintagePlan,
+  options: { force: boolean; cacheRoot?: string; requestContext: OlrcRequestContext; updateSelectedVintageMirror: boolean },
+): Promise<OlrcFetchResult> {
+  const sourceDirectory = options.cacheRoot ?? getCachePaths('olrc').sourceDirectory;
+  await mkdir(sourceDirectory, { recursive: true });
+
+  const manifest = await readManifest();
+  const titlesState: Record<string, OlrcTitleState> = {};
+  let titlesDownloaded = 0;
+
+  try {
+    for (const [titleNumber, url] of plan.titleUrls) {
+      const titleDirectory = resolve(sourceDirectory, 'vintages', plan.selectedVintage, `title-${padTitleNumber(titleNumber)}`);
+
+      try {
+        const zipPath = await getOrCreateZipPath({
+          titleNumber,
+          url,
+          titleDirectory,
+          force: options.force,
+          requestContext: options.requestContext,
+          bootstrapCookies: plan.listingUrl === OLRC_LISTING_URL,
+        });
+        const xmlEntries = await extractXmlEntriesFromZip(zipPath);
+        const reservedEmpty = classifyReservedEmptyXmlEntries(titleNumber, xmlEntries);
+        if (reservedEmpty) {
+          await removeTitleDirectoryIfPresent(titleDirectory);
+          applyReservedEmptyState(titlesState, titleNumber, plan.selectedVintage, url, reservedEmpty.classification_reason);
+          continue;
+        }
+
+        const extractionDirectory = resolve(titleDirectory, 'extracted');
+        await mkdir(extractionDirectory, { recursive: true });
+
+        const fetchedAt = new Date().toISOString();
+        const extractedArtifacts: DownloadedFileManifestEntry[] = [];
+        for (const entry of xmlEntries) {
+          const outputPath = resolve(extractionDirectory, entry.xmlPath);
+          await mkdir(resolve(outputPath, '..'), { recursive: true });
+          await writeFile(outputPath, entry.xml, { encoding: 'utf8', mode: 0o640 });
+          extractedArtifacts.push({
+            path: relativizeToDataDirectory(outputPath),
+            byte_count: Buffer.byteLength(entry.xml, 'utf8'),
+            checksum_sha256: sha256(Buffer.from(entry.xml, 'utf8')),
+            fetched_at: fetchedAt,
+          });
+        }
+
+        const zipBytes = await readFile(zipPath);
+        titlesState[String(titleNumber)] = {
+          title: titleNumber,
+          vintage: plan.selectedVintage,
+          status: 'downloaded',
+          zip_path: relativizeToDataDirectory(zipPath),
+          extraction_path: relativizeToDataDirectory(extractionDirectory),
+          byte_count: zipBytes.byteLength,
+          fetched_at: fetchedAt,
+          extracted_xml_artifacts: extractedArtifacts,
+        };
+        titlesDownloaded += 1;
+      } catch (error) {
+        const classification = classifyReservedEmptyError(titleNumber, error);
+        if (classification) {
+          await removeTitleDirectoryIfPresent(titleDirectory);
+          applyReservedEmptyState(titlesState, titleNumber, plan.selectedVintage, url, classification.classification_reason);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    const completedAt = new Date().toISOString();
+    manifest.sources.olrc.last_success_at = completedAt;
+    manifest.sources.olrc.last_failure = null;
+    manifest.sources.olrc.available_vintages = buildAvailableVintagesState(plan);
+    manifest.sources.olrc.vintages[plan.selectedVintage] = buildVintageManifestState(plan, titlesState, titlesDownloaded, 'complete', null, completedAt);
+    if (options.updateSelectedVintageMirror) {
+      manifest.sources.olrc.selected_vintage = plan.selectedVintage;
+      manifest.sources.olrc.titles = { ...titlesState };
+    }
+    await writeManifest(manifest);
+
+    return {
+      source: 'olrc',
+      ok: true,
+      requested_scope: { titles: '1..54' },
+      selected_vintage: plan.selectedVintage,
+      counts: { titles_downloaded: titlesDownloaded },
+      missing_titles: plan.missingTitles,
+      reserved_empty_titles: summarizeReservedEmptyTitles(titlesState),
+    };
+  } catch (error) {
+    const failure = {
+      code: 'upstream_request_failed',
+      message: error instanceof Error ? error.message : 'OLRC fetch failed',
+    };
+    const completedAt = new Date().toISOString();
+    manifest.sources.olrc.last_failure = failure;
+    manifest.sources.olrc.available_vintages = buildAvailableVintagesState(plan);
+    manifest.sources.olrc.vintages[plan.selectedVintage] = buildVintageManifestState(plan, titlesState, titlesDownloaded, 'failed', failure, completedAt);
+    if (options.updateSelectedVintageMirror) {
+      manifest.sources.olrc.selected_vintage = plan.selectedVintage;
+      manifest.sources.olrc.titles = { ...titlesState };
+    }
+    await writeManifest(manifest);
+
+    return {
+      source: 'olrc',
+      ok: false,
+      requested_scope: { titles: '1..54' },
+      selected_vintage: plan.selectedVintage,
+      counts: { titles_downloaded: titlesDownloaded },
+      missing_titles: plan.missingTitles,
+      reserved_empty_titles: summarizeReservedEmptyTitles(titlesState),
+      error: failure,
+    };
+  }
+}
+
+function buildVintageManifestState(
+  plan: OlrcVintagePlan,
+  titlesState: Record<string, OlrcTitleState>,
+  titlesDownloaded: number,
+  status: OlrcVintageState['status'],
+  failure: { code: string; message: string } | null,
+  completedAt: string,
+): OlrcVintageState {
+  return {
+    vintage: plan.selectedVintage,
+    listing_url: plan.listingUrl,
+    discovered_at: plan.discoveredAt,
+    completed_at: completedAt,
+    status,
+    missing_titles: plan.missingTitles,
+    titles_downloaded: titlesDownloaded,
+    titles: { ...titlesState },
+    last_success_at: status === 'complete' ? completedAt : null,
+    last_failure: failure,
+  };
+}
+
+function buildAvailableVintagesState(plan: OlrcVintagePlan): OlrcAvailableVintagesState {
+  return {
+    values: [...plan.availableVintages],
+    discovered_at: plan.discoveredAt,
+    listing_url: plan.listingUrl,
+  };
+}
+
+function relativizeToDataDirectory(path: string): string {
+  const dataDirectory = getDataDirectory();
+  return path.startsWith(dataDirectory)
+    ? `data/${path.slice(dataDirectory.length).replace(/^\//, '')}`
+    : path;
+}
+
+async function recordOlrcFailure(code: string, message: string): Promise<OlrcFetchResult> {
+  const manifest = await readManifest();
+  manifest.sources.olrc.last_failure = { code, message };
+  await writeManifest(manifest);
+  return {
+    source: 'olrc',
+    ok: false,
+    requested_scope: { titles: '1..54' },
+    error: { code, message },
+  };
+}
+
 async function getOrCreateZipPath(args: {
   titleNumber: number;
   url: string;
@@ -378,18 +610,6 @@ async function getOrCreateZipPath(args: {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`failed to download title ${args.titleNumber} from ${args.url} (${message})`);
   }
-}
-
-async function recordOlrcFailure(code: string, message: string): Promise<OlrcFetchResult> {
-  const manifest = await readManifest();
-  manifest.sources.olrc.last_failure = { code, message };
-  await writeManifest(manifest);
-  return {
-    source: 'olrc',
-    ok: false,
-    requested_scope: { titles: '1..54' },
-    error: { code, message },
-  };
 }
 
 function resolveManifestPath(path: string, dataDirectory: string): string {
