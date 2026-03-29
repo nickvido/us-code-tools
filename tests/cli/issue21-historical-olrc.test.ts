@@ -24,12 +24,31 @@ const spec = JSON.parse(Buffer.from(process.env.OLRC_FIXTURE_SPEC_B64 || '', 'ba
 const title01Zip = Buffer.from(process.env.OLRC_TITLE01_ZIP_B64 || '', 'base64');
 globalThis.__olrcRequestLog = [];
 
-function htmlForListing(vintages) {
-  return '<html><body>' + vintages.flatMap((vintage) => [
+function buildListingEntries(vintage) {
+  const configured = (spec.listingTitles || []).find((entry) => entry.vintage === vintage);
+  if (configured) {
+    return configured.titles.flatMap((title) => {
+      if (typeof title === 'string') {
+        return [
+          '<a href="/download/releasepoints/us/pl/' + vintage.replace('-', '/') + '/xml_usc' + title + '@' + vintage + '.zip">Title ' + title + '</a>',
+        ];
+      }
+
+      return [
+        '<a href="/download/releasepoints/us/pl/' + vintage.replace('-', '/') + '/xml_usc' + String(title).padStart(2, '0') + '@' + vintage + '.zip">Title ' + title + '</a>',
+      ];
+    });
+  }
+
+  return [
     '<a href="/download/releasepoints/us/pl/' + vintage.replace('-', '/') + '/xml_usc01@' + vintage + '.zip">Title 1</a>',
     '<a href="/download/releasepoints/us/pl/' + vintage.replace('-', '/') + '/xml_usc02@' + vintage + '.zip">Title 2</a>',
     '<a href="/download/releasepoints/us/pl/' + vintage.replace('-', '/') + '/xml_usc05a@' + vintage + '.zip">Appendix 5a</a>',
-  ]).join('') + '</body></html>';
+  ];
+}
+
+function htmlForListing(vintages) {
+  return '<html><body>' + vintages.flatMap((vintage) => buildListingEntries(vintage)).join('') + '</body></html>';
 }
 
 const originalFetch = globalThis.fetch;
@@ -65,6 +84,14 @@ globalThis.fetch = async (input, init) => {
       });
     }
 
+    const configured = (spec.listingTitles || []).find((entry) => entry.vintage === vintage);
+    if (configured && !configured.titles.includes(title) && !configured.titles.includes(String(title).padStart(2, '0'))) {
+      return new Response('missing from listing for ' + vintage + ' title ' + title, {
+        status: 404,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+
     if ((spec.htmlPayloadTitles || []).some((entry) => entry.vintage === vintage && entry.title === title)) {
       return new Response('<html><body>Reserved</body></html>', {
         status: 200,
@@ -85,7 +112,15 @@ globalThis.fetch = async (input, init) => {
   return importPath;
 }
 
-function runFetch(args: string[], fixture: { vintages: string[]; failVintages?: string[]; htmlPayloadTitles?: Array<{ vintage: string; title: number }> }) {
+function runFetch(
+  args: string[],
+  fixture: {
+    vintages: string[];
+    failVintages?: string[];
+    htmlPayloadTitles?: Array<{ vintage: string; title: number }>;
+    listingTitles?: Array<{ vintage: string; titles: Array<number | string> }>;
+  },
+) {
   const tempRoot = join(tmpdir(), `us-code-tools-issue21-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(tempRoot, { recursive: true });
   const mockImport = createMockOlrcImport(tempRoot);
@@ -217,6 +252,48 @@ describe('issue 21 historical OLRC fetch CLI', () => {
       expect(payload.results?.[1]?.error?.code).toBe('upstream_request_failed');
       expect(existsSync(join(result.dataDir, 'cache', 'olrc', 'vintages', '119-73'))).toBe(true);
       expect(existsSync(join(result.dataDir, 'cache', 'olrc', 'vintages', '117-163'))).toBe(true);
+    } finally {
+      result.cleanup();
+    }
+  }, 45_000);
+
+  it('fetches a sparse historical vintage using only discovered title URLs and reports missing titles instead of fabricated download failures', () => {
+    const result = runFetch(['--source=olrc', '--vintage=118-200'], {
+      vintages: ['119-73', '118-200'],
+      listingTitles: [
+        { vintage: '119-73', titles: [1, 2, '05a'] },
+        { vintage: '118-200', titles: [1] },
+      ],
+    });
+
+    try {
+      expect(result.status).toBe(0);
+      const payload = JSON.parse(result.stdout.trim()) as {
+        source?: string;
+        ok?: boolean;
+        selected_vintage?: string;
+        missing_titles?: number[];
+        counts?: { titles_downloaded?: number };
+        error?: { code?: string };
+      };
+      expect(payload.source).toBe('olrc');
+      expect(payload.ok).toBe(true);
+      expect(payload.selected_vintage).toBe('118-200');
+      expect(payload.counts?.titles_downloaded).toBe(1);
+      expect(payload.missing_titles).toContain(2);
+      expect(payload.error).toBeUndefined();
+      expect(existsSync(join(result.dataDir, 'cache', 'olrc', 'vintages', '118-200', 'title-01'))).toBe(true);
+      expect(existsSync(join(result.dataDir, 'cache', 'olrc', 'vintages', '118-200', 'title-02'))).toBe(false);
+
+      const manifest = JSON.parse(readFileSync(join(result.dataDir, 'manifest.json'), 'utf8')) as {
+        sources?: {
+          olrc?: {
+            vintages?: Record<string, { missing_titles?: number[]; titles?: Record<string, { status?: string }> }>;
+          };
+        };
+      };
+      expect(manifest.sources?.olrc?.vintages?.['118-200']?.missing_titles).toContain(2);
+      expect(manifest.sources?.olrc?.vintages?.['118-200']?.titles?.['2']).toBeUndefined();
     } finally {
       result.cleanup();
     }
