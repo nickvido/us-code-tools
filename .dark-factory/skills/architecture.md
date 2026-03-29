@@ -32,6 +32,7 @@
 - `src/utils/logger.ts` — structured network logging with `api_key` redaction.
 - `src/utils/rate-limit.ts` — sliding-window limiter helpers plus the shared `getSharedApiDataGovLimiter()` singleton/reset hook used by both `src/sources/congress.ts` and `src/sources/govinfo.ts` for the single `API_DATA_GOV_KEY` in-process budget.
 - `src/transforms/` — namespace-tolerant USLM parsing (`uscDoc.main.title` + legacy `uslm.title`), markdown rendering, and output writing for `transform`.
+- issue #10 tightened canonical number extraction inside `src/transforms/uslm-to-ir.ts`: title/chapter/section `<num>` reads now prefer `@_value` and only fall back to cleaned display text when the attribute is absent/empty.
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
 - `src/backfill/messages.ts` — exact Constitution/amendment commit-message formatting.
@@ -132,6 +133,9 @@
   - OLRC ZIP extraction now tolerates current large-title payloads via the 128 MiB large-entry ceiling while keeping bounded extraction caps
 
 ## Things Future Agents Should Notice
+- Issue #10 centralizes `<num>` normalization in `readCanonicalNumText(...)`; do not re-implement title/chapter/section cleanup at each call site.
+- Under the current `fast-xml-parser` config (`ignoreAttributes: false`, `attributeNamePrefix: '@_'`, `removeNSPrefix: true`), canonical USLM `value` attributes are read as `node['@_value']` even on `uscDoc` inputs.
+- Current Title 1 fixture coverage now assumes the XSD-shaped `uscDoc > meta + main > title > chapter > section` structure with decorated display `<num>` text and clean canonical `@value` strings.
 - `docs/architecture/3-architecture.md` proposes an `authors.ts` split, but the current implementation keeps author identity inside `src/backfill/constitution/dataset.ts`; do not assume a separate author module exists.
 - `git-adapter.ts` exposes `buildGitCommitEnv()` for unit coverage, but actual commit creation uses `git fast-import` instead of `git commit`.
 - Prefix validation keys off commit metadata, not file diffs.
@@ -159,6 +163,11 @@
     - `resolveCachedOlrcTitleZipPath()` so `transform` reads the selected-vintage cache layout
     - `uscDoc.main.title` parsing with namespace tolerance and legacy `uslm.title` fallback
     - larger bounded OLRC XML entry allowance for current Title 42
+  - issue #10 canonical `<num>` extraction layer:
+    - `readCanonicalNumText(...)` prefers non-empty `@_value` for title/chapter/section numbers
+    - fallback `cleanDecoratedNumText(...)` strips leading `§`, `Title `, `Chapter ` and trailing mixed `.` / `—` decoration
+    - current Title 1 `uscDoc` fixture asserts `titleIr.chapters.length === 1`, 53 sections, `/us/usc/t1/s...` identifiers, and per-section/per-chapter equality with source `<num @value>` values
+    - multi-title current-format integration coverage derives titles `2..54` (excluding reserved-empty `53`) from the committed Title 1 fixture via `buildCurrentFormatFixtureZip(...)`
   - unit, integration, snapshot, and adversary coverage for issues #3, #5, and #8
 - What's intentionally deferred:
   - non-Constitution backfill phases that consume fetched artifacts
