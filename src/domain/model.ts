@@ -33,6 +33,7 @@ export interface NoteIR {
 
 export interface StatutoryNoteIR {
   heading?: string;
+  noteType?: string;
   topic?: string;
   text: string;
 }

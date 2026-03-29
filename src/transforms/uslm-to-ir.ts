@@ -319,11 +319,14 @@ function parseNotes(
   }
 
   for (const notesNode of asArray(sectionNode.notes)) {
+    const noteType = normalizeWhitespace(readRawText(notesNode['@_type'])) || undefined;
+
     for (const noteNode of asArray(notesNode.note)) {
       const text = readNodeText(parseErrors, noteNode, xmlPath, sectionHint, 'statutory note');
       if (!text) continue;
       statutoryNotes.push({
         heading: optionalText(parseErrors, noteNode.heading, xmlPath, 'statutory note heading', sectionHint),
+        noteType,
         topic: normalizeWhitespace(readRawText(noteNode['@_topic'] ?? noteNode.type)) || undefined,
         text,
       });
