@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { ContentNode, HierarchyIR, NoteIR, ParseError, ParsedTitleResult, SectionIR, StatutoryNoteIR, TitleIR } from '../domain/model.js';
-import { asArray, normalizeWhitespace } from '../domain/normalize.js';
+import { asArray, normalizeWhitespace, sectionFileSafeId } from '../domain/normalize.js';
 
 const MAX_NORMALIZED_FIELD_LENGTH = 1_048_576;
 const HIERARCHY_TAGS = ['subtitle', 'part', 'subpart', 'chapter', 'subchapter'] as const;
@@ -365,25 +365,32 @@ function readRawText(value: XmlValue | undefined): string {
   }
 
   const label = combined || href;
-  return `[${label}](${hrefToMarkdownLink(href)})`;
-}
-
-function hrefToMarkdownLink(href: string): string {
-  const uscMatch = href.match(/^\/us\/usc\/t(\d+)\/s([^/]+)$/u);
-  if (uscMatch) {
-    const title = String(Number.parseInt(uscMatch[1] ?? '0', 10)).padStart(2, '0');
-    const section = uscMatch[2] ?? '';
-    return `../../title-${title}/section-${sectionToFileId(section)}.md`;
+  const markdownHref = hrefToMarkdownLink(href);
+  if (!markdownHref) {
+    return label;
   }
 
-  return href;
+  return `[${label}](${markdownHref})`;
 }
 
-function sectionToFileId(sectionNumber: string): string {
-  const sanitized = sectionNumber.replaceAll('/', '-');
-  const match = sanitized.match(/^(\d+)(.*)$/u);
-  if (!match) return sanitized;
-  return `${String(Number.parseInt(match[1] ?? '0', 10)).padStart(5, '0')}${match[2] ?? ''}`;
+function hrefToMarkdownLink(href: string): string | null {
+  const uscMatch = href.match(/^\/us\/usc\/t(\d+)\/s([^/]+)$/u);
+  if (!uscMatch) {
+    return null;
+  }
+
+  const titleNumber = Number.parseInt(uscMatch[1] ?? '0', 10);
+  if (!Number.isFinite(titleNumber) || titleNumber <= 0) {
+    return null;
+  }
+
+  const sectionNumber = normalizeWhitespace(uscMatch[2]);
+  if (!sectionNumber) {
+    return null;
+  }
+
+  const title = String(titleNumber).padStart(2, '0');
+  return `../title-${title}/section-${sectionFileSafeId(sectionNumber)}.md`;
 }
 
 function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
