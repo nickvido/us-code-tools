@@ -7,7 +7,7 @@ import { readManifest, computeMetadataDigest } from './manifest.js';
 import { normalizeReleasePointTag } from './metadata.js';
 import { renderReleaseBody, resolveBoundaryRowForCongress } from './release-renderer.js';
 import type { LegalMilestonesMetadata, MilestonesManifest, MilestonesPlan, PlannedAnnualRow } from './types.js';
-import { git, resolveCommitSelector } from './git.js';
+import { git, resolveCommitSelector, resolveGhBinary, resolveGitBinary } from './git.js';
 
 const execFileAsync = promisify(execFile);
 const DIFF_STAT_TIMEOUT_MS = 30_000;
@@ -102,14 +102,12 @@ async function normalizeCurrentRepoShape(repoPath: string, plan: MilestonesPlan)
   };
 }
 
-async function ensureGithubCliAvailableAndAuthenticated(): Promise<void> {
-  await execFileAsync('gh', ['auth', 'status']).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : 'gh auth status failed';
-    if (message.includes('ENOENT')) {
-      throw new Error('github_cli_unavailable: gh CLI is not installed');
-    }
+async function ensureGithubCliAvailableAndAuthenticated(): Promise<string> {
+  const ghExecutable = await resolveGhBinary();
+  await execFileAsync(ghExecutable, ['auth', 'status']).catch(() => {
     throw new Error('github_cli_auth_missing: gh CLI is not authenticated');
   });
+  return ghExecutable;
 }
 
 async function buildPlannedAnnualRows(repoPath: string, metadata: LegalMilestonesMetadata): Promise<PlannedAnnualRow[]> {
@@ -130,8 +128,9 @@ async function renderDiffStat(repoPath: string, previousTag: string | null, curr
     return null;
   }
 
+  const gitExecutable = await resolveGitBinary();
   const { stdout } = await execFileAsync(
-    'git',
+    gitExecutable,
     ['-C', repoPath, 'diff', '--stat', `${previousTag}..${currentTag}`],
     { timeout: DIFF_STAT_TIMEOUT_MS },
   ).catch((error: unknown) => {
@@ -149,23 +148,23 @@ async function writeNotesFile(body: string): Promise<{ dir: string; path: string
   return { dir, path };
 }
 
-async function upsertRelease(tag: string, title: string, body: string): Promise<void> {
+async function upsertRelease(ghExecutable: string, tag: string, title: string, body: string): Promise<void> {
   const notes = await writeNotesFile(body);
 
   try {
-    const releaseExists = await execFileAsync('gh', ['release', 'view', tag, '--json', 'tagName,url,name'])
+    const releaseExists = await execFileAsync(ghExecutable, ['release', 'view', tag, '--json', 'tagName,url,name'])
       .then(() => true)
       .catch(() => false);
 
     if (releaseExists) {
-      await execFileAsync('gh', ['release', 'edit', tag, '--title', title, '--notes-file', notes.path]).catch((error: unknown) => {
+      await execFileAsync(ghExecutable, ['release', 'edit', tag, '--title', title, '--notes-file', notes.path]).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'gh release edit failed';
         throw new Error(`github_release_write_failed: failed to update release '${tag}': ${message}`);
       });
       return;
     }
 
-    await execFileAsync('gh', ['release', 'create', tag, '--title', title, '--notes-file', notes.path]).catch((error: unknown) => {
+    await execFileAsync(ghExecutable, ['release', 'create', tag, '--title', title, '--notes-file', notes.path]).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'gh release create failed';
       throw new Error(`github_release_write_failed: failed to create release '${tag}': ${message}`);
     });
@@ -196,7 +195,7 @@ export async function releaseMilestones(
     throw new Error('manifest_stale: milestone manifest does not match the current repository plan');
   }
 
-  await ensureGithubCliAvailableAndAuthenticated();
+  const ghExecutable = await ensureGithubCliAvailableAndAuthenticated();
 
   const annualRows = await buildPlannedAnnualRows(repoPath, metadata);
 
@@ -205,6 +204,6 @@ export async function releaseMilestones(
     const boundaryRow = resolveBoundaryRowForCongress(annualRows, congress);
     const diffStat = await renderDiffStat(repoPath, releaseCandidate.previous_tag, releaseCandidate.tag);
     const body = renderReleaseBody(boundaryRow, diffStat);
-    await upsertRelease(releaseCandidate.tag, releaseCandidate.title, body);
+    await upsertRelease(ghExecutable, releaseCandidate.tag, releaseCandidate.title, body);
   }
 }

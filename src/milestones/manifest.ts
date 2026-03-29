@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 import type { MilestonesManifest, PlannedAnnualRow, PresidentTagPlan, ReleaseCandidate, SkippedPresidentTag } from './types.js';
+
+interface LockPayload {
+  pid: number;
+  hostname: string;
+  command: string;
+  timestamp: string;
+}
 
 export async function computeMetadataDigest(metadataPath: string): Promise<string> {
   const buffer = await readFile(metadataPath);
@@ -67,13 +75,49 @@ export async function readManifest(repoPath: string): Promise<MilestonesManifest
   return JSON.parse(content) as MilestonesManifest;
 }
 
-export async function withLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+function buildLockPayload(command: string): LockPayload {
+  return {
+    pid: process.pid,
+    hostname: hostname(),
+    command,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function readLockPayload(lockPath: string): Promise<LockPayload | null> {
+  try {
+    const content = await readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(content) as Partial<LockPayload>;
+    if (
+      typeof parsed.pid === 'number'
+      && typeof parsed.hostname === 'string'
+      && typeof parsed.command === 'string'
+      && typeof parsed.timestamp === 'string'
+    ) {
+      return {
+        pid: parsed.pid,
+        hostname: parsed.hostname,
+        command: parsed.command,
+        timestamp: parsed.timestamp,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function withLock<T>(repoPath: string, command: string, fn: () => Promise<T>): Promise<T> {
   const dirPath = resolve(repoPath, '.us-code-tools');
   const lockPath = resolve(dirPath, 'milestones.lock');
   await mkdir(dirPath, { recursive: true });
   try {
-    await writeFile(lockPath, JSON.stringify({ pid: process.pid, timestamp: new Date().toISOString() }), { flag: 'wx', mode: 0o600 });
+    await writeFile(lockPath, `${JSON.stringify(buildLockPayload(command), null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   } catch {
+    const payload = await readLockPayload(lockPath);
+    if (payload) {
+      throw new Error(`lock_conflict: another milestones command is already running (pid=${payload.pid}, hostname=${payload.hostname}, command=${payload.command}, timestamp=${payload.timestamp})`);
+    }
     throw new Error('lock_conflict: another milestones command is already running');
   }
 

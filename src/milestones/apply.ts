@@ -1,4 +1,4 @@
-import { createAnnotatedTag, ensureAttachedHead, ensureCleanWorkingTree } from './git.js';
+import { createAnnotatedTag, ensureAttachedHead, ensureCleanWorkingTree, resolveGitBinary } from './git.js';
 import { withLock, writeManifest } from './manifest.js';
 import type { PlannedAnnualRow, PresidentTagPlan, ReleaseCandidate, SkippedPresidentTag } from './types.js';
 
@@ -14,10 +14,11 @@ export async function applyMilestones(
   releaseCandidates: ReleaseCandidate[],
   metadataPath: string,
 ): Promise<void> {
+  await resolveGitBinary();
   await ensureAttachedHead(repoPath);
   await ensureCleanWorkingTree(repoPath);
 
-  await withLock(repoPath, async () => {
+  await withLock(repoPath, `milestones apply --target ${repoPath} --metadata ${metadataPath}`, async () => {
     for (const row of annualRows) {
       const year = row.annual_tag.replace('annual/', '');
       await createAnnotatedTag(repoPath, row.annual_tag, row.commit_sha, annualMessage(year));
