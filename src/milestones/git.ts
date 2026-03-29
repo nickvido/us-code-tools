@@ -55,7 +55,7 @@ export async function ensureAttachedHead(repoPath: string): Promise<string> {
   try {
     return await git(repoPath, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   } catch {
-    throw new Error('repo_dirty: target repository HEAD must be attached to a branch');
+    throw new Error('detached_head: target repository HEAD must be attached to a branch');
   }
 }
 

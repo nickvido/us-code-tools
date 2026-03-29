@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { applyMilestones } from '../milestones/apply.js';
+import { resolveGitBinary } from '../milestones/git.js';
 import { loadMetadata } from '../milestones/metadata.js';
 import { buildMilestonesPlan } from '../milestones/plan.js';
 import { derivePresidentTags } from '../milestones/president-tags.js';
@@ -63,6 +64,15 @@ export async function runMilestonesCommand(args: string[]): Promise<number> {
   if (!metadata) {
     process.stderr.write(`${JSON.stringify({ errors })}\n`);
     return 1;
+  }
+
+  if (parsed.value.subcommand === 'apply') {
+    try {
+      await resolveGitBinary();
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
+      return 1;
+    }
   }
 
   const built = await buildMilestonesPlan(parsed.value.target, metadata);
