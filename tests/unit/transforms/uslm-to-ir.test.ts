@@ -185,6 +185,33 @@ describe('uslm-to-ir parser', () => {
     expect(result.titleIr.sections[0].sectionNumber).toBe('2/3');
   });
 
+  it('strips mixed and doubled trailing decoration from fallback <num> text for title, chapter, and section nodes', async () => {
+    const absentValueResult = await parseXmlFixture(
+      buildNumContractXml({
+        titleNum: '<num>Title 1.—</num>',
+        chapterNum: '<num>Chapter 36B.—</num>',
+        sectionNum: '<num>§ 2/3.—</num>',
+      }),
+    );
+
+    expect(absentValueResult.titleIr.titleNumber).toBe(1);
+    expect(absentValueResult.titleIr.chapters[0].number).toBe('36B');
+    expect(absentValueResult.titleIr.sections[0].sectionNumber).toBe('2/3');
+
+    const emptyValueResult = await parseXmlFixture(
+      buildNumContractXml({
+        titleNum: '<num value="   ">Title 1.—</num>',
+        chapterNum: '<num value="">Chapter 36B.—</num>',
+        sectionNum: '<num value="  ">§ 1.—</num>',
+      }),
+    );
+
+    expect(emptyValueResult.titleIr.titleNumber).toBe(1);
+    expect(emptyValueResult.titleIr.chapters[0].number).toBe('36B');
+    expect(emptyValueResult.titleIr.sections[0].sectionNumber).toBe('1');
+    expect(emptyValueResult.parseErrors).toEqual([]);
+  });
+
   it('treats non-empty <num @value> as authoritative even when display text cleans to a different number', async () => {
     const result = await parseXmlFixture(
       buildNumContractXml({
