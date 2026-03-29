@@ -91,7 +91,7 @@ export async function runMilestonesCommand(args: string[]): Promise<number> {
       return 0;
     }
 
-    await releaseMilestones(parsed.value.target, parsed.value.metadata, plan);
+    await releaseMilestones(parsed.value.target, parsed.value.metadata, metadata, plan);
     process.stdout.write(`${JSON.stringify({ releases: plan.release_candidates.length })}\n`);
     return 0;
   } catch (error) {

@@ -13,10 +13,9 @@ export function derivePresidentTags(
 
   const coverageStart = annualRows[0].snapshot_date;
   const coverageEnd = annualRows[annualRows.length - 1].snapshot_date;
-  const coverageStartYear = coverageStart.slice(0, 4);
 
   for (const term of presidentTerms) {
-    if (term.inauguration_date < coverageStart && term.inauguration_date.slice(0, 4) < coverageStartYear) {
+    if (term.inauguration_date < coverageStart) {
       skippedPresidentTags.push({
         slug: term.slug,
         inauguration_date: term.inauguration_date,

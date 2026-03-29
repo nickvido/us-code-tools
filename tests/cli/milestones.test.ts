@@ -277,13 +277,16 @@ describe('milestones CLI contract', () => {
       expect(plan.congress_tags).toEqual([
         { tag: 'congress/113', commit_sha: sha2015, annual_tag: 'annual/2015' },
       ]);
-      expect(plan.president_tags).toEqual([
-        { tag: 'president/obama-2', commit_sha: sha2013, annual_tag: 'annual/2013' },
-      ]);
+      expect(plan.president_tags).toEqual([]);
       expect(plan.skipped_president_tags).toEqual([
         {
           slug: 'obama-1',
           inauguration_date: '2009-01-20',
+          reason: 'inauguration_before_coverage_window',
+        },
+        {
+          slug: 'obama-2',
+          inauguration_date: '2013-01-20',
           reason: 'inauguration_before_coverage_window',
         },
         {

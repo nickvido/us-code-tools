@@ -282,7 +282,7 @@ const logPath = process.env.FAKE_GH_LOG;
 const statePath = process.env.FAKE_GH_STATE;
 const args = process.argv.slice(2);
 const entry = { args };
-appendFileSync(logPath, JSON.stringify(entry) + '\n');
+appendFileSync(logPath, JSON.stringify(entry) + '\\n');
 const readState = () => existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { releases: {} };
 const writeState = (state) => writeFileSync(statePath, JSON.stringify(state, null, 2));
 if (args[0] === 'auth' && args[1] === 'status') process.exit(0);
@@ -331,7 +331,6 @@ process.exit(1);
         'congress/113',
         'pl/113-1',
         'pl/113-295',
-        'president/obama-2',
       ]);
 
       expect(execSync('git rev-list -n 1 annual/2013', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe(sha2013);
@@ -339,8 +338,6 @@ process.exit(1);
       expect(execSync('git rev-list -n 1 annual/2015', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe(sha2015);
       expect(execSync('git rev-list -n 1 pl/113-295', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe(sha2015);
       expect(execSync('git rev-list -n 1 congress/113', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe(sha2015);
-      expect(execSync('git rev-list -n 1 president/obama-2', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe(sha2013);
-
       const manifestPath = resolve(targetRepo, '.us-code-tools', 'milestones.json');
       expect(existsSync(manifestPath)).toBe(true);
       const firstManifest = readFileSync(manifestPath, 'utf8');
@@ -384,19 +381,16 @@ process.exit(1);
       expect(parsed.congress_tags).toEqual([
         { tag: 'congress/113', congress: 113, commit_sha: sha2015, annual_tag: 'annual/2015' },
       ]);
-      expect(parsed.president_tags).toEqual([
-        {
-          tag: 'president/obama-2',
-          slug: 'obama-2',
-          inauguration_date: '2013-01-20',
-          commit_sha: sha2013,
-          annual_tag: 'annual/2013',
-        },
-      ]);
+      expect(parsed.president_tags).toEqual([]);
       expect(parsed.skipped_president_tags).toEqual([
         {
           slug: 'obama-1',
           inauguration_date: '2009-01-20',
+          reason: 'inauguration_before_coverage_window',
+        },
+        {
+          slug: 'obama-2',
+          inauguration_date: '2013-01-20',
           reason: 'inauguration_before_coverage_window',
         },
         {
@@ -573,7 +567,7 @@ process.exit(1);
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}\n${result.stderr}`).toMatch(/manifest_stale|pl\/114-255|fresh/i);
       expect(existsSync(fakeGh.statePath)).toBe(false);
-      expect(readFileSync(fakeGh.logPath, 'utf8')).not.toMatch(/"auth","status"|"release"/);
+      expect(existsSync(fakeGh.logPath)).toBe(false);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
