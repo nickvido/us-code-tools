@@ -167,7 +167,12 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
     });
     expect(parsed10.data.subchapter).toBeUndefined();
     expect(parsed10.content).toContain('## Statutory Notes');
-    expect(parsed10.content).toMatch(/\[[^\]]+\]\((?:\.\.\/)+title-\d{2}\/section-\d{5}[A-Za-z0-9-]*\.md\)/u);
+    expect(parsed10.content).toMatch(/\[[^\]]*125\(d\)[^\]]*\]\(\.\.\/title-10\/section-00125d\.md\)/u);
+    expect(parsed10.content).not.toMatch(/\[[^\]]+\]\(\.\.\.\/title-10\/section-00125d\.md\)/u);
+    expect(parsed10.content).toContain('Aug. 10, 1956, ch. 1041');
+    expect(parsed10.content).toContain('70A Stat. 3');
+    expect(parsed10.content).not.toContain('[Aug. 10, 1956, ch. 1041](/us/act/1956-08-10/ch1041)');
+    expect(parsed10.content).not.toContain('[70A Stat. 3](/us/stat/70A/3)');
 
     const parsed26 = matter(title26Markdown);
     expect(parsed26.data).toMatchObject({
@@ -209,6 +214,46 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
       'Heading delta 106a',
       'Heading epsilon 106b',
       'Heading zeta 114',
+    ].map((needle) => markdown.indexOf(needle));
+
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it('keeps mixed-case suffix ordering deterministic for 106, 106A, 106a, and 106b', async () => {
+    const normalizeModulePath = resolve(process.cwd(), 'src', 'domain', 'normalize.ts');
+    const normalizeModule = await safeImport(normalizeModulePath);
+    ensureModuleLoaded(normalizeModulePath, normalizeModule);
+    const compareSectionNumbers = pickCallable(normalizeModule, [
+      'compareSectionNumbers',
+      'compareSections',
+      'compareSectionIds',
+      'compareSectionIdentifiers',
+    ]) as (left: string, right: string) => number;
+
+    expect(compareSectionNumbers('106', '106A')).toBeLessThan(0);
+    expect(compareSectionNumbers('106A', '106a')).not.toBe(0);
+    expect(compareSectionNumbers('106a', '106b')).toBeLessThan(0);
+
+    const { renderTitleMarkdown } = await loadMarkdownRenderers();
+    const markdown = renderTitleMarkdown({
+      titleNumber: 1,
+      heading: 'Mixed case ordering test',
+      positiveLaw: true,
+      chapters: [{ number: 'I', heading: 'Ordering' }],
+      sections: [
+        { sectionNumber: '106b', heading: 'Heading delta 106b' },
+        { sectionNumber: '106a', heading: 'Heading gamma 106a' },
+        { sectionNumber: '106A', heading: 'Heading beta 106A' },
+        { sectionNumber: '106', heading: 'Heading alpha 106' },
+      ],
+    });
+
+    const positions = [
+      'Heading alpha 106',
+      'Heading beta 106A',
+      'Heading gamma 106a',
+      'Heading delta 106b',
     ].map((needle) => markdown.indexOf(needle));
 
     expect(positions.every((position) => position >= 0)).toBe(true);
