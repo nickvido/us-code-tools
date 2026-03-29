@@ -24,8 +24,13 @@ export function renderSectionMarkdown(section: SectionIR): string {
 
   const lines = [`# § ${section.sectionNumber}. ${section.heading}`.trim()];
 
+  const duplicateTextTracker = buildDuplicateTextTracker(section.content);
+
   for (const node of section.content) {
-    lines.push(renderContentNode(node));
+    const rendered = renderContentNode(node, 0, duplicateTextTracker);
+    if (rendered) {
+      lines.push(rendered);
+    }
   }
 
   if (section.statutoryNotes && section.statutoryNotes.length > 0) {
@@ -74,18 +79,68 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-function renderContentNode(node: ContentNode): string {
+function renderContentNode(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string {
   if (node.type === 'text') {
-    return node.text.trimEnd();
+    const key = node.text.trim();
+    const remaining = duplicateTextTracker.get(key) ?? 0;
+    if (remaining > 1) {
+      duplicateTextTracker.set(key, remaining - 1);
+      return '';
+    }
+
+    if (remaining === 1) {
+      duplicateTextTracker.delete(key);
+    }
+
+    return `${' '.repeat(indent)}${node.text.trimEnd()}`.trimEnd();
   }
 
-  const indent = indentationForNode(node.type);
+  if (node.type === 'subsection') {
+    const headingLine = ['##', formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
+    const lines = [headingLine.trimEnd()];
+    for (const child of node.children) {
+      const rendered = renderContentNode(child, 0, duplicateTextTracker);
+      if (rendered) {
+        lines.push(rendered);
+      }
+    }
+    return lines.join('\n');
+  }
+
   const labelLine = [formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
   const lines = [`${' '.repeat(indent)}${labelLine}`.trimEnd()];
   for (const child of node.children) {
-    lines.push(renderContentNode(child));
+    const rendered = renderContentNode(child, indent + 2, duplicateTextTracker);
+    if (rendered) {
+      lines.push(rendered);
+    }
   }
   return lines.join('\n');
+}
+
+function buildDuplicateTextTracker(nodes: ContentNode[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  collectTextNodeCounts(nodes, counts);
+  for (const [key, value] of counts.entries()) {
+    if (value < 2) {
+      counts.delete(key);
+    }
+  }
+  return counts;
+}
+
+function collectTextNodeCounts(nodes: ContentNode[], counts: Map<string, number>): void {
+  for (const node of nodes) {
+    if (node.type === 'text') {
+      const key = node.text.trim();
+      if (key) {
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      continue;
+    }
+
+    collectTextNodeCounts(node.children, counts);
+  }
 }
 
 function formatLabel(label: string): string {

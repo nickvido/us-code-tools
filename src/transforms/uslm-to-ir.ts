@@ -426,23 +426,32 @@ function parseLabeledNode(
   sectionHint: string,
 ): ContentNode {
   const children: ContentNode[] = [];
+  const inlineParts: string[] = [];
 
-  for (const textNode of [...asArray(node.chapeau), ...asArray(node.continuation)]) {
-    const text = readNodeText(parseErrors, textNode, xmlPath, sectionHint, `${type} text`);
-    if (text) children.push({ type: 'text', text });
+  for (const chapeauNode of asArray(node.chapeau)) {
+    const text = readNodeText(parseErrors, chapeauNode, xmlPath, sectionHint, `${type} text`);
+    if (text) inlineParts.push(text);
+  }
+
+  const inlineText = optionalText(parseErrors, node.content ?? node.text ?? node.p, xmlPath, `${type} text`, sectionHint);
+  if (inlineText) {
+    inlineParts.push(inlineText);
   }
 
   for (const tag of SECTION_BODY_TAGS) {
     children.push(...asArray(node[tag]).map((child) => parseLabeledNode(tag, child, parseErrors, xmlPath, sectionHint)));
   }
 
-  const inlineText = optionalText(parseErrors, node.content ?? node.text ?? node.p, xmlPath, `${type} text`, sectionHint);
+  for (const continuationNode of asArray(node.continuation)) {
+    const text = readNodeText(parseErrors, continuationNode, xmlPath, sectionHint, `${type} text`);
+    if (text) children.push({ type: 'text', text });
+  }
 
   return {
     type,
     label: readCanonicalNumText(parseErrors, node.num, xmlPath, `${type} label`, sectionHint),
     heading: optionalText(parseErrors, node.heading, xmlPath, `${type} heading`, sectionHint),
-    text: inlineText,
+    text: inlineParts.length > 0 ? inlineParts.join(' ') : undefined,
     children: children.filter((entry) => !(entry.type === 'text' && !entry.text)),
   };
 }
@@ -455,8 +464,9 @@ function parseLabeledNodeOrdered(
   sectionHint: string,
 ): ContentNode {
   const children: ContentNode[] = [];
+  const inlineParts: string[] = [];
   const nodeChildren = orderedChildArray(entry, type);
-  let inlineText: string | undefined;
+  let sawNestedChild = false;
 
   for (const child of nodeChildren) {
     const tag = orderedEntryTag(child);
@@ -464,21 +474,37 @@ function parseLabeledNodeOrdered(
       continue;
     }
 
-    if (tag === 'chapeau' || tag === 'continuation') {
+    if (tag === 'chapeau') {
       const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
       if (text) {
-        children.push({ type: 'text', text });
+        inlineParts.push(text);
       }
       continue;
     }
 
     if (SECTION_BODY_TAGS.includes(tag as SectionBodyTag)) {
+      sawNestedChild = true;
       children.push(parseLabeledNodeOrdered(tag as SectionBodyTag, child, parseErrors, xmlPath, sectionHint));
       continue;
     }
 
-    if (!inlineText && (tag === 'content' || tag === 'text' || tag === 'p')) {
-      inlineText = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+    if (tag === 'continuation') {
+      const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+      if (text) {
+        if (sawNestedChild) {
+          children.push({ type: 'text', text });
+        } else {
+          inlineParts.push(text);
+        }
+      }
+      continue;
+    }
+
+    if (tag === 'content' || tag === 'text' || tag === 'p') {
+      const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+      if (text) {
+        inlineParts.push(text);
+      }
     }
   }
 
@@ -486,7 +512,7 @@ function parseLabeledNodeOrdered(
     type,
     label: readOrderedCanonicalNumEntry(orderedFindFirst(nodeChildren, 'num')),
     heading: readOrderedOptionalText(parseErrors, orderedChildArrayFromChildren(nodeChildren, 'heading'), xmlPath, `${type} heading`, sectionHint),
-    text: inlineText,
+    text: inlineParts.length > 0 ? inlineParts.join(' ') : undefined,
     children: children.filter((child) => !(child.type === 'text' && !child.text)),
   };
 }
