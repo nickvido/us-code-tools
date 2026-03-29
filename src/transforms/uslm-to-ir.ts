@@ -346,23 +346,12 @@ function readRawText(value: XmlValue | undefined): string {
   }
 
   if (Array.isArray(value)) {
-    return value.map((entry) => readRawText(entry)).join(' ');
+    return normalizeWhitespace(value.map((entry) => readRawText(entry)).filter(Boolean).join(' '));
   }
 
   const node = value;
   const href = normalizeWhitespace(node['@_href']);
-  const ownText = [node['#text'], node.text, node.p, node.content, node.heading, node.num, node.chapeau, node.continuation, node.quotedContent, node.inline]
-    .map((entry) => readRawText(entry))
-    .filter(Boolean)
-    .join(' ');
-
-  const childText = Object.entries(node)
-    .filter(([key]) => !key.startsWith('@_') && !['#text', 'text', 'p', 'content', 'heading', 'num', 'chapeau', 'continuation', 'quotedContent', 'inline'].includes(key))
-    .map(([, entry]) => readRawText(entry as XmlValue))
-    .filter(Boolean)
-    .join(' ');
-
-  const combined = normalizeWhitespace([ownText, childText].filter(Boolean).join(' '));
+  const combined = normalizeWhitespace(readNodeTextInDocumentOrder(node));
   if (!href) {
     return combined;
   }
@@ -374,6 +363,37 @@ function readRawText(value: XmlValue | undefined): string {
   }
 
   return `[${label}](${markdownHref})`;
+}
+
+function readNodeTextInDocumentOrder(node: XmlNode): string {
+  const parts: string[] = [];
+
+  for (const [key, entry] of Object.entries(node)) {
+    if (key.startsWith('@_')) {
+      continue;
+    }
+
+    if (entry === undefined || entry === null) {
+      continue;
+    }
+
+    if (Array.isArray(entry)) {
+      for (const child of entry) {
+        const childText = readRawText(child);
+        if (childText) {
+          parts.push(childText);
+        }
+      }
+      continue;
+    }
+
+    const childText = readRawText(entry as XmlValue);
+    if (childText) {
+      parts.push(childText);
+    }
+  }
+
+  return parts.join(' ');
 }
 
 function hrefToMarkdownLink(href: string): string | null {
