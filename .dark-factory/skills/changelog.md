@@ -105,6 +105,37 @@
 
 - This knowledge-capture update corrects the stale branch notes that previously described the `Retry-After` serialization bug as still open after it had already been fixed.
 
+## Feature #8 — OLRC releasepoint cookie bootstrap + current uscDoc compatibility
+- Updated `src/sources/olrc.ts` to work with the current OLRC releasepoint site:
+  - homepage bootstrap against `https://uscode.house.gov/`
+  - in-memory cookie reuse for listing and ZIP requests
+  - `download.shtml`-first vintage discovery
+  - numeric releasepoint link parsing with appendix-title ignore behavior
+  - Title 53 `reserved_empty` classification with manifest-only skip state
+  - bounded large-entry handling for current large OLRC XML archives
+- Updated `src/utils/manifest.ts` with concrete OLRC per-title states:
+  - `status: 'downloaded'`
+  - `status: 'reserved_empty'`
+- Updated `src/transforms/uslm-to-ir.ts` for current XML compatibility:
+  - `fast-xml-parser` namespace stripping via `removeNSPrefix: true`
+  - root discovery `uscDoc.main.title` first, legacy `uslm.title` fallback second
+- Updated `src/index.ts` / transform CLI behavior to resolve OLRC ZIPs from manifest-backed selected-vintage cache state via `resolveCachedOlrcTitleZipPath()`.
+- Added/expanded offline regression coverage for:
+  - OLRC cookie bootstrap and authenticated follow-on requests
+  - `download.shtml` parsing
+  - current `uscDoc` Title 1 fixture with 53 sections
+  - legacy parser compatibility
+  - Title 42 extraction ceiling behavior
+  - Title 53 reserved-empty handling
+  - selected-vintage transform cache lookup
+- Latest issue-context verification relevant to this feature:
+  - `npx vitest run tests/unit/sources/olrc.test.ts` ✅
+  - `npx vitest run tests/unit/transforms/uslm-to-ir.test.ts` ✅
+  - `npx vitest run tests/integration/transform-cli.test.ts` ✅
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `npm test` ⚠️ branch context notes existing unrelated failures outside this change set
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - Title transform flow from issue #1

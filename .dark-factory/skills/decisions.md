@@ -133,11 +133,40 @@
 - **Consequence:** `rate_limit_exhausted` results now preserve `next_request_at` consistently across shared-budget exhaustion and parsed `Retry-After` responses; future agents should not reintroduce early ISO conversion in the throw path.
 - **Feature:** #5 Data Acquisition
 
+### ADR-020: OLRC fetches bootstrap one in-memory session cookie jar per request context
+- **Status:** Active
+- **Context:** `uscode.house.gov` now requires a session cookie before `download.shtml` and releasepoint ZIP URLs return the expected artifacts.
+- **Decision:** `src/sources/olrc.ts` performs a homepage bootstrap against `https://uscode.house.gov/`, captures `Set-Cookie`, and reuses the resulting `Cookie` header for later OLRC requests in the same fetch context.
+- **Consequence:** Manual curl bootstrap is no longer required, but future agents must keep cookie state memory-only and must not move it into manifest/cache/log state.
+- **Feature:** #8 OLRC Compatibility
+
+### ADR-021: OLRC discovery is `download.shtml`-first and only Title 53 may downgrade to `reserved_empty`
+- **Status:** Active
+- **Context:** The legacy `annualtitlefiles.shtml` page is obsolete for current OLRC releasepoints, and the current site returns an empty/non-ZIP payload for reserved Title 53.
+- **Decision:** `fetchOlrcVintagePlan()` prefers `download.shtml`, parses numeric releasepoint ZIP links, ignores appendix-title links, and `fetchOlrcSource()` records Title 53 as `status: 'reserved_empty'` instead of failing the whole run when classification matches the approved reasons.
+- **Consequence:** Current OLRC vintages are discoverable again, but non-53 title failures must remain hard failures and no placeholder artifact should be cached for reserved-empty Title 53.
+- **Feature:** #8 OLRC Compatibility
+
+### ADR-022: Parser compatibility is current `uscDoc.main.title` first, legacy `uslm.title` second
+- **Status:** Active
+- **Context:** Current OLRC XML is rooted at `uscDoc` with a namespace-qualified `main > title` path, while existing fixtures still use legacy `<uslm><title>` layout.
+- **Decision:** `src/transforms/uslm-to-ir.ts` configures `fast-xml-parser` with `removeNSPrefix: true`, resolves `document.uscDoc?.main?.title` first, and falls back to `document.uslm?.title`.
+- **Consequence:** Callers continue to pass raw XML strings directly, legacy fixtures stay valid, and current releasepoint XML transforms without caller-side namespace stripping.
+- **Feature:** #8 OLRC Compatibility
+
+### ADR-023: Raise the OLRC large-title entry ceiling to a bounded 128 MiB
+- **Status:** Active
+- **Context:** Current Title 42 exceeds the prior 64 MiB per-entry cap after decompression, but the issue scope does not justify a streaming parser rewrite.
+- **Decision:** `src/sources/olrc.ts` keeps bounded extraction limits but allows recognized large-title XML entries up to 128 MiB while still enforcing total extracted XML limits.
+- **Consequence:** Current Title 42-compatible archives extract successfully, and future agents should preserve explicit bounds rather than removing the guardrails entirely.
+- **Feature:** #8 OLRC Compatibility
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - transform ADRs for issue #1
   - Constitution dataset/planner/render/git-history/push ADRs for issue #3
   - manifest/cache/member-snapshot/crosswalk ADRs for issue #5
+  - OLRC cookie/bootstrap/listing/parser/size-limit ADRs for issue #8
 - What's intentionally deferred:
   - later backfill phases and their own ADRs
   - history repair/rewrite semantics for non-prefix repos

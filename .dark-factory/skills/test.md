@@ -18,7 +18,9 @@
 - `tests/utils/fetch-config.test.ts` — current Congress override/live/fallback behavior.
 - `tests/utils/manifest.test.ts` — manifest normalization/defaulting and atomic write expectations.
 - `tests/utils/rate-limit.test.ts` — limiter arithmetic and exhaustion timing for the shared helper primitives.
-- `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures.
+- `tests/unit/sources/olrc.test.ts` — OLRC source/cache behavior, cookie bootstrap, `download.shtml` discovery, Title 42 extraction ceiling, Title 53 reserved-empty classification, and selected-vintage cache regressions.
+- `tests/unit/transforms/uslm-to-ir.test.ts` — legacy `uslm` fixtures plus current namespace-qualified `uscDoc` fixture coverage.
+- `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures and selected-vintage cache lookup.
 - `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
 - `tests/adversary-round1-issue3.test.ts` — configured remote without upstream must still push current branch explicitly.
 - `tests/adversary-round1-issue5.test.ts` … `tests/adversary-round9-issue5.test.ts` — issue #5 regressions across fetch, cache, manifest, GovInfo/Congress behavior, and legislators crosswalk cleanup.
@@ -30,11 +32,13 @@
   - `tests/fixtures/title-01/manifest.json`
   - `tests/fixtures/title-01/title-01.zip`
   - `tests/fixtures/xml/title-01/*.xml`
+  - notably `tests/fixtures/xml/title-01/04-current-uscdoc.xml` for current OLRC `uscDoc` coverage
 - `tests/utils/module-helpers.ts` provides safe dynamic imports for source-module unit tests.
 
 ## Patterns to Follow
 - For pure backfill modules, import source files directly and assert behavior without shelling out where possible.
 - For fetch utilities/sources, prefer fixture-backed unit tests over live requests; default `npm test` remains offline.
+- When touching OLRC fetch logic, isolate `US_CODE_TOOLS_DATA_DIR` in tests that depend on uncached fetch behavior so ambient `data/` state cannot suppress the request path.
 - For CLI tests, build first and run `dist/index.js` with `spawnSync`.
 - For git behavior, prefer temp repos created in the test rather than mocks when validating actual history semantics.
 - Preserve adversary regression files once added; issue #3 and issue #5 both rely on explicit regression chains.
@@ -51,6 +55,7 @@
 - Planner changes: assert exactly 28 events, non-decreasing dates, stable `1791-12-15` ordering, and suffix behavior after slicing a prefix.
 - Git/repo changes: cover empty-dir bootstrap, populated-dir rejection, dirty-tree rejection, unrelated-history rejection, prefix resume, idempotent rerun, and explicit remote push semantics.
 - CLI changes: assert usage/error text and no-side-effect behavior for bad invocations.
+- OLRC issue #8 changes: cover homepage cookie bootstrap, authenticated follow-on requests, `download.shtml` parsing, current `uscDoc` parsing, selected-vintage transform lookup, Title 42 large-entry acceptance, and Title 53 reserved-empty handling without live outbound access.
 
 ## Known Test Behaviors
 - `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.
@@ -62,6 +67,8 @@
 - `tests/adversary-round2-issue5.test.ts` now mocks `src/utils/rate-limit.ts` at the shared-module seam and verifies Congress stops immediately with `rate_limit_exhausted` when the shared limiter reports zero remaining budget.
 - There is still no dedicated regression that forces a real upstream `429 Retry-After` response through Congress/GovInfo end-to-end; current confidence comes from the source implementations plus the targeted adversary regressions that now pass locally.
 - Full suite still depends on a built `dist/index.js` because transform/backfill/fetch CLI tests execute the compiled entrypoint.
+- `tests/unit/transforms/uslm-to-ir.test.ts` asserts that raw namespace-qualified `uscDoc` XML parses directly; callers should not strip namespaces before invoking `parseUslmToIr()`.
+- `tests/integration/transform-cli.test.ts` now seeds a canonical `data/manifest.json` for selected-vintage OLRC cache resolution instead of relying only on the fixture env override.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
@@ -69,6 +76,7 @@
   - end-to-end temp-repo Constitution backfill integration coverage
   - adversary regression for configured remote without upstream
   - issue #5 CLI/utils/adversary coverage for fetch/cache/manifest/crosswalk behavior
+  - issue #8 OLRC regression coverage for cookie bootstrap, listing parsing, `uscDoc` parsing, selected-vintage transform lookup, Title 42 extraction, and Title 53 reserved-empty behavior
   - existing transform regression coverage remains intact
 - What's intentionally deferred:
   - live external Constitution-source verification during tests
