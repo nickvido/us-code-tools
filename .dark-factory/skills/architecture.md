@@ -33,6 +33,12 @@
 - `src/utils/rate-limit.ts` — sliding-window limiter helpers plus the shared `getSharedApiDataGovLimiter()` singleton/reset hook used by both `src/sources/congress.ts` and `src/sources/govinfo.ts` for the single `API_DATA_GOV_KEY` in-process budget.
 - `src/transforms/` — namespace-tolerant USLM parsing (`uscDoc.main.title` + legacy `uslm.title`), markdown rendering, and output writing for `transform`.
 - issue #10 tightened canonical number extraction inside `src/transforms/uslm-to-ir.ts`: title/chapter/section `<num>` reads now prefer `@_value` and only fall back to cleaned display text when the attribute is absent/empty.
+- issue #14 completed structured section-body rendering across labeled hierarchy nodes:
+  - `src/domain/model.ts` first-class `ContentNode` coverage now includes `subclause` and `subitem`
+  - `src/transforms/uslm-to-ir.ts` parses ordered section bodies across `subsection -> paragraph -> subparagraph -> clause -> subclause -> item -> subitem`
+  - ordered render contract is `chapeau -> parent inline body -> nested labeled children -> continuation`
+  - inline body text is preserved from `<content>`, `<text>`, or `<p>` on labeled nodes and rendered alongside normalized labels
+  - current fixture anchors are `tests/fixtures/xml/title-42/42-section-10307.xml` and `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
 - issue #12 extended the transform architecture from a fixed `title -> chapter -> section` walk to recursive hierarchy traversal with accumulated per-section frontmatter context:
   - `src/domain/model.ts` now carries `HierarchyIR`, singular `sourceCredit`, and `statutoryNotes` (`noteType`, `topic`, `heading`, `text`) on `SectionIR`
   - `src/domain/normalize.ts` now owns canonical section ordering via `splitSectionNumber()`, `compareSectionNumbers()`, `sectionFileSafeId()`, and `sortSections()`
@@ -146,6 +152,7 @@
 - `sectionFileSafeId()` pads the leading numeric root to width 5 and preserves trailing suffixes/case, so examples like `106A`, `106a`, `106b`, and `2/3` remain distinct and stable.
 - Branch commit `07b954e` fixed the earlier issue #12 adversary seams around slash-separated `/us/usc/t10/s125/d` refs and equal-root mixed-case suffix ordering (`106 < 106A < 106a < 106b`).
 - Current head `2fb5c52` completes the remaining mixed-content seam in `src/transforms/uslm-to-ir.ts`: the module now dual-parses XML with a preserve-order tree and routes section body parsing, `sourceCredit`, and statutory-note extraction through ordered-text helpers (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) so inline `<ref>` / `<date>` siblings keep source document order.
+- Current head `8882d06` extends that ordered path to full structured bodies: `parseOrderedContentChildren(...)` / `parseLabeledNodeOrdered(...)` now preserve chapeau text, inline labeled-node body text, nested descendants through `subitem`, and continuation text after child lists; `src/transforms/markdown.ts` renders those nodes with normalized parenthesized labels and stable depth-based indentation.
 - `src/transforms/uslm-to-ir.ts` still keeps the legacy object-tree helpers (`readRawText(...)`, `readNodeTextInDocumentOrder(...)`) for non-preserve-order call sites, but issue #12 correctness now depends on the ordered path found via `findOrderedTitleNode(...)` / `collectOrderedSectionNodes(...)` rather than the older bucketed reconstruction.
 - Current issue #12 fixture coverage is centered on Titles 1, 5, 10, and 26 plus the deterministic numeric-title integration matrix and reserved-empty Title 53 negative path.
 - PR #13 is open and no longer draft; the latest issue comments show `[dev]` and `[adversary-review]` both approved with no remaining blocker on issue #12.
@@ -191,7 +198,13 @@
     - transformable USC refs render as relative markdown links using the same zero-padded filename helper as actual output files
     - section output names are zero-padded (`section-00001.md`, `section-00106a.md`, `section-00002-3.md`) and `_title.md` uses the same canonical sort order
     - real recursive fixtures live at `tests/fixtures/xml/title-05/05-part-chapter-sections.xml`, `tests/fixtures/xml/title-10/10-subtitle-part-chapter-sections.xml`, and `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
-  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, and #12
+  - issue #14 structured section-body completeness layer:
+    - section/provision bodies now preserve section-level `<chapeau>` text before the first labeled child
+    - labeled nodes render parent inline text from `<content>`, `<text>`, or `<p>` on every level from `subsection` through `subitem`
+    - `<continuation>` text is preserved after nested descendants in the same parent node
+    - `ContentNode` now models `subclause` and `subitem` as first-class renderable node types rather than collapsing them into shallower levels
+    - Title 42 § 10307 is the spot-check fixture for chapeau + ten paragraphs; Title 26 § 2 is the deep-order fixture for subsection body + nested subclauses + continuation
+  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, #12, and #14
 - What's intentionally deferred:
   - non-Constitution backfill phases that consume fetched artifacts
   - rewriting/repairing non-prefix histories

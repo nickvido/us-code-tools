@@ -24,6 +24,9 @@
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts`
   - `npx vitest run tests/unit/transforms/write-output.test.ts`
   - `npx vitest run tests/integration/issue12-transform-cli.test.ts`
+- Focused issue #14 tests:
+  - `npx vitest run tests/unit/transforms/uslm-to-ir.test.ts tests/unit/transforms/markdown.test.ts`
+  - spot-check fixture sections: Title 42 § 10307 and Title 26 § 2
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
@@ -89,8 +92,8 @@
 - `src/backfill/planner.ts` → `src/backfill/constitution/dataset.ts`, `src/backfill/renderer.ts`, `src/backfill/messages.ts`
 - `src/backfill/renderer.ts` → `src/backfill/constitution/dataset.ts`, `gray-matter`
 - `src/backfill/messages.ts` → no downstream state; keep pure and template-exact
-- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10/#12: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, canonical title/chapter/section numbers flow through `readCanonicalNumText(...)`, and recursive traversal now accumulates `subtitle`/`part`/`subpart`/`chapter`/`subchapter` context while `parseNotes()` emits `sourceCredit`, `statutoryNotes`, and note wrapper `noteType`)
-- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12: section frontmatter now serializes hierarchy keys + `source_credit`, `_title.md` must use `sortSections()`, and section prose may contain relative USC links generated from sanitized section ids)
+- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10/#12/#14: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, canonical title/chapter/section numbers flow through `readCanonicalNumText(...)`, recursive traversal accumulates `subtitle`/`part`/`subpart`/`chapter`/`subchapter`, `parseNotes()` emits `sourceCredit` + `statutoryNotes`, and ordered-body helpers now preserve `chapeau`, inline body text, nested descendants, and `continuation` across `subsection -> ... -> subitem`)
+- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12/#14: section frontmatter now serializes hierarchy keys + `source_credit`, `_title.md` must use `sortSections()`, section prose may contain relative USC links generated from sanitized section ids, and labeled body rendering normalizes bare labels like `1` to `(1)` while keeping deterministic indentation)
 - `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`, `src/domain/normalize.ts` (issue #12: all section file paths must use zero-padded `sectionFileSafeId()` output)
 
 ### Call Chain: Entry Point → Your Code
@@ -168,7 +171,7 @@ src/index.ts (main)
 - `HistoricalEvent` in `src/backfill/planner.ts` — exact commit/write plan contract
 - `PreparedTargetRepo` in `src/backfill/target-repo.ts` — repo bootstrap + resume state handoff
 - `BackfillSummary` in `src/backfill/orchestrator.ts` — CLI success payload
-- `TitleIR`, `SectionIR`, `ParseError`, `XmlEntry`, `HierarchyIR`, `StatutoryNoteIR` in `src/domain/model.ts` — transform contracts, including issue #12 hierarchy and statutory-note metadata
+- `TitleIR`, `SectionIR`, `ParseError`, `XmlEntry`, `HierarchyIR`, `StatutoryNoteIR`, and the labeled `ContentNode` union in `src/domain/model.ts` — transform contracts, including issue #12 hierarchy/statutory-note metadata and issue #14 first-class `subclause` / `subitem` structured-body nodes
 - `splitSectionNumber(...)`, `compareSectionNumbers(...)`, `sectionFileSafeId(...)`, `sortSections(...)` in `src/domain/normalize.ts` — canonical section sort/pad/file-stem contract for issue #12
 - `readCanonicalNumText(...)` / `cleanDecoratedNumText(...)` in `src/transforms/uslm-to-ir.ts` — the canonical `<num>` extraction boundary for issue #10; future parser changes should extend this seam instead of adding ad hoc cleanup elsewhere
 
@@ -199,7 +202,8 @@ src/index.ts (main)
   - preserve suffix case in ordering and filenames (`106A` != `106a`)
   - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; branch commit `07b954e` replaced locale-sensitive suffix sorting with direct codepoint comparison to keep that order deterministic
   - mixed-content inline ordering is now handled by the preserve-order parser path at head `2fb5c52`: `parseUslmToIr()` parses both the ordinary object tree and a `preserveOrder: true` tree, aligns sections with `collectOrderedSectionNodes(...)`, and routes section prose / `sourceCredit` / statutory-note extraction through ordered helpers instead of relying on the older object-entry traversal
-  - when modifying `src/transforms/uslm-to-ir.ts`, treat `readOrderedRawText(...)` + `parseNotesOrdered(...)` as the production issue-#12 path; keep legacy `readRawText(...)` behavior only where the ordered tree is unavailable, and avoid reintroducing per-tag bucket concatenation for mixed-content nodes
+  - issue #14 builds on that same preserve-order seam: `parseOrderedContentChildren(...)` and `parseLabeledNodeOrdered(...)` are now the production path for structured section bodies when ordered children are available; preserve the source-order contract `chapeau -> inline body -> nested labeled children -> continuation`
+  - when modifying `src/transforms/uslm-to-ir.ts`, treat `readOrderedRawText(...)` + `parseNotesOrdered(...)` as the production issue-#12 path and treat the ordered body helpers as the production issue-#14 path; keep legacy `readRawText(...)` behavior only where the ordered tree is unavailable, and avoid reintroducing per-tag bucket concatenation for mixed-content nodes
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
 ## Practical Notes
@@ -235,6 +239,12 @@ src/index.ts (main)
     - statutory notes with preserved wrapper `noteType`
     - relative USC ref rendering and zero-padded section filenames
     - dedicated real-fixture coverage in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
+  - issue #14 structured-body completeness work:
+    - preserve section-level `chapeau` before numbered descendants
+    - keep inline body text on labeled nodes from `<content>`, `<text>`, or `<p>`
+    - preserve `continuation` text after nested descendants in the same parent
+    - render first-class `subclause` and `subitem` nodes instead of dropping deep hierarchy levels
+    - normalize bare labels to parenthesized markdown output without disturbing already-parenthesized labels
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories

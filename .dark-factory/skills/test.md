@@ -19,8 +19,9 @@
 - `tests/utils/manifest.test.ts` — manifest normalization/defaulting and atomic write expectations.
 - `tests/utils/rate-limit.test.ts` — limiter arithmetic and exhaustion timing for the shared helper primitives.
 - `tests/unit/sources/olrc.test.ts` — OLRC source/cache behavior, cookie bootstrap, `download.shtml` discovery, Title 42 extraction ceiling, Title 53 reserved-empty classification, and selected-vintage cache regressions.
-- `tests/unit/transforms/uslm-to-ir.test.ts` — legacy `uslm` fixtures plus current namespace-qualified `uscDoc` fixture coverage, canonical `<num @value>` precedence, empty-attribute fallback, disagreement cases, mixed punctuation cleanup, and structural XSD-shape assertions.
+- `tests/unit/transforms/uslm-to-ir.test.ts` — legacy `uslm` fixtures plus current namespace-qualified `uscDoc` fixture coverage, canonical `<num @value>` precedence, empty-attribute fallback, disagreement cases, mixed punctuation cleanup, structural XSD-shape assertions, and issue #14 fixture regressions for section `chapeau`, paragraph body text, subsection body text, nested subclause bodies, and parent-level continuation text.
 - `tests/unit/transforms/issue12-recursive-metadata.test.ts` — real-fixture regression suite for recursive hierarchy walking, hierarchy frontmatter, singular `source_credit`, statutory notes, preserved `noteType`, relative USC ref rendering, canonical ordering, mixed-case suffix ordering, and zero-padded filename derivation.
+- `tests/unit/transforms/markdown.test.ts` — markdown rendering contracts, including issue #14 regression coverage for Title 42 § 10307 paragraph completeness, parenthesized label normalization, deterministic deep-hierarchy indentation/order, and continuation placement after nested children.
 - `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures, selected-vintage cache lookup, path-safe output assertions, and derived current-format title matrix coverage for titles `1..52` and `54` with reserved-empty `53`.
 - `tests/integration/issue12-transform-cli.test.ts` — fixture-backed CLI coverage for titles 5/10/26, slash-separated USC ref links, and zero-padded filesystem output ordering.
 - `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
@@ -38,6 +39,9 @@
   - issue #12 recursive hierarchy fixtures:
     - `tests/fixtures/xml/title-05/05-part-chapter-sections.xml`
     - `tests/fixtures/xml/title-10/10-subtitle-part-chapter-sections.xml`
+    - `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
+  - issue #14 completeness fixtures:
+    - `tests/fixtures/xml/title-42/42-section-10307.xml`
     - `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
 - `tests/utils/module-helpers.ts` provides safe dynamic imports for source-module unit tests.
 
@@ -64,10 +68,15 @@
 - OLRC issue #8 changes: cover homepage cookie bootstrap, authenticated follow-on requests, `download.shtml` parsing, current `uscDoc` parsing, selected-vintage transform lookup, Title 42 large-entry acceptance, and Title 53 reserved-empty handling without live outbound access.
 - Issue #10 parser changes: assert `@value` beats display text for title/chapter/section nodes, whitespace-only attributes fall back cleanly, mixed trailing `.—` decoration is removed in fallback mode, Title 1 current-format fixture yields `titleIr.chapters.length === 1` + 53 canonical section numbers, and output paths never contain decorated `<num>` text.
 - Issue #12 transform changes: assert fixture `<section>` count equality for Titles 1/5/10/26, rendered hierarchy frontmatter for sampled deep-nesting sections, `source_credit` presence when `<sourceCredit>` exists, `## Statutory Notes` rendering when `<notes>` exists, preserved `noteType: 'uscNote'`, relative markdown links for transformable USC refs, canonical slash-ref mapping (`/us/usc/t10/s125/d` → `../title-10/section-00125d.md`), zero-padded filenames, canonical mixed-width/mixed-case section ordering (`106`, `106A`, `106a`, `106b`), and normalized mixed-content source-credit/note text retention (`Aug. 10, 1956, ch. 1041`, `70A Stat. 3`).
+- Issue #14 transform changes: assert Title 42 § 10307 preserves section `chapeau` plus all ten numbered paragraph bodies, Title 26 § 2 preserves subsection body text + nested subclause text + parent continuation text, rendered labels are parenthesized exactly once, and repeated renders are byte-identical for fixture-backed sections.
 - Latest issue #12 branch state at head `2fb5c52`: the earlier slash-ref / mixed-case-suffix regressions and the final mixed-content ordering seam are all covered and currently passing.
+- Latest issue #14 branch state at head `8882d06`: the QA red regressions for missing paragraph/subsection bodies, bare labels, and dropped continuation text are all covered in `tests/unit/transforms/uslm-to-ir.test.ts` + `tests/unit/transforms/markdown.test.ts` and currently passing.
 - Fastest focused verification for issue #12 now is:
   - `rtk test npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts tests/unit/transforms/write-output.test.ts`
   - expected result at current head: all tests pass, including the Title 10 assertions that require `Aug. 10, 1956, ch. 1041` and `70A Stat. 3` to survive around inline refs.
+- Fastest focused verification for issue #14 now is:
+  - `rtk test npx vitest run tests/unit/transforms/uslm-to-ir.test.ts tests/unit/transforms/markdown.test.ts`
+  - expected result at current head: all tests pass, including the Title 42 § 10307 completeness spot-check and the Title 26 § 2 continuation-order assertions.
 
 ## Known Test Behaviors
 - `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.

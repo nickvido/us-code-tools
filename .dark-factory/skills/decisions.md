@@ -228,3 +228,17 @@
 - **Decision:** `src/transforms/uslm-to-ir.ts` now keeps a second `fast-xml-parser` pass with `preserveOrder: true` and uses ordered helper functions (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) for section prose, `sourceCredit`, and statutory notes so normalization follows source document order before applying USC-link vs plain-text fallback logic.
 - **Consequence:** Recognized USC refs still link, non-transformable refs stay plain text, surrounding punctuation/dates survive in rendered order, and future agents should extend the ordered helper path instead of reviving tag-bucket concatenation.
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-032: Structured section bodies render in source order with first-class deep hierarchy nodes
+- **Status:** Active
+- **Context:** Many USC sections express their real body text through `chapeau`, labeled descendants (`subsection` through `subitem`), inline node body text (`content` / `text` / `p`), and trailing `continuation` text. Earlier rendering could keep labels while dropping the actual body text or lose deep levels like `subclause` / `subitem`.
+- **Decision:** `src/domain/model.ts` treats `subclause` and `subitem` as first-class `ContentNode` variants, `src/transforms/uslm-to-ir.ts` preserves ordered section-body content across all labeled levels, and markdown rendering follows the container order `chapeau -> parent inline body -> nested children -> continuation`.
+- **Consequence:** Future agents must preserve deep hierarchy node types and the ordered-body contract rather than flattening or bucketizing structured content.
+- **Feature:** #14 Transform: render chapeau, paragraph content, and subsection body text
+
+### ADR-033: Markdown label normalization is a renderer concern, not a parser rewrite
+- **Status:** Active
+- **Context:** Real fixtures and tests now cover cases where parsed labels may be bare canonical values (`1`, `A`, `i`) while expected markdown output requires readable legislative formatting like `(1)`.
+- **Decision:** `src/transforms/markdown.ts` normalizes labels at render time with `formatLabel(...)`, adding parentheses only when they are absent and leaving already-parenthesized labels unchanged.
+- **Consequence:** Canonical parser values stay stable for IR/testing/path logic, while rendered markdown remains readable and deterministic. Future agents should not move this formatting concern into identifier parsing.
+- **Feature:** #14 Transform: render chapeau, paragraph content, and subsection body text

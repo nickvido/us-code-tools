@@ -235,3 +235,28 @@
 - Knowledge-capture correction on the current branch:
   - the older docs that described issue #12 as still blocked on `readRawText()` are now obsolete
   - current production behavior uses the ordered parse path for the mixed-content surfaces that matter to issue #12, and the focused Title 10 assertions for `Aug. 10, 1956, ch. 1041` / `70A Stat. 3` now pass
+
+## Feature #14 — Structured USLM section-body completeness
+- Updated `src/domain/model.ts`:
+  - extended the labeled `ContentNode` union with first-class `subclause` and `subitem` node types
+  - kept labeled-node inline body text on the shared `text?: string` field so paragraph/subsection bodies can render inline with their labels
+- Updated `src/transforms/uslm-to-ir.ts`:
+  - ordered section-body parsing now preserves `chapeau`, inline parent body text from `<content>` / `<text>` / `<p>`, nested descendants through `subitem`, and trailing `continuation` text in source order
+  - legacy-object fallback parsing mirrors the same hierarchy coverage so structured-body fidelity does not depend exclusively on one code path
+  - deep hierarchy fixtures now preserve subsection body text, nested subclause text, and continuation text on the correct parent node
+- Updated `src/transforms/markdown.ts`:
+  - renderer now normalizes bare labels to parenthesized output (`1` → `(1)`) without double-wrapping labels that are already normalized
+  - rendered labeled-node lines now include heading + inline body text in the same line and preserve deterministic indentation by node depth
+- Regression coverage now locks the feature down with real OLRC fixtures:
+  - `tests/unit/transforms/uslm-to-ir.test.ts`
+  - `tests/unit/transforms/markdown.test.ts`
+  - fixtures: `tests/fixtures/xml/title-42/42-section-10307.xml` and `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
+- Reviewer/branch context captured:
+  - QA first introduced 3 expected red regressions for missing paragraph/subsection bodies, dropped continuation text, and bare labels
+  - dev implementation landed at commit `8882d06`
+  - `[adversary-review]` is APPROVED with no findings
+  - PR #15 remains the active branch PR for `df2/issue-14`
+- Verification recorded in issue context:
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `rtk test npx vitest run` ✅
