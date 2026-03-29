@@ -224,6 +224,10 @@
 - Knowledge-capture correction on the current branch:
   - the prior docs open-bug note is now partly obsolete: `07b954e` fixed both slash-ref path generation and deterministic mixed-case suffix ordering on `df2/issue-12`
   - the remaining focused issue #12 failure is `src/transforms/uslm-to-ir.ts::readRawText()`, which still reorders mixed-content `sourceCredit` / statutory-note text and drops normalized text like `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
+- Latest reviewer state at branch head (`1afab19` / issue comment `4150102366`):
+  - adversary review is still rejecting only one medium spec violation
+  - target seam remains `src/transforms/uslm-to-ir.ts::readRawText()`
+  - required fix is a deterministic mixed-content walker that preserves document order across plain text, `<ref>`, and `<date>` before applying USC-link vs plain-text fallback logic
 - Verification observed during this knowledge-capture correction:
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts -t "renders hierarchy frontmatter, source_credit, statutory notes, and USC ref links from parsed sections"` ❌ (fails on missing mixed-content source-credit text)
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (the slash-ref + suffix-order failures are gone; the remaining break is mixed-content order/text loss)
