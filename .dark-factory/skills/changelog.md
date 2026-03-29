@@ -224,14 +224,14 @@
 - Knowledge-capture correction on the current branch:
   - the prior docs open-bug note is now partly obsolete: `07b954e` fixed both slash-ref path generation and deterministic mixed-case suffix ordering on `df2/issue-12`
   - the remaining focused issue #12 failure is `src/transforms/uslm-to-ir.ts::readRawText()`, which still reorders mixed-content `sourceCredit` / statutory-note text and drops normalized text like `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
-- Latest reviewer state at branch head (`1afab19` / issue comment `4150102366`):
+- Latest reviewer state at branch head (`3b5fb20`; latest adversary-review issue comment still points at the same unresolved parser seam):
   - adversary review is still rejecting only one medium spec violation
   - target seam remains `src/transforms/uslm-to-ir.ts::readRawText()`
   - required fix is a deterministic mixed-content walker that preserves document order across plain text, `<ref>`, and `<date>` before applying USC-link vs plain-text fallback logic
-- Verification observed during this knowledge-capture correction:
+- Verification observed during the latest knowledge-capture pass:
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts -t "renders hierarchy frontmatter, source_credit, statutory notes, and USC ref links from parsed sections"` ❌ (fails on missing mixed-content source-credit text)
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (the slash-ref + suffix-order failures are gone; the remaining break is mixed-content order/text loss)
-- Follow-up knowledge capture on the same branch head (`e8bf199`):
-  - confirmed from code that the remaining `readRawText()` seam is a literal two-pass bucket rebuild, not an abstract parser quirk
+- Follow-up knowledge capture at current branch head (`3b5fb20`):
+  - confirmed from code that the remaining `readRawText()` seam is still a literal two-pass bucket rebuild, not an abstract parser quirk
   - current implementation first concatenates `#text`, `text`, `p`, `content`, `heading`, `num`, `chapeau`, `continuation`, `quotedContent`, and `inline`, then walks remaining child entries via `Object.entries(node)`
-  - re-ran the focused Title 10 renderer regression and it still fails at the assertions expecting `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
+  - re-confirmed the focused Title 10 renderer regression still fails at the assertions expecting `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
