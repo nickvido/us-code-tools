@@ -169,6 +169,8 @@ These checks must run after schema validation and before any side effects:
 
 ### 1.5 Manifest structure
 
+The manifest is operational state for the local target repo and must remain uncommitted. To reduce unnecessary workstation disclosure while still supporting freshness/debugging, it stores a canonical absolute path plus a separate display-safe relative label.
+
 ```json
 {
   "version": 1,
@@ -178,7 +180,8 @@ These checks must run after schema validation and before any side effects:
   },
   "generated_at": "2026-03-29T19:00:00.000Z",
   "target_repo": {
-    "path": "/abs/path/to/us-code",
+    "canonical_path": "/abs/path/to/us-code",
+    "display_path": ".",
     "head_branch": "main"
   },
   "annual_rows": [
@@ -247,6 +250,12 @@ Lock acquisition algorithm:
 3. Write JSON lock payload containing PID, hostname, command, and timestamp.
 4. On failure to acquire, exit non-zero with deterministic `lock_conflict` error.
 5. Delete lock in `finally`.
+
+Stale-lock policy:
+
+- Day-one behavior stays fail-closed; the command never auto-breaks an existing lock.
+- `lock_conflict` output must include the lock payload fields needed for manual recovery: PID, hostname, command, and timestamp.
+- The docs and error text must include a deterministic recovery instruction: inspect the recorded process, confirm it is no longer running, delete `.us-code-tools/milestones.lock`, then rerun.
 
 Index rationale:
 
@@ -448,7 +457,21 @@ No circular imports are allowed.
 - Child-process calls for git and `gh`.
 - No queues, no background jobs, no webhooks.
 
-### 3.5 Tagging strategy
+### 3.5 Trusted executable resolution
+
+Subprocess adapters must resolve the `git` and `gh` executable paths once at process start before any metadata-driven operations.
+
+Rules:
+
+1. Resolve binaries with a dedicated helper using `command -v`/`which` equivalent behavior implemented via Node APIs, then store the absolute paths in process-local config.
+2. All subprocesses use `execFile`/`spawn` argument arrays with the resolved absolute executable path; never use shell interpolation.
+3. Fail closed with deterministic errors if `git` is missing for any command or if `gh` is missing for `milestones release`.
+4. Debug logs may mention only the executable basename by default; absolute binary paths are printed only in explicit verbose troubleshooting mode.
+5. Document in implementation notes and CI docs that operators must provide trusted `git` and `gh` binaries on the host.
+
+This directly addresses the approved medium-risk finding about PATH spoofing while preserving the CLI-only design.
+
+### 3.6 Tagging strategy
 
 Use **annotated tags** consistently for all managed milestone tags. The spec permits lightweight or annotated tags, but architecture standardizes on annotated tags to avoid mixed-repo behavior and to support future audit context.
 
@@ -502,6 +525,7 @@ Because this is a CLI, observability is process-local:
 - Tagging is safe because existing incorrect tags are never moved.
 - Release publication may partially succeed across Congress releases; rerun updates existing releases keyed by tag.
 - Manifest is never trusted blindly; freshness check is mandatory before GitHub writes.
+- `git diff --stat` output must be bounded during release rendering: capture only diff-stat output, enforce a subprocess timeout, and either truncate to a documented maximum body size or fail with a deterministic renderer error before attempting the GitHub write.
 
 ## 4.2 Development / test environment
 
@@ -701,13 +725,15 @@ No new secrets are introduced.
 
 Potentially sensitive values:
 
-- absolute local filesystem paths in manifest
+- canonical local filesystem paths in manifest
 - repo remotes indirectly visible through git operations
 
 Guidance:
 
-- keep manifest scoped to local target repo
-- do not embed GitHub tokens or environment dumps in manifest or stderr output
+- keep manifest scoped to local target repo and treat it as internal operational state, not reviewable project content
+- default human-facing logs and errors must prefer `display_path`/relative paths over canonical absolute paths
+- do not embed GitHub tokens, auth headers, environment dumps, or full `gh auth status` output in manifest or stderr output
+- if verbose/debug logging is enabled, redact home-directory prefixes where practical before printing file paths
 
 ### 7.6 Release-body integrity
 
