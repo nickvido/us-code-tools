@@ -291,8 +291,7 @@ function cleanDecoratedNumText(value: string): string {
     .replace(/^§\s*/u, '')
     .replace(/^Title\s+/iu, '')
     .replace(/^Chapter\s+/iu, '')
-    .replace(/[.]+$/u, '')
-    .replace(/[—]+$/u, '')
+    .replace(/[.—]+$/u, '')
     .trim();
 }
 
