@@ -195,11 +195,11 @@ src/index.ts (main)
 - Issue #12 transform conventions:
   - never hand-roll section ordering in renderers/tests; use `sortSections()` / `compareSectionNumbers()`
   - never hand-roll section filenames or ref targets; use `sectionFileSafeId()` so writes and links stay aligned
-  - slash-separated USC ref tails like `/us/usc/t10/s125/d` must be canonicalized before path generation; branch commit `07b954e` now collapses the slash tail in `hrefToMarkdownLink()` so links resolve to `section-00125d.md`
+  - slash-separated USC ref tails like `/us/usc/t10/s125/d` must be canonicalized before path generation; branch commit `07b954e` collapses the slash tail in `hrefToMarkdownLink()` so links resolve to `section-00125d.md`
   - preserve suffix case in ordering and filenames (`106A` != `106a`)
   - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; branch commit `07b954e` replaced locale-sensitive suffix sorting with direct codepoint comparison to keep that order deterministic
-  - the remaining open issue #12 parser seam is mixed-content inline ordering: `readRawText()` still buckets `#text`/`text`/`p` ahead of other children, so source-credit and statutory-note text around inline `<ref>` / `<date>` nodes can be reordered or dropped
-  - exact current seam at `3b5fb20`: `readRawText()` concatenates `node['#text']`, `text`, `p`, `content`, `heading`, `num`, `chapeau`, `continuation`, `quotedContent`, and `inline` before a second `Object.entries(node)` walk for everything else; replace that two-pass rebuild with one document-order walker instead of patching individual child names
+  - mixed-content inline ordering is now handled by the preserve-order parser path at head `2fb5c52`: `parseUslmToIr()` parses both the ordinary object tree and a `preserveOrder: true` tree, aligns sections with `collectOrderedSectionNodes(...)`, and routes section prose / `sourceCredit` / statutory-note extraction through ordered helpers instead of relying on the older object-entry traversal
+  - when modifying `src/transforms/uslm-to-ir.ts`, treat `readOrderedRawText(...)` + `parseNotesOrdered(...)` as the production issue-#12 path; keep legacy `readRawText(...)` behavior only where the ordered tree is unavailable, and avoid reintroducing per-tag bucket concatenation for mixed-content nodes
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
 ## Practical Notes

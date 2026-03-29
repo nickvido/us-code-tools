@@ -223,8 +223,8 @@
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
 
 ### ADR-031: Mixed-content XML normalization must preserve source order across text and inline children
-- **Status:** Active (desired contract; current branch still violates it)
-- **Context:** `sourceCredit` and statutory-note nodes interleave plain text with inline `<ref>` and `<date>` children, and bucketed reconstruction in `readRawText()` reorders or drops source text like `Aug. 10, 1956, ch. 1041` / `70A Stat. 3`.
-- **Decision:** The normalization boundary for mixed-content XML must walk text nodes and inline children in document order before deciding whether each ref becomes a markdown link or plain text fallback.
-- **Consequence:** Recognized USC refs can still link, non-transformable refs stay plain text, and surrounding punctuation/dates survive in rendered order.
+- **Status:** Active
+- **Context:** `sourceCredit` and statutory-note nodes interleave plain text with inline `<ref>` and `<date>` children, and the earlier object-tree reconstruction in `readRawText()` reordered or dropped source text like `Aug. 10, 1956, ch. 1041` / `70A Stat. 3`.
+- **Decision:** `src/transforms/uslm-to-ir.ts` now keeps a second `fast-xml-parser` pass with `preserveOrder: true` and uses ordered helper functions (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) for section prose, `sourceCredit`, and statutory notes so normalization follows source document order before applying USC-link vs plain-text fallback logic.
+- **Consequence:** Recognized USC refs still link, non-transformable refs stay plain text, surrounding punctuation/dates survive in rendered order, and future agents should extend the ordered helper path instead of reviving tag-bucket concatenation.
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy

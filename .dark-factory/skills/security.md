@@ -98,8 +98,9 @@
   - pads only the leading numeric root to width 5 while preserving suffix case
   - branch commit `07b954e` restored the intended boundary behavior for slash-separated USC ref tails by collapsing `/us/usc/t10/s125/d` to the same canonical section id used for filenames (`section-00125d.md`)
 - `src/transforms/uslm-to-ir.ts`
-  - still has one open issue-#12 normalization/order gap: `readRawText()` rebuilds mixed-content XML by bucket rather than source order, so inline `<ref>` and `<date>` nodes can scramble surrounding plain text in `sourceCredit`, statutory notes, and other normalized text fields
-  - at current head (`bfc6502`), that means trusted normalization currently depends on a two-pass rebuild (`#text`/`text`/`p`/`content`/`heading`/`num`/`chapeau`/`continuation`/`quotedContent`/`inline`, then remaining child entries). Any fix should preserve the single normalization boundary while changing the traversal order, not add a second path just for `sourceCredit` or notes
+  - now uses a preserve-order parse path for the security-sensitive mixed-content surfaces added by issue #12: section prose, `sourceCredit`, and statutory notes are read from ordered child arrays so inline `<ref>` / `<date>` nodes retain surrounding plain text in source order
+  - still keeps the non-preserve-order object tree for legacy parsing and metadata extraction, but the production safety/correctness boundary for mixed content is the ordered helper family (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`)
+  - dual parsing does not add outbound surface area or new trust boundaries; it only changes how untrusted XML is normalized before markdown/frontmatter/path reuse
 - `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale

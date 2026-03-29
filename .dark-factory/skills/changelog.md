@@ -221,17 +221,17 @@
   - mixed-case suffix ordering is part of the public ordering contract for `_title.md` and any shared section-sort helper: `106` < `106A` < `106a` < `106b`
   - mixed-content source-credit/statutory-note parsing must preserve the original text/link/date order instead of bucketed reconstruction
   - regression coverage for those adversary findings lives in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
+- Follow-up implementation landed after the earlier blocker notes:
+  - `2863584` / `2fb5c52` completed the mixed-content ordering fix by adding a preserve-order XML parse path and routing section body parsing, `sourceCredit`, and statutory-note extraction through ordered helpers in `src/transforms/uslm-to-ir.ts`
+  - the same ordered path preserves inline `<ref>` / `<date>` sibling order while keeping legacy source-credit note handling for backward compatibility
+- Latest reviewer state at branch head (`2fb5c52`):
+  - `[dev]` reports the mixed-content seam fixed and verified with `npx vitest run`, `npx tsc --noEmit`, and `npm run build`
+  - `[adversary-review]` is APPROVED with no remaining findings
+  - PR #13 is OPEN and no longer draft
+- Verification observed during this knowledge-capture pass:
+  - `rtk test npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts tests/unit/transforms/write-output.test.ts` ✅
+  - `rtk err npx tsc --noEmit` ✅
+  - `rtk err npm run build` ✅
 - Knowledge-capture correction on the current branch:
-  - the prior docs open-bug note is now partly obsolete: `07b954e` fixed both slash-ref path generation and deterministic mixed-case suffix ordering on `df2/issue-12`
-  - the remaining focused issue #12 failure is `src/transforms/uslm-to-ir.ts::readRawText()`, which still reorders mixed-content `sourceCredit` / statutory-note text and drops normalized text like `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
-- Latest reviewer state at branch head (`3b5fb20`; latest adversary-review issue comment still points at the same unresolved parser seam):
-  - adversary review is still rejecting only one medium spec violation
-  - target seam remains `src/transforms/uslm-to-ir.ts::readRawText()`
-  - required fix is a deterministic mixed-content walker that preserves document order across plain text, `<ref>`, and `<date>` before applying USC-link vs plain-text fallback logic
-- Verification observed during the latest knowledge-capture pass:
-  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts -t "renders hierarchy frontmatter, source_credit, statutory notes, and USC ref links from parsed sections"` ❌ (fails on missing mixed-content source-credit text)
-  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (the slash-ref + suffix-order failures are gone; the remaining break is mixed-content order/text loss)
-- Follow-up knowledge capture at current branch head (`3b5fb20`):
-  - confirmed from code that the remaining `readRawText()` seam is still a literal two-pass bucket rebuild, not an abstract parser quirk
-  - current implementation first concatenates `#text`, `text`, `p`, `content`, `heading`, `num`, `chapeau`, `continuation`, `quotedContent`, and `inline`, then walks remaining child entries via `Object.entries(node)`
-  - re-confirmed the focused Title 10 renderer regression still fails at the assertions expecting `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
+  - the older docs that described issue #12 as still blocked on `readRawText()` are now obsolete
+  - current production behavior uses the ordered parse path for the mixed-content surfaces that matter to issue #12, and the focused Title 10 assertions for `Aug. 10, 1956, ch. 1041` / `70A Stat. 3` now pass
