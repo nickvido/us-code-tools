@@ -34,6 +34,43 @@ function buildCurrentFormatFixtureZip(outputDir: string, title: number): string 
   return zipPath;
 }
 
+function buildCollidingChapterFixtureZip(outputDir: string, title: number): string {
+  const fixtureDir = resolve(outputDir, `title-${String(title).padStart(2, '0')}-collision-xml`);
+  const zipPath = resolve(outputDir, `title-${String(title).padStart(2, '0')}-collision.zip`);
+  mkdirSync(fixtureDir, { recursive: true });
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<uscDoc xmlns="http://xml.house.gov/schemas/uslm/1.0" schemaLocation="http://xml.house.gov/schemas/uslm/1.0 USLM-1.0.15.xsd">
+  <meta>
+    <docNumber>${title}</docNumber>
+    <docTitle>General Provisions</docTitle>
+  </meta>
+  <main>
+    <title identifier="/us/usc/t${title}">
+      <num value="${title}">Title ${title}—</num>
+      <heading>General Provisions</heading>
+      <chapter identifier="/us/usc/t${title}/ch-a-b">
+        <num value="A-B">Chapter A-B—</num>
+        <heading>Alpha Beta</heading>
+        <section identifier="/us/usc/t${title}/s1"><num value="1">§ 1.</num><heading>Section 1 heading</heading><content><p>Section 1 text.</p></content></section>
+      </chapter>
+      <chapter identifier="/us/usc/t${title}/ch-a-slash-b">
+        <num value="A / B">Chapter A / B—</num>
+        <heading>Alpha Slash Beta</heading>
+        <section identifier="/us/usc/t${title}/s2"><num value="2">§ 2.</num><heading>Section 2 heading</heading><content><p>Section 2 text.</p></content></section>
+      </chapter>
+    </title>
+  </main>
+</uscDoc>`;
+
+  writeFileSync(resolve(fixtureDir, `usc${String(title).padStart(2, '0')}.xml`), xml);
+  execSync(`cd ${JSON.stringify(fixtureDir)} && zip -qr ${JSON.stringify(zipPath)} .`, {
+    cwd: outputDir,
+    shell: '/bin/bash',
+  });
+  return zipPath;
+}
+
 function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vintage: string, title: number): string {
   const titleDir = resolve(repoRoot, 'data', 'cache', 'olrc', 'vintages', vintage, `title-${String(title).padStart(2, '0')}`);
   mkdirSync(titleDir, { recursive: true });
@@ -240,6 +277,32 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
       expect(headingMatches.length).toBeGreaterThan(1);
       expect(headingMatches[0]).toMatch(/^1\. /);
       expect(headingMatches[1]).toMatch(/^2\. /);
+    } finally {
+      rmSync(sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('fails before writing chapter files when two distinct chapter buckets normalize to the same filename', () => {
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-issue16-collision-'));
+    const fixtureZip = buildCollidingChapterFixtureZip(sandboxRoot, 1);
+    seedSelectedVintageOlrcCache(sandboxRoot, fixtureZip, '119-73', 1);
+    const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+
+    const result = spawnSync(
+      process.execPath,
+      [distEntry, 'transform', '--title', '1', '--output', './out', '--group-by', 'chapter'],
+      { cwd: sandboxRoot, encoding: 'utf8', timeout: 60_000, env: process.env },
+    );
+
+    try {
+      const outputTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const files = existsSync(outputTree) ? readdirSync(outputTree).sort() : [];
+      const report = parseReportFromStdout(result.stdout);
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/chapter-a-b\.md|collision|duplicate|write/i);
+      expect(files.filter((name) => name === 'chapter-a-b.md')).toHaveLength(0);
+      expect(report?.parse_errors?.length ?? 0).toBeGreaterThan(0);
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
     }
