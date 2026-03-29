@@ -119,6 +119,44 @@ describe('issue #12 CLI transform QA', () => {
     }
   });
 
+  it('renders slash-separated USC refs as relative markdown links in written section output', () => {
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-issue12-ref-links-'));
+
+    try {
+      const fixtureZip = buildFixtureZip(sandboxRoot, 10, 'title-10/10-subtitle-part-chapter-sections.xml');
+      seedSelectedVintageOlrcCache(sandboxRoot, fixtureZip, '119-73', 10);
+
+      const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+      const result = spawnSync(process.execPath, [distEntry, 'transform', '--title', '10', '--output', './out'], {
+        cwd: sandboxRoot,
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: process.env,
+      });
+
+      expect(result.status).toBe(0);
+
+      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-10');
+      const sectionMarkdown = readFileSync(join(outTree, 'section-00101.md'), 'utf8');
+      const parsedSection = matter(sectionMarkdown);
+
+      expect(parsedSection.data).toMatchObject({
+        title: 10,
+        section: '101',
+        subtitle: 'A',
+        part: 'I',
+        chapter: '1',
+        source_credit: expect.any(String),
+      });
+      expect(parsedSection.content).toContain('## Statutory Notes');
+      expect(parsedSection.content).toContain('[section 125(d) of this title](../title-10/section-00125d.md)');
+      expect(parsedSection.content).not.toContain('section 125(d) of this title](/us/usc/t10/s125/d)');
+      expect(parsedSection.content).not.toContain('[section 125(d) of this title]()');
+    } finally {
+      rmSync(sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
   it('writes zero-padded filenames and a canonically sorted _title.md for mixed-width section identifiers', () => {
     const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-issue12-ordering-'));
     const fixtureXml = `<?xml version="1.0" encoding="UTF-8"?>
