@@ -265,6 +265,75 @@ describe('OLRC source and cache behavior', () => {
     }
   }, 45000);
 
+  it('defaults OLRC vintage discovery to download.shtml instead of probing annualtitlefiles.shtml first', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+
+    // NOTE: Use the EXISTING fetchOlrcSource signature — do NOT add a new overload for this test.
+    const fetchOlrcSource = pickCallable(mod, [
+      'fetchOlrcSource',
+      'fetchOlrc',
+      'runOlrcFetch',
+      'fetchSourceOlrc',
+    ]);
+
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    const title01Zip = readFileSync(resolve(process.cwd(), 'tests/fixtures/title-01/title-01.zip'));
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(url);
+
+      if (url === 'https://uscode.house.gov/') {
+        return new Response('ok', {
+          status: 200,
+          headers: {
+            'Set-Cookie': 'JSESSIONID=current-only; Path=/; Secure; HttpOnly',
+            'Content-Type': 'text/html; charset=utf-8',
+          },
+        });
+      }
+
+      if (url === 'https://uscode.house.gov/download/download.shtml') {
+        expect(init?.headers).toBeDefined();
+        const headers = new Headers(init?.headers);
+        expect(headers.get('cookie') ?? headers.get('Cookie')).toContain('JSESSIONID=current-only');
+
+        return new Response(`
+          <html><body>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">Title 1</a>
+          </body></html>
+        `, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      if (url.endsWith('xml_usc01@119-73.zip')) {
+        return new Response(title01Zip, { status: 200, headers: { 'Content-Type': 'application/zip' } });
+      }
+
+      if (url === 'https://uscode.house.gov/download/annualtitlefiles.shtml') {
+        return new Response('legacy listing must not be requested in default discovery flow', {
+          status: 418,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+
+      throw new Error(`Unexpected OLRC request in discovery test: ${url}`);
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchOlrcSource({ force: false });
+      expect((result as any)?.ok).toBe(true);
+      expect(requests).toContain('https://uscode.house.gov/');
+      expect(requests).toContain('https://uscode.house.gov/download/download.shtml');
+      expect(requests).toContain('https://uscode.house.gov/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip');
+      expect(requests).not.toContain('https://uscode.house.gov/download/annualtitlefiles.shtml');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('bootstraps homepage cookies before requesting download.shtml and releasepoint ZIPs', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
     const mod = await safeImport(modulePath);
