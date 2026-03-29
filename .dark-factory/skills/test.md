@@ -100,6 +100,42 @@
 - `tests/integration/transform-cli.test.ts` now seeds a canonical `data/manifest.json` for selected-vintage OLRC cache resolution instead of relying only on the fixture env override.
 - `tests/integration/issue12-transform-cli.test.ts` seeds a selected-vintage OLRC cache with real nested fixtures and then shells out to `dist/index.js transform`; keep that pattern for future end-to-end transform regressions instead of introducing live fetches.
 
+## Milestones / Releases Test Notes (Issue #18)
+- Milestones coverage currently lives in:
+  - `tests/cli/milestones.test.ts` — command usage, deterministic plan output, same-year inauguration skip semantics, committed metadata smoke check
+  - `tests/integration/milestones-workflow.test.ts` — build-first full workflow coverage for `plan`, `apply`, and `release`
+- The integration suite uses real temp git repos plus fake `gh` binaries instead of mocking internal modules for most end-to-end assertions.
+- Important workflow assertions already covered:
+  - `apply` creates `annual/*`, paired one-per-row `pl/*`, boundary-only `congress/*`, and manifest rows deterministically
+  - unchanged reruns leave tags stable and manifest bytes identical
+  - dirty working tree rejects before tag/manifest mutation
+  - detached HEAD rejects with `detached_head` and not `repo_dirty`
+  - duplicate metadata fails during planning before side effects
+  - release refuses missing/stale manifest state before any `gh` write
+  - release create/update is keyed by tag name (`gh release view/create/edit` path)
+  - `pl/*` SHA drift alone is enough to fail manifest freshness
+  - `git_cli_unavailable` and `github_cli_unavailable` both fail closed before mutation
+  - lock conflicts echo `pid`, `hostname`, `command`, and `timestamp` and leave the lock file untouched
+- Fake-CLI helpers worth reusing instead of reinventing:
+  - `createFakeGhBin(...)` in `tests/integration/milestones-workflow.test.ts` for release create/edit/view logging and state persistence
+  - `createGitOnlyBin(...)` for PATH-based `gh` absence scenarios
+- Current milestone tests are build-coupled: both CLI and integration suites shell out to `dist/index.js`, so `npm run build` remains a prerequisite for green Vitest runs on those files.
+
+## What Good Coverage Looks Like Here
+- Metadata changes: assert both positive plan shape and pre-mutation validation failures (`metadata_invalid`, duplicate tags/dates/slugs, malformed release points, scope mismatch).
+- Repo-state changes: assert no tags and no `.us-code-tools/milestones.json` on dirty-tree, detached-HEAD, lock-conflict, or binary-resolution failures.
+- Freshness changes: assert `release` fails on digest drift, missing manifest, missing tags, or per-tag SHA drift before any fake-`gh` state/log file appears.
+- Release-body changes: assert exact ordered sections `## Diff Stat`, `## Summary`, `## Notable Laws`, `## Narrative`; baseline release must render the exact fixed sentence when `previous_tag` is null.
+- Binary-resolution changes: assert PATH isolation via fake bins and that failure occurs before any mutation.
+- Concurrency changes: preserve the repo-local lock test that verifies both surfaced diagnostics and unchanged on-disk lock payload.
+
+## Known Test Behaviors
+- `tests/integration/milestones-workflow.test.ts` calls `npm run build` once in `beforeAll()` and then shells out to `process.execPath dist/index.js ...`.
+- Fake `gh` binaries persist both a JSONL command log and a JSON state file so tests can prove create-vs-edit idempotency without GitHub network access.
+- Milestone temp repos commit dated snapshot files directly with shell `git add && git commit` commands; commit SHAs are then embedded into metadata JSON written inside the test sandbox.
+- The detached-HEAD regression uses `git checkout --detach <sha>` and then asserts both the deterministic code path and absence of manifest/tag side effects.
+- Binary-unavailable tests use PATH replacement rather than monkeypatching internal resolution helpers, so they exercise the real absolute-path resolver contract.
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - unit coverage for backfill args, dataset, renderer, messages, planner, and commit env

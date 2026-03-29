@@ -148,6 +148,53 @@
 - Issue #16 `_uncategorized.md` plus `warnings[]` is expected behavior for chapter-less sections and should not be mislabeled as a failed transform.
 - Zero-padded section filenames are part of the transform safety/correctness contract now because lexicographic directory order must match canonical numeric order during local review and downstream processing.
 
+## Milestones / Releases Security Notes (Issue #18)
+
+### Trust Boundary Additions
+- Untrusted milestone inputs now include:
+  - committed-but-still-validated milestone metadata JSON (`docs/metadata/legal-milestones.json` or test metadata files)
+  - `commit_selector` strings resolved against arbitrary target repos
+  - target-repo tag state under managed namespaces (`annual/*`, `pl/*`, `congress/*`, `president/*`)
+  - repo-local `.us-code-tools/milestones.json` and `.us-code-tools/milestones.lock`
+  - host `PATH` entries used to resolve `git` / `gh`
+
+### Implemented Controls
+- `src/milestones/git.ts`
+  - resolves `git` / `gh` once per process into absolute executable paths and reuses them through `resolvedBinaryCache`
+  - uses `execFile` with argument vectors rather than shell interpolation
+  - fails closed with `git_cli_unavailable` / `github_cli_unavailable` when binaries cannot be resolved
+  - distinguishes detached HEAD from dirty-tree state via dedicated `detached_head` error text
+- `src/milestones/metadata.ts`
+  - validates tag/release metadata before plan/apply/release side effects
+  - rejects duplicate `annual_tag`, duplicate `snapshot_date`, duplicate normalized `pl/*`, duplicate president slugs, unknown president-term references, malformed release points, and scope mismatches
+- `src/milestones/manifest.ts`
+  - computes metadata digests with SHA-256 for freshness checks
+  - writes `.us-code-tools/milestones.json` atomically via temp file + rename with mode `0600`
+  - acquires a repo-local exclusive lock file and surfaces deterministic `lock_conflict` payload details for manual recovery
+  - does not auto-break stale locks
+- `src/milestones/apply.ts`
+  - requires resolved `git`, attached HEAD, and a clean working tree before tag creation
+  - fails on tag drift (`tag_conflict`) rather than retargeting an existing managed tag
+- `src/milestones/releases.ts`
+  - requires a present manifest whose metadata digest and live repo tag SHAs match a freshly recomputed plan before any GitHub write
+  - requires resolved/authenticated `gh` before release publication
+  - serializes release writes one at a time and stops immediately on failure
+  - renders diff stats with `git diff --stat` using resolved tag names and a bounded subprocess timeout
+
+### Security Decisions with Rationale
+- **Absolute-path binary reuse per command run:** mitigates PATH-spoofing drift during one milestone invocation; once resolved, subprocesses do not fall back to repeated bare-name lookup.
+- **Fail-on-tag-conflict:** managed milestone tags are historical markers and must not silently move to new SHAs.
+- **Repo-local manifest freshness gate before GitHub writes:** prevents hand-edited or stale manifests from driving release publication after repo/tag drift.
+- **Repo-local lock payload is operator-readable, not self-healing:** manual recovery is safer than auto-breaking a possibly-live lock in a git-mutating workflow.
+- **Tool-owned `.us-code-tools/*` paths are excluded from clean-tree gating:** reruns should not deadlock on the command’s own operational files, but unrelated working-tree changes still block mutation.
+- **Release body content is deterministic, metadata-driven text only:** no live model calls or web scraping can inject nondeterministic or unreviewed legal summaries during `release`.
+
+## Things Future Agents Should Not Mislabel as Bugs
+- The current code manually validates metadata in `src/milestones/metadata.ts`; absence of Ajv/schema modules is branch reality, not automatically a security bug.
+- `createAnnotatedTag(...)` is a misleading name today: implementation currently issues plain `git tag <tag> <sha>` calls. That is a correctness/doc drift note, not evidence of silent force-move behavior.
+- Skipping president tags for inaugurations before `coverage_start` in the same calendar year is intentional; the code compares full ISO dates, not just years.
+- Release publication without remotes is still valid for `apply`; pushing tags is explicitly out of scope for issue #18.
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - strict target bootstrap rules

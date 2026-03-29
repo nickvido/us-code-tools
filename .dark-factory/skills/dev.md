@@ -221,6 +221,90 @@ src/index.ts (main)
 - `buildGitCommitEnv()` exists primarily to guarantee exact UTC timestamp strings in tests; actual commits are authored in `fast-import` using Unix seconds + `+0000`.
 - There is no separate `authors.ts` file in the current code despite the architecture doc suggestion.
 
+## Milestones / Releases Dev Notes (Issue #18)
+- New CLI command family:
+  - `node dist/index.js milestones plan --target <repo> --metadata <file>`
+  - `node dist/index.js milestones apply --target <repo> --metadata <file>`
+  - `node dist/index.js milestones release --target <repo> --metadata <file>`
+- Fast focused verification for issue #18:
+  - `rtk test npx vitest run tests/cli/milestones.test.ts tests/integration/milestones-workflow.test.ts`
+  - `rtk err npx tsc --noEmit`
+  - `rtk err npm run build`
+- Current repo has milestone-specific production files:
+  - `src/commands/milestones.ts`
+  - `src/milestones/apply.ts`
+  - `src/milestones/git.ts`
+  - `src/milestones/manifest.ts`
+  - `src/milestones/metadata.ts`
+  - `src/milestones/plan.ts`
+  - `src/milestones/president-tags.ts`
+  - `src/milestones/release-renderer.ts`
+  - `src/milestones/releases.ts`
+  - `src/milestones/title-renderer.ts`
+  - `src/milestones/types.ts`
+
+## Module Dependency Graph
+
+### If you're modifying... → Read these first:
+- `src/commands/milestones.ts` → `src/milestones/metadata.ts`, `src/milestones/plan.ts`, `src/milestones/president-tags.ts`, `src/milestones/apply.ts`, `src/milestones/releases.ts`, `src/milestones/git.ts` (command entrypoint owns parse/usage/dispatch and the early `git` resolution for `apply`)
+- `src/milestones/metadata.ts` → `src/milestones/types.ts` (manual semantic validation lives here; no external schema validator exists in current code)
+- `src/milestones/plan.ts` → `src/milestones/metadata.ts`, `src/milestones/president-tags.ts`, `src/milestones/title-renderer.ts`, `src/milestones/git.ts` (plan shape depends on normalized metadata + commit resolution + Congress title/year derivation)
+- `src/milestones/apply.ts` → `src/milestones/git.ts`, `src/milestones/manifest.ts`, `src/milestones/types.ts` (tag creation order + repo safety + manifest persistence all meet here)
+- `src/milestones/git.ts` → Node `child_process`, `fs/promises`, `path` (this is the trusted subprocess boundary for both `git` and `gh`)
+- `src/milestones/manifest.ts` → `src/milestones/types.ts` (manifest digesting, atomic writes, and repo-local lock handling live together)
+- `src/milestones/releases.ts` → `src/milestones/manifest.ts`, `src/milestones/release-renderer.ts`, `src/milestones/metadata.ts`, `src/milestones/plan.ts`, `src/milestones/git.ts` (release freshness, diff-stat generation, and `gh` create/edit all converge here)
+- `src/milestones/release-renderer.ts` → `src/milestones/types.ts` (pure body rendering + exact boundary-row selection)
+- `tests/integration/milestones-workflow.test.ts` → all milestone modules via built CLI (`dist/index.js`), plus fake `gh` / PATH-manipulation scenarios
+
+### Call Chain: Entry Point → Your Code
+```text
+src/index.ts
+  → runMilestonesCommand()
+    → loadMetadata()
+    → (apply only) resolveGitBinary()
+    → buildMilestonesPlan()
+      → resolveCommitSelector()
+      → normalizeReleasePointTag()
+      → derivePresidentTags()
+      → renderCongressTitle()
+    → derivePresidentTags()
+    → applyMilestones()
+      → ensureAttachedHead()
+      → ensureCleanWorkingTree()
+      → withLock()
+      → createAnnotatedTag()
+      → writeManifest()
+    OR
+    → releaseMilestones()
+      → readManifest()
+      → computeMetadataDigest()
+      → normalizeCurrentRepoShape()
+        → resolveTagSha()
+      → ensureGithubCliAvailableAndAuthenticated()
+      → buildPlannedAnnualRows()
+      → renderDiffStat()
+      → renderReleaseBody()
+      → upsertRelease()
+```
+
+### Key Interfaces (the contracts)
+- `LegalMilestonesMetadata` in `src/milestones/types.ts` — committed metadata contract for `annual_snapshots[]` + `president_terms[]`
+- `AnnualSnapshotRow` / `PresidentTermRow` — normalized row types after metadata validation
+- `MilestonesPlan` — deterministic `plan`/`apply` JSON contract surfaced to stdout
+- `PlannedAnnualRow` — annual row + resolved `commit_sha` + normalized `pl_tag`
+- `MilestonesManifest` — repo-local persisted manifest contract under `.us-code-tools/milestones.json`
+- `ReleaseCandidate` — Congress release planning and manifest freshness contract
+- `SkippedPresidentTag` — machine-readable skipped-president diagnostics contract
+
+## Conventions / Patterns
+- Keep metadata validation in `src/milestones/metadata.ts` deterministic and explicit; do not split business rules across CLI, planner, and renderer.
+- Reuse `resolveGitBinary()` / `resolveGhBinary()` and `git(...)`; do not introduce new bare-name `spawn('git', ...)` or `spawn('gh', ...)` call sites.
+- Keep release publication serialized; `releaseMilestones()` intentionally loops one Congress release at a time.
+- Preserve stable JSON ordering by building plan/manifest arrays from already-sorted metadata rows.
+- Treat `.us-code-tools/milestones.lock` as part of the repo-local contract, not an implementation detail to silently bypass.
+- If you modify repo cleanliness checks, keep the exclusion of tool-owned `.us-code-tools/*` files unless the spec changes.
+- If you rename or reshape manifest fields, update both `normalizeManifestShape(...)` and `normalizeCurrentRepoShape(...)`; those two functions are the freshness comparison seam.
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - existing transform pipeline

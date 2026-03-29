@@ -170,6 +170,58 @@
 - `git-adapter.ts` exposes `buildGitCommitEnv()` for unit coverage, but actual commit creation uses `git fast-import` instead of `git commit`.
 - Prefix validation keys off commit metadata, not file diffs.
 
+## Milestones / Releases Architecture (Issue #18)
+- `src/index.ts` now exposes a fourth CLI surface: `milestones plan|apply|release --target <repo> --metadata <file>`.
+- Day-one milestone source of truth is committed JSON metadata at `docs/metadata/legal-milestones.json`; runtime persistence is repo-local `.us-code-tools/milestones.json` plus `.us-code-tools/milestones.lock` in the downstream target repo.
+- `src/commands/milestones.ts` is the command orchestrator:
+  - loads + semantically validates metadata with `loadMetadata(...)`
+  - resolves `git` early on `apply` via `resolveGitBinary()` so mutation paths fail closed with `git_cli_unavailable`
+  - builds a deterministic plan with `buildMilestonesPlan(...)`
+  - derives president tags with `derivePresidentTags(...)`
+  - dispatches to `applyMilestones(...)` or `releaseMilestones(...)`
+- `src/milestones/metadata.ts` currently performs validation manually in code rather than via Ajv/schema files:
+  - validates row shapes and scalar constraints for `annual_snapshots[]` and `president_terms[]`
+  - enforces duplicate checks for `annual_tag`, `snapshot_date`, normalized `pl/*` tags, and president slugs
+  - enforces `release_notes.scope` parity with `is_congress_boundary`
+  - validates `release_point` format with `^PL (\d+)-(\d+)$` and same-row congress match
+  - sorts annual rows by `snapshot_date` / `annual_tag` and president rows by `inauguration_date` / `slug`
+- `src/milestones/plan.ts` is the pure-ish planner boundary:
+  - resolves each `commit_selector` to exactly one commit SHA via `resolveCommitSelector(...)`
+  - normalizes paired `pl/*` tags from `release_point`
+  - derives `annual_tags[]`, `pl_tags[]`, `congress_tags[]`, `president_tags[]`, `skipped_president_tags[]`, and `release_candidates[]`
+  - computes Congress release titles from `renderCongressTitle(...)` / `getCongressYearRange(...)`
+- `src/milestones/git.ts` is the subprocess and repo-state adapter:
+  - resolves `git` and `gh` once per process into absolute executable paths and reuses them via a process-local promise cache
+  - uses `execFile`, not shell interpolation
+  - `ensureAttachedHead(...)` now throws deterministic `detached_head: ...` on symbolic-ref failure
+  - `ensureCleanWorkingTree(...)` ignores repo-local milestone files under `.us-code-tools/` but still blocks unrelated changes
+  - `createAnnotatedTag(...)` is idempotent for matching SHAs and fails with `tag_conflict` on drift
+- `src/milestones/manifest.ts` owns milestone persistence:
+  - computes metadata SHA-256 digests with `computeMetadataDigest(...)`
+  - writes `.us-code-tools/milestones.json` atomically through `milestones.json.tmp` with mode `0600`
+  - writes repo-local lock payloads containing exactly `pid`, `hostname`, `command`, and `timestamp`
+  - lock conflicts surface those same four fields in deterministic `lock_conflict` errors and never auto-break the lock
+- `src/milestones/apply.ts` is intentionally narrow:
+  - revalidates repo state (`git` available, attached HEAD, clean tree)
+  - creates `annual/*`, paired one-per-row `pl/*`, boundary-only `congress/*`, and derived `president/*` tags
+  - writes the manifest only after tag application succeeds under the repo-local lock
+- `src/milestones/releases.ts` owns GitHub Release publication:
+  - requires a present + fresh manifest before any `gh` write
+  - recomputes plan shape from current repo tag SHAs and compares it to manifest-normalized shape
+  - requires `gh auth status` success via the resolved absolute `gh` path
+  - renders per-Congress diff stats with `git diff --stat <previous>..<current>` or the exact baseline sentence for the earliest release
+  - creates/updates releases keyed strictly by tag name through `gh release view/create/edit`
+- `src/milestones/release-renderer.ts` renders exactly four ordered sections: `## Diff Stat`, `## Summary`, `## Notable Laws`, and `## Narrative`, sourcing non-diff text only from the single boundary metadata row for that Congress.
+- `docs/metadata/legal-milestones.json` is currently a minimal committed seed/example metadata file with placeholder commit selectors; real fixture/test metadata is synthesized inside the Vitest suites.
+
+## Things Future Agents Should Notice
+- The approved architecture doc for issue #18 discusses Ajv + a richer manifest shape, but the production code on this branch does **not** use Ajv and the written manifest currently stores only `version`, `metadata`, annual/congress/president rows, skipped president tags, and release candidates. Document/code drift here is intentional branch reality, not a missed file read.
+- `createAnnotatedTag(...)` currently calls `git tag <tag> <sha>` without `-a/-m`; despite the helper name, present implementation creates plain tags. Do not claim annotated-tag behavior in docs or tests unless the code changes.
+- `ensureCleanWorkingTree(...)` intentionally filters `.us-code-tools/`, `.us-code-tools/milestones.json`, and `.us-code-tools/milestones.lock` from porcelain output so reruns are not blocked by the tool’s own operational files.
+- Detached HEAD is now a distinct contract path (`detached_head`), no longer bundled under `repo_dirty`.
+- Release freshness checks compare both metadata digest and live repo tag SHAs (including `pl/*` drift), so hand-editing tags or the manifest must fail before any GitHub write.
+- President tags are derived strictly from inauguration dates against annual snapshot dates; inaugurations before the first covered snapshot in the same calendar year still skip with `inauguration_before_coverage_window`.
+
 ## Phase 1 Scope (Current)
 - What's implemented:
   - original Title 1 USLM transform flow
