@@ -278,6 +278,10 @@ describe('OLRC source and cache behavior', () => {
       'fetchSourceOlrc',
     ]);
 
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-olrc-discovery-'));
+    const originalDataDir = process.env.US_CODE_TOOLS_DATA_DIR;
+    process.env.US_CODE_TOOLS_DATA_DIR = cacheRoot;
+
     const originalFetch = globalThis.fetch;
     const requests: string[] = [];
     const title01Zip = readFileSync(resolve(process.cwd(), 'tests/fixtures/title-01/title-01.zip'));
@@ -331,6 +335,12 @@ describe('OLRC source and cache behavior', () => {
       expect(requests).not.toContain('https://uscode.house.gov/download/annualtitlefiles.shtml');
     } finally {
       globalThis.fetch = originalFetch;
+      if (originalDataDir === undefined) {
+        delete process.env.US_CODE_TOOLS_DATA_DIR;
+      } else {
+        process.env.US_CODE_TOOLS_DATA_DIR = originalDataDir;
+      }
+      rmSync(cacheRoot, { recursive: true, force: true });
     }
   });
 
