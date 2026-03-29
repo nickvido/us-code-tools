@@ -80,7 +80,7 @@ export async function fetchOlrcSource(invocation?: { force?: boolean; cacheRoot?
 
   let plan: OlrcVintagePlan;
   try {
-    plan = await fetchOlrcVintagePlan(requestContext, invocation?.cacheRoot ? 'current' : 'legacy');
+    plan = await fetchOlrcVintagePlan(requestContext, 'current');
   } catch (error) {
     return await recordOlrcFailure('upstream_request_failed', error instanceof Error ? error.message : 'OLRC fetch failed');
   }
@@ -256,18 +256,22 @@ async function fetchPreferredOlrcListing(
   requestContext: OlrcRequestContext,
   preferredListing: 'current' | 'legacy',
 ): Promise<{ response: Response; listingUrl: string }> {
-  const firstUrl = preferredListing === 'legacy' ? OLRC_LEGACY_LISTING_URL : OLRC_LISTING_URL;
-  const secondUrl = preferredListing === 'legacy' ? OLRC_LISTING_URL : OLRC_LEGACY_LISTING_URL;
+  if (preferredListing === 'current') {
+    return {
+      response: await fetchWithRetry(OLRC_LISTING_URL, requestContext, true),
+      listingUrl: OLRC_LISTING_URL,
+    };
+  }
 
   try {
     return {
-      response: await fetchWithRetry(firstUrl, requestContext, firstUrl === OLRC_LISTING_URL),
-      listingUrl: firstUrl,
+      response: await fetchWithRetry(OLRC_LEGACY_LISTING_URL, requestContext, false),
+      listingUrl: OLRC_LEGACY_LISTING_URL,
     };
   } catch {
     return {
-      response: await fetchWithRetry(secondUrl, requestContext, secondUrl === OLRC_LISTING_URL),
-      listingUrl: secondUrl,
+      response: await fetchWithRetry(OLRC_LISTING_URL, requestContext, true),
+      listingUrl: OLRC_LISTING_URL,
     };
   }
 }
