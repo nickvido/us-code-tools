@@ -374,7 +374,7 @@ function readRawText(value: XmlValue | undefined): string {
 }
 
 function hrefToMarkdownLink(href: string): string | null {
-  const uscMatch = href.match(/^\/us\/usc\/t(\d+)\/s([^/]+)$/u);
+  const uscMatch = href.match(/^\/us\/usc\/t(\d+)\/s(.+)$/u);
   if (!uscMatch) {
     return null;
   }
@@ -384,13 +384,13 @@ function hrefToMarkdownLink(href: string): string | null {
     return null;
   }
 
-  const sectionNumber = normalizeWhitespace(uscMatch[2]);
-  if (!sectionNumber) {
+  const sectionTail = normalizeWhitespace(uscMatch[2]);
+  if (!sectionTail) {
     return null;
   }
 
   const title = String(titleNumber).padStart(2, '0');
-  return `../title-${title}/section-${sectionFileSafeId(sectionNumber)}.md`;
+  return `../title-${title}/section-${sectionFileSafeId(sectionTail)}.md`;
 }
 
 function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
