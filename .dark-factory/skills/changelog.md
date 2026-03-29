@@ -176,3 +176,43 @@
   - spec + architecture explicitly require non-empty `@value` to win even on mismatch
   - adversary-reviewed fallback cleanup bug for mixed trailing decoration was fixed by changing trailing cleanup to `/[.—]+$/u`
   - latest branch verification in issue context reports `npm run build`, `npx tsc --noEmit`, and `npm test` passing for this change set
+
+## Feature #12 — Recursive hierarchy traversal, rich metadata, and zero-padded section filenames
+- Updated `src/domain/model.ts`:
+  - added `HierarchyIR` with `subtitle`, `part`, `subpart`, `chapter`, and `subchapter`
+  - added `StatutoryNoteIR` with `heading`, `noteType`, `topic`, and `text`
+  - extended `SectionIR` with singular `sourceCredit`, optional `hierarchy`, and optional `statutoryNotes`
+- Updated `src/domain/normalize.ts`:
+  - `splitSectionNumber()` now separates numeric root and suffix
+  - `compareSectionNumbers()` is the canonical mixed-width/mixed-case section sort contract
+  - `sectionFileSafeId()` zero-pads numeric roots to width 5 and normalizes `/` to `-`
+  - `sortSections()` is reused by markdown rendering and output writing
+- Updated `src/transforms/uslm-to-ir.ts`:
+  - replaced fixed-depth section collection with recursive traversal over `subtitle`, `part`, `subpart`, `chapter`, and `subchapter`
+  - preserved hierarchy metadata on every parsed section
+  - extracted `<sourceCredit>` into `sourceCredit`
+  - parsed `<notes type="...">` into ordered `statutoryNotes` and copied wrapper `@type` into each note’s `noteType`
+  - rendered transformable `/us/usc/t{title}/s{section}` refs as relative links using the shared file-stem helper
+- Updated `src/transforms/markdown.ts`:
+  - serialized hierarchy levels as top-level frontmatter keys when present
+  - emitted singular `source_credit`
+  - rendered statutory notes under `## Statutory Notes`
+  - sorted `_title.md` sections with `sortSections()` rather than parser discovery order
+- Updated `src/transforms/write-output.ts`:
+  - section output paths now always use zero-padded filenames like `section-00001.md`, `section-00106a.md`, and `section-00002-3.md`
+- Added real-fixture coverage for recursive and metadata-heavy titles:
+  - `tests/fixtures/xml/title-05/05-part-chapter-sections.xml`
+  - `tests/fixtures/xml/title-10/10-subtitle-part-chapter-sections.xml`
+  - `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
+- Added/expanded issue #12 tests:
+  - `tests/unit/transforms/issue12-recursive-metadata.test.ts`
+  - `tests/integration/issue12-transform-cli.test.ts`
+  - `tests/unit/transforms/write-output.test.ts`
+  - `tests/integration/transform-cli.test.ts`
+- Branch history captured for future agents:
+  - `a5a0b6a` — main implementation landed
+  - `32cd467` / `a72c64c` — USC ref rendering and slash-separated ref fixes
+  - `b9395bc` — case-sensitive suffix ordering fix
+  - `6446f2f` — preserved statutory note wrapper metadata (`noteType`)
+- Verification observed during knowledge capture:
+  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ✅

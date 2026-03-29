@@ -33,6 +33,12 @@
 - `src/utils/rate-limit.ts` — sliding-window limiter helpers plus the shared `getSharedApiDataGovLimiter()` singleton/reset hook used by both `src/sources/congress.ts` and `src/sources/govinfo.ts` for the single `API_DATA_GOV_KEY` in-process budget.
 - `src/transforms/` — namespace-tolerant USLM parsing (`uscDoc.main.title` + legacy `uslm.title`), markdown rendering, and output writing for `transform`.
 - issue #10 tightened canonical number extraction inside `src/transforms/uslm-to-ir.ts`: title/chapter/section `<num>` reads now prefer `@_value` and only fall back to cleaned display text when the attribute is absent/empty.
+- issue #12 extended the transform architecture from a fixed `title -> chapter -> section` walk to recursive hierarchy traversal with accumulated per-section frontmatter context:
+  - `src/domain/model.ts` now carries `HierarchyIR`, singular `sourceCredit`, and `statutoryNotes` (`noteType`, `topic`, `heading`, `text`) on `SectionIR`
+  - `src/domain/normalize.ts` now owns canonical section ordering via `splitSectionNumber()`, `compareSectionNumbers()`, `sectionFileSafeId()`, and `sortSections()`
+  - `src/transforms/uslm-to-ir.ts` recursively walks `subtitle`, `part`, `subpart`, `chapter`, and `subchapter` containers, preserving hierarchy context on every parsed section
+  - `src/transforms/markdown.ts` now serializes hierarchy keys as top-level frontmatter, emits `source_credit`, renders `## Statutory Notes`, and uses relative links for transformable `/us/usc/t{title}/s{section}` refs
+  - `src/transforms/write-output.ts` writes zero-padded section filenames like `section-00001.md`
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
 - `src/backfill/messages.ts` — exact Constitution/amendment commit-message formatting.
@@ -134,6 +140,11 @@
 
 ## Things Future Agents Should Notice
 - Issue #10 centralizes `<num>` normalization in `readCanonicalNumText(...)`; do not re-implement title/chapter/section cleanup at each call site.
+- Issue #12 makes recursive hierarchy traversal the production path. Do not add new fixed-depth loops that assume sections only live directly under `<title>` or `<chapter>`.
+- Hierarchy preservation is not just parser IR now; rendered section markdown is required to serialize present `subtitle`, `part`, `subpart`, `chapter`, and `subchapter` keys and omit absent ones.
+- `src/domain/normalize.ts` is now the single normalization boundary for section sort order and file stems. `_title.md` ordering, section filenames, and USC ref targets must all flow through the same helpers.
+- `sectionFileSafeId()` pads the leading numeric root to width 5 and preserves trailing suffixes/case, so examples like `106A`, `106a`, `106b`, and `2/3` remain distinct and stable.
+- Current issue #12 fixture coverage is centered on Titles 1, 5, 10, and 26 plus the deterministic numeric-title integration matrix and reserved-empty Title 53 negative path.
 - Under the current `fast-xml-parser` config (`ignoreAttributes: false`, `attributeNamePrefix: '@_'`, `removeNSPrefix: true`), canonical USLM `value` attributes are read as `node['@_value']` even on `uscDoc` inputs.
 - Current Title 1 fixture coverage now assumes the XSD-shaped `uscDoc > meta + main > title > chapter > section` structure with decorated display `<num>` text and clean canonical `@value` strings.
 - `docs/architecture/3-architecture.md` proposes an `authors.ts` split, but the current implementation keeps author identity inside `src/backfill/constitution/dataset.ts`; do not assume a separate author module exists.
@@ -168,7 +179,15 @@
     - fallback `cleanDecoratedNumText(...)` strips leading `§`, `Title `, `Chapter ` and trailing mixed `.` / `—` decoration
     - current Title 1 `uscDoc` fixture asserts `titleIr.chapters.length === 1`, 53 sections, `/us/usc/t1/s...` identifiers, and per-section/per-chapter equality with source `<num @value>` values
     - multi-title current-format integration coverage derives titles `2..54` (excluding reserved-empty `53`) from the committed Title 1 fixture via `buildCurrentFormatFixtureZip(...)`
-  - unit, integration, snapshot, and adversary coverage for issues #3, #5, and #8
+  - issue #12 recursive hierarchy + metadata layer:
+    - parser now discovers sections beneath `subtitle`, `part`, `subpart`, `chapter`, and `subchapter` at arbitrary nesting depth under `<title>`
+    - section markdown frontmatter serializes every present hierarchy level as its own top-level key
+    - `sourceCredit` is emitted as singular `source_credit` frontmatter
+    - statutory notes are rendered under `## Statutory Notes` and preserve wrapper `noteType` plus note `topic`
+    - transformable USC refs render as relative markdown links using the same zero-padded filename helper as actual output files
+    - section output names are zero-padded (`section-00001.md`, `section-00106a.md`, `section-00002-3.md`) and `_title.md` uses the same canonical sort order
+    - real recursive fixtures live at `tests/fixtures/xml/title-05/05-part-chapter-sections.xml`, `tests/fixtures/xml/title-10/10-subtitle-part-chapter-sections.xml`, and `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
+  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, and #12
 - What's intentionally deferred:
   - non-Constitution backfill phases that consume fetched artifacts
   - rewriting/repairing non-prefix histories

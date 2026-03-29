@@ -91,6 +91,11 @@
   - keeps section identifiers as strings through the current-format parser path
   - prefers non-empty `node['@_value']` for title/chapter/section `<num>` extraction and only falls back to cleaned display text when the attribute is absent/empty
   - removes mixed trailing display decoration (`.` / `—`) in one pass so canonical numbers cannot retain path-unsafe punctuation
+  - issue #12 recursively traverses nested hierarchy containers, but hierarchy keys come only from normalized container `<num>` values rather than arbitrary heading text
+  - issue #12 renders USC ref links only when identifiers match the narrow `/us/usc/t{title}/s{section}` pattern; unknown refs fall back to plain text instead of malformed links
+- `src/domain/normalize.ts`
+  - is now the single sanitization boundary for section sort/file/link identifiers via `splitSectionNumber()`, `compareSectionNumbers()`, and `sectionFileSafeId()`
+  - pads only the leading numeric root to width 5 while preserving suffix case and replacing `/` with `-`
 - `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale
@@ -106,6 +111,8 @@
 - **Reserved-empty downgrade is Title-53-only:** current unreadable/non-zip/empty payload handling is intentionally narrow so other title failures remain operator-visible instead of being silently reclassified.
 - **Canonical `@value` wins over decorated display text:** when `<num value="7">§ 8.</num>` disagrees, the parser must emit `7` because the XSD defines `@value` as machine-readable canonical data; future agents should not add reconciliation or warning logic that rewrites canonical numbers from the display string.
 - **Fallback cleanup is path-safety hardening, not cosmetic formatting:** `cleanDecoratedNumText(...)` exists to keep `sectionFileSafeId()` inputs undecorated so filenames like `section-§-1..md` never appear.
+- **Issue #12 centralizes XML-derived identifier reuse behind one normalization boundary:** hierarchy numbers, section filenames, `_title.md` ordering, and relative USC ref targets must all flow through shared normalization helpers before being reused in paths, links, or frontmatter.
+- **Issue #12 keeps ref rendering fail-closed:** only recognized USC section identifiers become links; legislative-history and non-USC refs remain plain text so markdown cannot contain broken or unsafe `[]()` targets.
 
 ## Things Future Agents Should Not Mislabel as Bugs
 - No database/auth/RLS: intentional; this repo is a local CLI, not a service.
@@ -119,6 +126,8 @@
 - Title 53 `reserved_empty` manifest entries are expected machine-readable skip states, not generic fetch failures and not cache artifacts.
 - VoteView indexing is currently in-memory only; lack of on-disk index files is an implementation choice, not accidental data loss.
 - The fallback current-congress path is expected to mark runs degraded/operator-review-required; that warning path is part of the contract.
+- Recursive hierarchy walking for issue #12 is required production behavior for positive-law titles; zero sections from titles like 5/10/26 is a correctness bug, not an acceptable degraded mode.
+- Zero-padded section filenames are part of the transform safety/correctness contract now because lexicographic directory order must match canonical numeric order during local review and downstream processing.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
@@ -131,6 +140,7 @@
   - issue #5 cache/manifest atomicity, redacted network logging, member-snapshot freshness checks, and skip-path crosswalk cleanup
   - issue #8 OLRC hardening: in-memory cookie bootstrap, Title-53-only reserved-empty downgrade, namespace-tolerant parser root discovery, and bounded larger-title XML extraction
   - issue #10 transform hardening: canonical `@_value` extraction for `<num>` nodes and mixed-decoration fallback cleanup so display punctuation does not leak into identifiers or paths
+  - issue #12 transform hardening: one shared normalization boundary for XML-derived identifiers reused in frontmatter/paths/links, recursive hierarchy coverage for positive-law titles, preserved statutory note wrapper metadata, and fail-closed relative USC ref rendering
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes

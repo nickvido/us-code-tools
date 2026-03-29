@@ -20,7 +20,9 @@
 - `tests/utils/rate-limit.test.ts` — limiter arithmetic and exhaustion timing for the shared helper primitives.
 - `tests/unit/sources/olrc.test.ts` — OLRC source/cache behavior, cookie bootstrap, `download.shtml` discovery, Title 42 extraction ceiling, Title 53 reserved-empty classification, and selected-vintage cache regressions.
 - `tests/unit/transforms/uslm-to-ir.test.ts` — legacy `uslm` fixtures plus current namespace-qualified `uscDoc` fixture coverage, canonical `<num @value>` precedence, empty-attribute fallback, disagreement cases, mixed punctuation cleanup, and structural XSD-shape assertions.
+- `tests/unit/transforms/issue12-recursive-metadata.test.ts` — real-fixture regression suite for recursive hierarchy walking, hierarchy frontmatter, singular `source_credit`, statutory notes, preserved `noteType`, relative USC ref rendering, canonical ordering, mixed-case suffix ordering, and zero-padded filename derivation.
 - `tests/integration/transform-cli.test.ts` — built transform CLI against committed Title 1 fixtures, selected-vintage cache lookup, path-safe output assertions, and derived current-format title matrix coverage for titles `1..52` and `54` with reserved-empty `53`.
+- `tests/integration/issue12-transform-cli.test.ts` — fixture-backed CLI coverage for titles 5/10/26, slash-separated USC ref links, and zero-padded filesystem output ordering.
 - `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
 - `tests/adversary-round1-issue3.test.ts` — configured remote without upstream must still push current branch explicitly.
 - `tests/adversary-round1-issue5.test.ts` … `tests/adversary-round9-issue5.test.ts` — issue #5 regressions across fetch, cache, manifest, GovInfo/Congress behavior, and legislators crosswalk cleanup.
@@ -33,6 +35,10 @@
   - `tests/fixtures/title-01/title-01.zip`
   - `tests/fixtures/xml/title-01/*.xml`
   - notably `tests/fixtures/xml/title-01/04-current-uscdoc.xml` for current OLRC `uscDoc` coverage with XSD-shaped `meta + main`, canonical `@value`, decorated display text, one chapter, and 53 sections
+  - issue #12 recursive hierarchy fixtures:
+    - `tests/fixtures/xml/title-05/05-part-chapter-sections.xml`
+    - `tests/fixtures/xml/title-10/10-subtitle-part-chapter-sections.xml`
+    - `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
 - `tests/utils/module-helpers.ts` provides safe dynamic imports for source-module unit tests.
 
 ## Patterns to Follow
@@ -57,6 +63,7 @@
 - CLI changes: assert usage/error text and no-side-effect behavior for bad invocations.
 - OLRC issue #8 changes: cover homepage cookie bootstrap, authenticated follow-on requests, `download.shtml` parsing, current `uscDoc` parsing, selected-vintage transform lookup, Title 42 large-entry acceptance, and Title 53 reserved-empty handling without live outbound access.
 - Issue #10 parser changes: assert `@value` beats display text for title/chapter/section nodes, whitespace-only attributes fall back cleanly, mixed trailing `.—` decoration is removed in fallback mode, Title 1 current-format fixture yields `titleIr.chapters.length === 1` + 53 canonical section numbers, and output paths never contain decorated `<num>` text.
+- Issue #12 transform changes: assert fixture `<section>` count equality for Titles 1/5/10/26, rendered hierarchy frontmatter for sampled deep-nesting sections, `source_credit` presence when `<sourceCredit>` exists, `## Statutory Notes` rendering when `<notes>` exists, preserved `noteType: 'uscNote'`, relative markdown links for transformable USC refs, zero-padded filenames, and canonical mixed-width/mixed-case section ordering.
 
 ## Known Test Behaviors
 - `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.
@@ -71,6 +78,7 @@
 - `tests/unit/transforms/uslm-to-ir.test.ts` asserts that raw namespace-qualified `uscDoc` XML parses directly; callers should not strip namespaces before invoking `parseUslmToIr()`.
 - `tests/integration/transform-cli.test.ts` generates the current-format title matrix inside `buildCurrentFormatFixtureZip(...)` by deterministic string substitution from the committed Title 1 fixture; do not add live OLRC downloads or a pile of per-title committed XML fixtures for this coverage.
 - `tests/integration/transform-cli.test.ts` now seeds a canonical `data/manifest.json` for selected-vintage OLRC cache resolution instead of relying only on the fixture env override.
+- `tests/integration/issue12-transform-cli.test.ts` seeds a selected-vintage OLRC cache with real nested fixtures and then shells out to `dist/index.js transform`; keep that pattern for future end-to-end transform regressions instead of introducing live fetches.
 
 ## Phase 1 Scope (Current)
 - What's implemented:
@@ -80,6 +88,7 @@
   - issue #5 CLI/utils/adversary coverage for fetch/cache/manifest/crosswalk behavior
   - issue #8 OLRC regression coverage for cookie bootstrap, listing parsing, `uscDoc` parsing, selected-vintage transform lookup, Title 42 extraction, and Title 53 reserved-empty behavior
   - issue #10 transform regression coverage for canonical `@value` extraction, fallback decoration cleanup, Title 1 chapter/section equality against source fixture values, path-safe output names, and derived multi-title current-format fixtures
+  - issue #12 regression coverage for recursive hierarchy fixtures, hierarchy markdown frontmatter, `source_credit`, statutory note wrapper metadata, relative USC refs, and zero-padded section filenames
   - existing transform regression coverage remains intact
 - What's intentionally deferred:
   - live external Constitution-source verification during tests
