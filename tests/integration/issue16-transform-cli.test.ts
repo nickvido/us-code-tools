@@ -71,6 +71,43 @@ function buildCollidingChapterFixtureZip(outputDir: string, title: number): stri
   return zipPath;
 }
 
+function buildPartialChapterWriteFailureFixtureZip(outputDir: string, title: number): string {
+  const fixtureDir = resolve(outputDir, `title-${String(title).padStart(2, '0')}-partial-write-xml`);
+  const zipPath = resolve(outputDir, `title-${String(title).padStart(2, '0')}-partial-write.zip`);
+  mkdirSync(fixtureDir, { recursive: true });
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<uscDoc xmlns="http://xml.house.gov/schemas/uslm/1.0" schemaLocation="http://xml.house.gov/schemas/uslm/1.0 USLM-1.0.15.xsd">
+  <meta>
+    <docNumber>${title}</docNumber>
+    <docTitle>General Provisions</docTitle>
+  </meta>
+  <main>
+    <title identifier="/us/usc/t${title}">
+      <num value="${title}">Title ${title}—</num>
+      <heading>General Provisions</heading>
+      <chapter identifier="/us/usc/t${title}/ch1">
+        <num value="1">Chapter 1—</num>
+        <heading>First Chapter</heading>
+        <section identifier="/us/usc/t${title}/s1"><num value="1">§ 1.</num><heading>Section 1 heading</heading><content><p>Section 1 text.</p></content></section>
+      </chapter>
+      <chapter identifier="/us/usc/t${title}/ch2">
+        <num value="2">Chapter 2—</num>
+        <heading>Second Chapter</heading>
+        <section identifier="/us/usc/t${title}/s2"><num value="2">§ 2.</num><heading>Section 2 heading</heading><content><p>Section 2 text.</p></content></section>
+      </chapter>
+    </title>
+  </main>
+</uscDoc>`;
+
+  writeFileSync(resolve(fixtureDir, `usc${String(title).padStart(2, '0')}.xml`), xml);
+  execSync(`cd ${JSON.stringify(fixtureDir)} && zip -qr ${JSON.stringify(zipPath)} .`, {
+    cwd: outputDir,
+    shell: '/bin/bash',
+  });
+  return zipPath;
+}
+
 function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vintage: string, title: number): string {
   const titleDir = resolve(repoRoot, 'data', 'cache', 'olrc', 'vintages', vintage, `title-${String(title).padStart(2, '0')}`);
   mkdirSync(titleDir, { recursive: true });
@@ -303,6 +340,40 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
       expect(`${result.stdout}\n${result.stderr}`).toMatch(/chapter-a-b\.md|collision|duplicate|write/i);
       expect(files.filter((name) => name === 'chapter-a-b.md')).toHaveLength(0);
       expect(report?.parse_errors?.length ?? 0).toBeGreaterThan(0);
+    } finally {
+      rmSync(sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns non-zero when one chapter file write fails after another chapter file already succeeded', () => {
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-issue16-partial-write-'));
+    const fixtureZip = buildPartialChapterWriteFailureFixtureZip(sandboxRoot, 1);
+    seedSelectedVintageOlrcCache(sandboxRoot, fixtureZip, '119-73', 1);
+    const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+    const blockedChapterPath = resolve(sandboxRoot, 'out', 'uscode', 'title-01', 'chapter-002.md');
+    mkdirSync(blockedChapterPath, { recursive: true });
+
+    const result = spawnSync(
+      process.execPath,
+      [distEntry, 'transform', '--title', '1', '--output', './out', '--group-by', 'chapter'],
+      { cwd: sandboxRoot, encoding: 'utf8', timeout: 60_000, env: process.env },
+    );
+
+    try {
+      const outputTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const files = existsSync(outputTree) ? readdirSync(outputTree).sort() : [];
+      const report = parseReportFromStdout(result.stdout);
+
+      expect(files).toContain('_title.md');
+      expect(files).toContain('chapter-001.md');
+      expect(files).toContain('chapter-002.md');
+      expect(readFileSync(join(outputTree, 'chapter-001.md'), 'utf8')).toContain('# § 1. Section 1 heading');
+      expect(() => readFileSync(join(outputTree, 'chapter-002.md'), 'utf8')).toThrow();
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/chapter-002\.md|OUTPUT_WRITE_FAILED|write/i);
+      expect(report?.parse_errors?.length ?? 0).toBeGreaterThan(0);
+      expect(JSON.stringify(report?.parse_errors ?? [])).toMatch(/chapter-002\.md|OUTPUT_WRITE_FAILED|write/i);
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
     }
