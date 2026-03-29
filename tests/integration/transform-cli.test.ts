@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
@@ -78,6 +78,37 @@ describe('CLI integration — Title 1 fixture run', () => {
     rmSync(outputDir, { recursive: true, force: true });
   });
 
+  it('resolves transform input from the selected OLRC vintage cache layout instead of the legacy fixture env path', async () => {
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-it-selected-vintage-'));
+    const fixtureZip = buildFixtureZip(sandboxRoot);
+    const titleZipPath = seedSelectedVintageOlrcCache(sandboxRoot, fixtureZip, '119-73', 1);
+
+    const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+    const result = spawnSync(process.execPath, [distEntry, 'transform', '--title', '1', '--output', './out'], {
+      cwd: sandboxRoot,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: process.env,
+    });
+
+    expect(result.status).toBe(0);
+
+    const report = parseReportFromStdout(result.stdout);
+    expect(report?.title).toBe(1);
+    expect(report?.sections_found).toBeGreaterThan(0);
+    expect(report?.files_written).toBeGreaterThanOrEqual(2);
+
+    const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+    expect(readdirSync(outTree).sort()).toEqual(expect.arrayContaining(['_title.md', 'section-1.md']));
+
+    const titleMarkdown = readFileSync(join(outTree, '_title.md'), 'utf8');
+    expect(titleMarkdown).toContain('title: 1');
+    expect(titleMarkdown).toContain('sections: 3');
+
+    expect(readFileSync(titleZipPath)).toEqual(readFileSync(fixtureZip));
+    rmSync(sandboxRoot, { recursive: true, force: true });
+  });
+
   it('returns non-zero and writes no files on invalid title input', async () => {
     const outputDir = mkdtempSync(join(tmpdir(), 'us-code-tools-it-fail-'));
 
@@ -116,6 +147,44 @@ describe('CLI integration — Title 1 fixture run', () => {
     // Keep test fixtures immutable so tests are deterministic and network-free by default.
   });
 });
+
+function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vintage: string, title: number): string {
+  const titleDir = resolve(repoRoot, 'data', 'cache', 'olrc', 'vintages', vintage, `title-${String(title).padStart(2, '0')}`);
+  mkdirSync(titleDir, { recursive: true });
+
+  const zipName = `xml_usc${String(title).padStart(2, '0')}@${vintage}.zip`;
+  const zipPath = resolve(titleDir, zipName);
+  copyFileSync(fixtureZip, zipPath);
+
+  writeFileSync(
+    resolve(repoRoot, 'data', 'manifest.json'),
+    JSON.stringify(
+      {
+        sources: {
+          olrc: {
+            selected_vintage: vintage,
+            titles: {
+              [String(title)]: {
+                title,
+                vintage,
+                status: 'downloaded',
+                zip_path: `data/cache/olrc/vintages/${vintage}/title-${String(title).padStart(2, '0')}/${zipName}`,
+                extraction_path: `data/cache/olrc/vintages/${vintage}/title-${String(title).padStart(2, '0')}/extracted`,
+                byte_count: readFileSync(fixtureZip).byteLength,
+                fetched_at: '2026-03-28T22:31:00.000Z',
+                extracted_xml_artifacts: [],
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  return zipPath;
+}
 
 function parseReportFromStdout(stdout: string): any {
   try {
