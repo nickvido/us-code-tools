@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, resolve } from 'node:path';
 import yauzl from 'yauzl';
 import type { Entry, ZipFile } from 'yauzl';
 import type { XmlEntry } from '../domain/model.js';
 import { padTitleNumber } from '../domain/normalize.js';
 import { getCachePaths } from '../utils/cache.js';
-import { readManifest, writeManifest } from '../utils/manifest.js';
+import { getDataDirectory, readManifest, writeManifest } from '../utils/manifest.js';
 import type { DownloadedFileManifestEntry, OlrcTitleReservedEmptyState, OlrcTitleState } from '../utils/manifest.js';
 import { logNetworkEvent } from '../utils/logger.js';
 
@@ -44,6 +44,28 @@ export async function getTitleZipPath(titleNumber: number, cacheRoot: string): P
     requestContext: createOlrcRequestContext(),
     bootstrapCookies: false,
   });
+}
+
+export async function resolveCachedOlrcTitleZipPath(titleNumber: number, dataDirectory = getDataDirectory()): Promise<string> {
+  const fixturePath = process.env[`${FIXTURE_ENV_PREFIX}${padTitleNumber(titleNumber)}_FIXTURE_ZIP`];
+  if (fixturePath) {
+    return fixturePath;
+  }
+
+  const manifest = await readManifest(dataDirectory);
+  const titleState = manifest.sources.olrc.titles[String(titleNumber)];
+
+  if (titleState?.status === 'downloaded') {
+    return resolveManifestPath(titleState.zip_path, dataDirectory);
+  }
+
+  const selectedVintage = manifest.sources.olrc.selected_vintage;
+  if (selectedVintage) {
+    const zipName = basename(resolveTitleUrl(titleNumber, selectedVintage));
+    return resolve(dataDirectory, 'cache', 'olrc', 'vintages', selectedVintage, `title-${padTitleNumber(titleNumber)}`, zipName);
+  }
+
+  throw new Error(`No cached OLRC artifact found for title ${titleNumber}; fetch OLRC first`);
 }
 
 interface OlrcVintagePlan {
@@ -368,6 +390,10 @@ async function recordOlrcFailure(code: string, message: string): Promise<OlrcFet
     requested_scope: { titles: '1..54' },
     error: { code, message },
   };
+}
+
+function resolveManifestPath(path: string, dataDirectory: string): string {
+  return isAbsolute(path) ? path : resolve(dataDirectory, '..', path);
 }
 
 function compareVintageDescending(left: string, right: string): number {

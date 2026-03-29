@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { getTitleZipPath, extractXmlEntriesFromZip, resolveTitleUrl } from './sources/olrc.js';
+import { extractXmlEntriesFromZip, resolveCachedOlrcTitleZipPath, resolveTitleUrl } from './sources/olrc.js';
 import type { ParseError, TitleIR } from './domain/model.js';
 import { parseUslmToIr } from './transforms/uslm-to-ir.js';
 import { writeTitleOutput } from './transforms/write-output.js';
@@ -125,7 +125,7 @@ async function runTransformCommand(args: string[]): Promise<number> {
   }
 
   try {
-    const zipPath = await getTitleZipPath(titleNumber, resolve(process.cwd(), '.cache'));
+    const zipPath = await resolveCachedOlrcTitleZipPath(titleNumber);
     const xmlEntries = await extractXmlEntriesFromZip(zipPath);
     if (xmlEntries.length === 0) {
       throw new Error(`failed to download title ${titleNumber} from ${resolveTitleUrl(titleNumber)} (no XML entries)`);

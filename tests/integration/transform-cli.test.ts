@@ -160,9 +160,13 @@ function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vint
     resolve(repoRoot, 'data', 'manifest.json'),
     JSON.stringify(
       {
+        version: 1,
+        updated_at: '2026-03-28T22:31:00.000Z',
         sources: {
           olrc: {
             selected_vintage: vintage,
+            last_success_at: '2026-03-28T22:31:00.000Z',
+            last_failure: null,
             titles: {
               [String(title)]: {
                 title,
@@ -176,7 +180,51 @@ function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vint
               },
             },
           },
+          congress: {
+            last_success_at: null,
+            last_failure: null,
+            bulk_scope: null,
+            member_snapshot: {
+              snapshot_id: null,
+              status: 'missing',
+              snapshot_completed_at: null,
+              cache_ttl_ms: null,
+              member_page_count: 0,
+              member_detail_count: 0,
+              failed_member_details: [],
+              artifacts: [],
+            },
+            congress_runs: {},
+            bulk_history_checkpoint: null,
+          },
+          govinfo: {
+            last_success_at: null,
+            last_failure: null,
+            query_scopes: {},
+            checkpoints: {},
+          },
+          voteview: {
+            last_success_at: null,
+            last_failure: null,
+            files: {},
+            indexes: [],
+          },
+          legislators: {
+            last_success_at: null,
+            last_failure: null,
+            files: {},
+            cross_reference: {
+              status: 'skipped_missing_congress_cache',
+              based_on_snapshot_id: null,
+              crosswalk_artifact_id: null,
+              matched_bioguide_ids: 0,
+              unmatched_legislator_bioguide_ids: 0,
+              unmatched_congress_bioguide_ids: 0,
+              updated_at: null,
+            },
+          },
         },
+        runs: [],
       },
       null,
       2,
