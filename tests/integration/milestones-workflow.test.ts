@@ -9,6 +9,10 @@ type MetadataOptions = {
   duplicateAnnualTag?: boolean;
 };
 
+type RunCliOptions = {
+  env?: NodeJS.ProcessEnv;
+};
+
 describe('milestones workflow integration', () => {
   const root = resolve(process.cwd());
   const distEntry = resolve(root, 'dist', 'index.js');
@@ -17,12 +21,12 @@ describe('milestones workflow integration', () => {
     execSync('npm run build', { cwd: root, stdio: 'ignore' });
   });
 
-  function runCli(args: string[], cwd = root) {
+  function runCli(args: string[], cwd = root, options: RunCliOptions = {}) {
     return spawnSync(process.execPath, [distEntry, ...args], {
       cwd,
       encoding: 'utf8',
       timeout: 30_000,
-      env: process.env,
+      env: { ...process.env, ...options.env },
     });
   }
 
@@ -129,6 +133,184 @@ describe('milestones workflow integration', () => {
     );
 
     return metadataPath;
+  }
+
+  function createReleaseTargetRepo() {
+    const sandbox = mkdtempSync(join(tmpdir(), 'us-code-tools-milestones-release-'));
+    const targetRepo = resolve(sandbox, 'target');
+    mkdirSync(targetRepo, { recursive: true });
+    execSync('git init', { cwd: targetRepo, stdio: 'ignore' });
+    execSync('git config user.name "QA Bot"', { cwd: targetRepo, stdio: 'ignore' });
+    execSync('git config user.email "qa@example.com"', { cwd: targetRepo, stdio: 'ignore' });
+
+    writeFileSync(resolve(targetRepo, 'snapshot-2013.md'), '2013\n');
+    execSync('git add snapshot-2013.md && GIT_AUTHOR_DATE="2013-01-21T00:00:00Z" GIT_COMMITTER_DATE="2013-01-21T00:00:00Z" git commit -m "snapshot 2013"', {
+      cwd: targetRepo,
+      stdio: 'ignore',
+      shell: '/bin/bash',
+    });
+    const sha2013 = execSync('git rev-parse HEAD', { cwd: targetRepo, encoding: 'utf8' }).trim();
+
+    writeFileSync(resolve(targetRepo, 'snapshot-2015.md'), '2015\n');
+    execSync('git add snapshot-2015.md && GIT_AUTHOR_DATE="2015-01-20T00:00:00Z" GIT_COMMITTER_DATE="2015-01-20T00:00:00Z" git commit -m "snapshot 2015"', {
+      cwd: targetRepo,
+      stdio: 'ignore',
+      shell: '/bin/bash',
+    });
+    const sha2015 = execSync('git rev-parse HEAD', { cwd: targetRepo, encoding: 'utf8' }).trim();
+
+    writeFileSync(resolve(targetRepo, 'snapshot-2017.md'), '2017\n');
+    execSync('git add snapshot-2017.md && GIT_AUTHOR_DATE="2017-01-20T00:00:00Z" GIT_COMMITTER_DATE="2017-01-20T00:00:00Z" git commit -m "snapshot 2017"', {
+      cwd: targetRepo,
+      stdio: 'ignore',
+      shell: '/bin/bash',
+    });
+    const sha2017 = execSync('git rev-parse HEAD', { cwd: targetRepo, encoding: 'utf8' }).trim();
+
+    return { sandbox, targetRepo, sha2013, sha2015, sha2017 };
+  }
+
+  function writeReleaseMetadataFile(sandbox: string, sha2013: string, sha2015: string, sha2017: string) {
+    const metadataPath = resolve(sandbox, 'legal-milestones-release.json');
+    writeFileSync(
+      metadataPath,
+      JSON.stringify(
+        {
+          annual_snapshots: [
+            {
+              annual_tag: 'annual/2013',
+              snapshot_date: '2013-01-21',
+              release_point: 'PL 113-1',
+              commit_selector: sha2013,
+              congress: 113,
+              president_term: 'obama-2',
+              is_congress_boundary: false,
+              release_notes: {
+                scope: 'annual',
+                notable_laws: ['American Taxpayer Relief Act of 2012'],
+                summary_counts: {
+                  titles_changed: 1,
+                  chapters_changed: 2,
+                  sections_added: 3,
+                  sections_amended: 4,
+                  sections_repealed: 0,
+                },
+                narrative: 'Annual snapshot current through the opening 2013 release point.',
+              },
+            },
+            {
+              annual_tag: 'annual/2015',
+              snapshot_date: '2015-01-20',
+              release_point: 'PL 113-295',
+              commit_selector: sha2015,
+              congress: 113,
+              president_term: 'obama-2',
+              is_congress_boundary: true,
+              release_notes: {
+                scope: 'congress',
+                notable_laws: ['Carl Levin and Howard P. “Buck” McKeon National Defense Authorization Act for Fiscal Year 2015'],
+                summary_counts: {
+                  titles_changed: 5,
+                  chapters_changed: 6,
+                  sections_added: 7,
+                  sections_amended: 8,
+                  sections_repealed: 1,
+                },
+                narrative: 'Congress summary for the 113th Congress boundary snapshot.',
+              },
+            },
+            {
+              annual_tag: 'annual/2017',
+              snapshot_date: '2017-01-20',
+              release_point: 'PL 114-255',
+              commit_selector: sha2017,
+              congress: 114,
+              president_term: 'trump-1',
+              is_congress_boundary: true,
+              release_notes: {
+                scope: 'congress',
+                notable_laws: ['Water Infrastructure Improvements for the Nation Act'],
+                summary_counts: {
+                  titles_changed: 9,
+                  chapters_changed: 10,
+                  sections_added: 11,
+                  sections_amended: 12,
+                  sections_repealed: 2,
+                },
+                narrative: 'Congress summary for the 114th Congress boundary snapshot.',
+              },
+            },
+          ],
+          president_terms: [
+            {
+              slug: 'obama-1',
+              inauguration_date: '2009-01-20',
+              president_name: 'Barack Obama',
+            },
+            {
+              slug: 'obama-2',
+              inauguration_date: '2013-01-20',
+              president_name: 'Barack Obama',
+            },
+            {
+              slug: 'trump-1',
+              inauguration_date: '2017-01-20',
+              president_name: 'Donald Trump',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    return metadataPath;
+  }
+
+  function createFakeGhBin(sandbox: string) {
+    const binDir = resolve(sandbox, 'fake-bin');
+    mkdirSync(binDir, { recursive: true });
+    const logPath = resolve(sandbox, 'gh-log.jsonl');
+    const statePath = resolve(sandbox, 'gh-state.json');
+    const ghPath = resolve(binDir, 'gh');
+
+    writeFileSync(
+      ghPath,
+      `#!/usr/bin/env node
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
+const logPath = process.env.FAKE_GH_LOG;
+const statePath = process.env.FAKE_GH_STATE;
+const args = process.argv.slice(2);
+const entry = { args };
+appendFileSync(logPath, JSON.stringify(entry) + '\n');
+const readState = () => existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { releases: {} };
+const writeState = (state) => writeFileSync(statePath, JSON.stringify(state, null, 2));
+if (args[0] === 'auth' && args[1] === 'status') process.exit(0);
+if (args[0] === 'release' && args[1] === 'view') {
+  const tag = args[2];
+  const state = readState();
+  const release = state.releases[tag];
+  if (!release) process.exit(1);
+  process.stdout.write(JSON.stringify({ tagName: tag, name: release.title, url: 'https://example.test/' + tag }));
+  process.exit(0);
+}
+if (args[0] === 'release' && (args[1] === 'create' || args[1] === 'edit')) {
+  const mode = args[1];
+  const tag = args[2];
+  const title = args[args.indexOf('--title') + 1];
+  const notesFile = args[args.indexOf('--notes-file') + 1];
+  const body = readFileSync(notesFile, 'utf8');
+  const state = readState();
+  state.releases[tag] = { mode, title, body };
+  writeState(state);
+  process.exit(0);
+}
+process.exit(1);
+`,
+      { mode: 0o755 },
+    );
+
+    return { binDir, logPath, statePath };
   }
 
   it('apply creates the annual, pl, congress, and president tags plus a byte-stable manifest', () => {
@@ -295,6 +477,103 @@ describe('milestones workflow integration', () => {
       const staleManifest = runCli(['milestones', 'release', '--target', targetRepo, '--metadata', metadataPath]);
       expect(staleManifest.status).not.toBe(0);
       expect(`${staleManifest.stdout}\n${staleManifest.stderr}`).toMatch(/manifest_stale|manifest_invalid|fresh/i);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('publishes congress releases with the required sections and updates existing releases in place by tag', () => {
+    const { sandbox, targetRepo, sha2013, sha2015, sha2017 } = createReleaseTargetRepo();
+    const metadataPath = writeReleaseMetadataFile(sandbox, sha2013, sha2015, sha2017);
+    const fakeGh = createFakeGhBin(sandbox);
+
+    try {
+      const apply = runCli(['milestones', 'apply', '--target', targetRepo, '--metadata', metadataPath]);
+      expect(apply.status).toBe(0);
+
+      const env = {
+        PATH: `${fakeGh.binDir}:${process.env.PATH ?? ''}`,
+        FAKE_GH_LOG: fakeGh.logPath,
+        FAKE_GH_STATE: fakeGh.statePath,
+      };
+
+      const firstRelease = runCli(['milestones', 'release', '--target', targetRepo, '--metadata', metadataPath], root, { env });
+      expect(firstRelease.status).toBe(0);
+
+      const firstState = JSON.parse(readFileSync(fakeGh.statePath, 'utf8')) as {
+        releases: Record<string, { mode: string; title: string; body: string }>;
+      };
+      expect(Object.keys(firstState.releases).sort()).toEqual(['congress/113', 'congress/114']);
+      expect(firstState.releases['congress/113']).toMatchObject({
+        mode: 'create',
+        title: '113th Congress (2013–2014)',
+      });
+      expect(firstState.releases['congress/114']).toMatchObject({
+        mode: 'create',
+        title: '114th Congress (2015–2016)',
+      });
+      expect(firstState.releases['congress/113'].body).toContain('## Diff Stat\n\nBaseline release: no prior congress tag in scope.');
+      expect(firstState.releases['congress/113'].body).toContain('## Summary');
+      expect(firstState.releases['congress/113'].body).toContain('Titles changed: 5');
+      expect(firstState.releases['congress/113'].body).toContain('## Notable Laws');
+      expect(firstState.releases['congress/113'].body).toContain('Carl Levin and Howard P. “Buck” McKeon National Defense Authorization Act for Fiscal Year 2015');
+      expect(firstState.releases['congress/113'].body).toContain('## Narrative');
+      expect(firstState.releases['congress/113'].body).toContain('Congress summary for the 113th Congress boundary snapshot.');
+      expect(firstState.releases['congress/114'].body).toMatch(/## Diff Stat[\s\S]*snapshot-2017\.md/);
+      expect(firstState.releases['congress/114'].body).toMatch(/## Diff Stat[\s\S]*## Summary[\s\S]*## Notable Laws[\s\S]*## Narrative/);
+      expect(firstState.releases['congress/114'].body).toContain('Titles changed: 9');
+      expect(firstState.releases['congress/114'].body).toContain('Water Infrastructure Improvements for the Nation Act');
+      expect(firstState.releases['congress/114'].body).toContain('Congress summary for the 114th Congress boundary snapshot.');
+
+      const secondRelease = runCli(['milestones', 'release', '--target', targetRepo, '--metadata', metadataPath], root, { env });
+      expect(secondRelease.status).toBe(0);
+
+      const secondState = JSON.parse(readFileSync(fakeGh.statePath, 'utf8')) as {
+        releases: Record<string, { mode: string; title: string; body: string }>;
+      };
+      expect(Object.keys(secondState.releases).sort()).toEqual(['congress/113', 'congress/114']);
+      expect(secondState.releases['congress/113'].mode).toBe('edit');
+      expect(secondState.releases['congress/114'].mode).toBe('edit');
+
+      const ghLog = readFileSync(fakeGh.logPath, 'utf8');
+      expect(ghLog).toMatch(/"args":\["release","view","congress\/113"/);
+      expect(ghLog).toMatch(/"args":\["release","create","congress\/113"/);
+      expect(ghLog).toMatch(/"args":\["release","edit","congress\/113"/);
+      expect(ghLog).toMatch(/"args":\["release","view","congress\/114"/);
+      expect(ghLog).toMatch(/"args":\["release","create","congress\/114"/);
+      expect(ghLog).toMatch(/"args":\["release","edit","congress\/114"/);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('fails release freshness validation when a pl tag SHA drifts even if annual and congress tags still match', () => {
+    const { sandbox, targetRepo, sha2013, sha2015, sha2017 } = createReleaseTargetRepo();
+    const metadataPath = writeReleaseMetadataFile(sandbox, sha2013, sha2015, sha2017);
+    const fakeGh = createFakeGhBin(sandbox);
+
+    try {
+      const apply = runCli(['milestones', 'apply', '--target', targetRepo, '--metadata', metadataPath]);
+      expect(apply.status).toBe(0);
+
+      execSync('git tag -d pl/114-255', { cwd: targetRepo, stdio: 'ignore' });
+      execSync(`git tag -a pl/114-255 ${sha2015} -m "drifted pl tag"`, { cwd: targetRepo, stdio: 'ignore', shell: '/bin/bash' });
+
+      const result = runCli(
+        ['milestones', 'release', '--target', targetRepo, '--metadata', metadataPath],
+        root,
+        {
+          env: {
+            PATH: `${fakeGh.binDir}:${process.env.PATH ?? ''}`,
+            FAKE_GH_LOG: fakeGh.logPath,
+            FAKE_GH_STATE: fakeGh.statePath,
+          },
+        },
+      );
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/manifest_stale|pl\/114-255|fresh/i);
+      expect(existsSync(fakeGh.statePath)).toBe(false);
+      expect(readFileSync(fakeGh.logPath, 'utf8')).not.toMatch(/"auth","status"|"release"/);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }

@@ -76,6 +76,81 @@ describe('milestones CLI contract', () => {
     }
   });
 
+  it('skips inaugurations before coverage_start even when they fall in the same calendar year', () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'us-code-tools-milestones-president-window-'));
+    const targetRepo = resolve(sandbox, 'target');
+    mkdirSync(targetRepo, { recursive: true });
+    execSync('git init', { cwd: targetRepo, stdio: 'ignore' });
+    execSync('git config user.name "QA Bot"', { cwd: targetRepo, stdio: 'ignore' });
+    execSync('git config user.email "qa@example.com"', { cwd: targetRepo, stdio: 'ignore' });
+
+    writeFileSync(resolve(targetRepo, 'snapshot-2013.md'), '2013 boundary\n');
+    execSync('git add snapshot-2013.md && GIT_AUTHOR_DATE="2013-12-31T00:00:00Z" GIT_COMMITTER_DATE="2013-12-31T00:00:00Z" git commit -m "snapshot 2013 boundary"', {
+      cwd: targetRepo,
+      stdio: 'ignore',
+      shell: '/bin/bash',
+    });
+    const sha2013 = execSync('git rev-parse HEAD', { cwd: targetRepo, encoding: 'utf8' }).trim();
+
+    const metadataPath = resolve(sandbox, 'legal-milestones.json');
+    writeFileSync(
+      metadataPath,
+      JSON.stringify(
+        {
+          annual_snapshots: [
+            {
+              annual_tag: 'annual/2013',
+              snapshot_date: '2013-12-31',
+              release_point: 'PL 113-300',
+              commit_selector: sha2013,
+              congress: 113,
+              president_term: 'obama-2',
+              is_congress_boundary: true,
+              release_notes: {
+                scope: 'congress',
+                notable_laws: ['Boundary snapshot'],
+                summary_counts: {
+                  titles_changed: 1,
+                  chapters_changed: 1,
+                  sections_added: 1,
+                  sections_amended: 0,
+                  sections_repealed: 0,
+                },
+                narrative: 'Boundary coverage starts at the end of 2013.',
+              },
+            },
+          ],
+          president_terms: [
+            {
+              slug: 'obama-2',
+              inauguration_date: '2013-01-20',
+              president_name: 'Barack Obama',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    try {
+      const result = runCli(['milestones', 'plan', '--target', targetRepo, '--metadata', metadataPath]);
+      expect(result.status).toBe(0);
+
+      const plan = JSON.parse(result.stdout) as Record<string, unknown>;
+      expect(plan.president_tags).toEqual([]);
+      expect(plan.skipped_president_tags).toEqual([
+        {
+          slug: 'obama-2',
+          inauguration_date: '2013-01-20',
+          reason: 'inauguration_before_coverage_window',
+        },
+      ]);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it('prints a deterministic plan JSON payload with the required top-level arrays and no side effects', () => {
     const sandbox = mkdtempSync(join(tmpdir(), 'us-code-tools-milestones-plan-'));
     const targetRepo = resolve(sandbox, 'target');
