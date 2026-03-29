@@ -68,7 +68,7 @@ describe('CLI integration — Title 1 fixture run', () => {
     const result = runTransformFromSelectedVintage(sandboxRoot, './out', fixtureZip);
     expect(result.status).toBe(0);
 
-    const outTree = resolve(sandboxRoot, 'out', 'uscode', `title-${String(manifest.title).padStart(2, '0')}`);
+    const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions');
     const written = readdirSync(outTree).sort();
 
     expect(written).toEqual(expect.arrayContaining(manifest.expected_files));
@@ -114,7 +114,7 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(report?.sections_found).toBeGreaterThan(0);
     expect(report?.files_written).toBeGreaterThanOrEqual(2);
 
-    const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+    const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions');
     expect(readdirSync(outTree).sort()).toEqual(expect.arrayContaining(['_title.md', 'section-00001.md']));
 
     const titleMarkdown = readFileSync(join(outTree, '_title.md'), 'utf8');
@@ -146,7 +146,7 @@ describe('CLI integration — Title 1 fixture run', () => {
       expect(report?.sections_found).toBe(53);
       expect(report?.files_written).toBe(54);
 
-      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions');
       const written = readdirSync(outTree).sort();
       expect(written).toContain('_title.md');
       expect(written.filter((name) => /^section-.*\.md$/u.test(name))).toHaveLength(53);
@@ -203,7 +203,17 @@ describe('CLI integration — Title 1 fixture run', () => {
         expect(report?.sections_found).toBe(53);
         expect(report?.files_written).toBe(54);
 
-        const outTree = resolve(outputDir, 'uscode', `title-${String(title).padStart(2, '0')}`);
+        const uscodeDir = resolve(outputDir, 'uscode');
+        const titleDirs = readdirSync(uscodeDir).filter((name) => name.startsWith('title-'));
+        expect(titleDirs).toHaveLength(1);
+
+        const [titleDir] = titleDirs;
+        expect(titleDir).toMatch(new RegExp(`^title-${String(title).padStart(2, '0')}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$`, 'u'));
+        expect(titleDir).not.toMatch(/[\s'"“”‘’/\\]/u);
+        expect(titleDir).not.toContain('--');
+        expect(titleDir.endsWith('-')).toBe(false);
+
+        const outTree = resolve(uscodeDir, titleDir);
         const written = readdirSync(outTree).sort();
         expect(written).toContain('_title.md');
         expect(written.filter((name) => /^section-.*\.md$/u.test(name))).toHaveLength(53);
