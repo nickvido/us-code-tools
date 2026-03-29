@@ -444,6 +444,24 @@ process.exit(1);
     }
   });
 
+  it('fails apply with detached_head when the target repository HEAD is not attached to a branch', () => {
+    const { sandbox, targetRepo, sha2013, sha2015 } = createTargetRepo();
+    const metadataPath = writeMetadataFile(sandbox, sha2013, sha2015);
+
+    execSync(`git checkout --detach ${sha2015}`, { cwd: targetRepo, stdio: 'ignore', shell: '/bin/bash' });
+
+    try {
+      const result = runCli(['milestones', 'apply', '--target', targetRepo, '--metadata', metadataPath]);
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/detached_head|HEAD must be attached to a branch/i);
+      expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/repo_dirty/);
+      expect(execSync('git tag --list', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe('');
+      expect(existsSync(resolve(targetRepo, '.us-code-tools', 'milestones.json'))).toBe(false);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it('fails validation on duplicate annual tag metadata before creating tags or a manifest', () => {
     const { sandbox, targetRepo, sha2013, sha2015 } = createTargetRepo();
     const metadataPath = writeMetadataFile(sandbox, sha2013, sha2015, { duplicateAnnualTag: true });
