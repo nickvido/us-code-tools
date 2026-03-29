@@ -20,7 +20,9 @@ Extend the existing `fetch --source=olrc` flow so operators can discover, select
   <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
 - [ ] `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages` are valid only when `--source=olrc` is also present; each invalid combination exits `2`, writes a single JSON usage error to stderr with `error.code="invalid_arguments"`, and writes no cache or manifest changes.
   <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
-- [ ] `--list-vintages` cannot be combined with `--all`, `--status`, `--congress=<n>`, `--vintage=<pl-number>`, or `--all-vintages`; `--vintage=<pl-number>` cannot be combined with `--all-vintages`; `--all-vintages` cannot be combined with `--all`, `--status`, or `--congress=<n>`.
+- [ ] `--list-vintages` cannot be combined with `--all`, `--status`, `--force`, `--congress=<n>`, `--vintage=<pl-number>`, or `--all-vintages`; `--vintage=<pl-number>` cannot be combined with `--all-vintages`; `--all-vintages` cannot be combined with `--all`, `--status`, or `--congress=<n>`.
+  <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
+- [ ] `--vintage=<pl-number>` values must match `/^\d+-\d+$/`; malformed values (including empty values, missing right-hand segments like `113-`, missing delimiters like `113`, and extra delimiters like `113--1`) are rejected before OLRC discovery with exit `2`, stderr JSON `error.code="invalid_arguments"`, and no cache or manifest changes.
   <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
 - [ ] Existing valid invocations remain valid and unchanged: `fetch --source=olrc` still means “fetch the single latest OLRC vintage,” and non-OLRC sources do not accept any of the new vintage selectors.
   <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
