@@ -253,7 +253,7 @@
   - fixtures: `tests/fixtures/xml/title-42/42-section-10307.xml` and `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
 - Reviewer/branch context captured:
   - QA first introduced 3 expected red regressions for missing paragraph/subsection bodies, dropped continuation text, and bare labels
-  - dev implementation landed at commit `8882d06`
+  - implementation currently lands at branch head commit `fa568ae` (`fix: preserve structured USLM body text ordering (#14)`), superseding the earlier feature commit `8882d06`
   - `[adversary-review]` is APPROVED with no findings
   - PR #15 remains the active branch PR for `df2/issue-14`
 - Verification recorded in issue context:
