@@ -15,6 +15,11 @@
   - listing discovery now prefers `https://uscode.house.gov/download/download.shtml`
   - per-title OLRC manifest state distinguishes `status: 'downloaded'` vs `status: 'reserved_empty'`
   - `src/transforms/uslm-to-ir.ts` accepts both legacy `uslm.title` and current `uscDoc.main.title`
+- Issue #21 extends OLRC acquisition from latest-only into historical release-point modes:
+  - `src/commands/fetch.ts` adds `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages`
+  - `src/sources/olrc.ts` performs one discovery pass, derives descending unique `available_vintages`, and reuses the discovered per-vintage title URL maps for latest/single/all-vintages execution
+  - OLRC artifacts are now canonically isolated per vintage under `data/cache/olrc/vintages/{pl-number}/...`
+  - `src/utils/manifest.ts` preserves latest-mode compatibility via `selected_vintage` + top-level `titles` while storing canonical historical state under `sources.olrc.vintages`
 
 ## Codebase Map
 - `src/index.ts` — top-level CLI dispatcher, arg parsing, usage/error text, process exit policy.
@@ -122,7 +127,9 @@
   - TTL-governed raw API responses: Congress + GovInfo via `src/utils/cache.ts`
 - Manifest state tracked in `src/utils/manifest.ts` includes:
   - per-source `last_success_at` / `last_failure`
-  - OLRC `selected_vintage` plus per-title `status: 'downloaded' | 'reserved_empty'`
+  - OLRC latest-mode compatibility fields `selected_vintage` plus top-level `titles`
+  - OLRC historical state under `sources.olrc.vintages[vintage]` with `listing_url`, `discovered_at`, `completed_at`, `status`, `missing_titles`, `titles_downloaded`, and per-title `status: 'downloaded' | 'reserved_empty'`
+  - OLRC additive discovery metadata under `sources.olrc.available_vintages`
   - Congress `bulk_scope`, `member_snapshot`, `congress_runs`, `bulk_history_checkpoint`
   - GovInfo `query_scopes` and `checkpoints`
   - legislators `cross_reference` state with explicit skip statuses
@@ -158,6 +165,7 @@
 - `sectionFileSafeId()` pads the leading numeric root to width 5 and preserves trailing suffixes/case, so examples like `106A`, `106a`, `106b`, and `2/3` remain distinct and stable.
 - Branch commit `07b954e` fixed the earlier issue #12 adversary seams around slash-separated `/us/usc/t10/s125/d` refs and equal-root mixed-case suffix ordering (`106 < 106A < 106a < 106b`).
 - Current head `2fb5c52` completes the remaining mixed-content seam in `src/transforms/uslm-to-ir.ts`: the module now dual-parses XML with a preserve-order tree and routes section body parsing, `sourceCredit`, and statutory-note extraction through ordered-text helpers (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) so inline `<ref>` / `<date>` siblings keep source document order.
+- Current issue #21 branch head `051ce97` finalizes the historical OLRC discovery contract in `src/sources/olrc.ts`: `OlrcVintagePlan` now retains `titleUrlsByVintage`, `selectVintagePlan()` reuses the discovered title-map for the requested historical vintage instead of synthesizing `1..54` URLs, and sparse historical vintages surface uncovered titles via `missing_titles` rather than `upstream_request_failed` 404s.
 - Current issue #14 branch head `fa568ae` carries the full structured-body repair: `parseOrderedContentChildren(...)` / `parseLabeledNodeOrdered(...)` preserve chapeau text, inline labeled-node body text, nested descendants through `subitem`, and continuation text after child lists, while `src/transforms/markdown.ts` renders those nodes with normalized parenthesized labels and stable depth-based indentation.
 - `src/transforms/uslm-to-ir.ts` still keeps the legacy object-tree helpers (`readRawText(...)`, `readNodeTextInDocumentOrder(...)`) for non-preserve-order call sites, but issue #12 correctness now depends on the ordered path found via `findOrderedTitleNode(...)` / `collectOrderedSectionNodes(...)` rather than the older bucketed reconstruction.
 - Issue #16 chapter mode composes on top of that existing parser/renderer stack rather than introducing a second parsing path: grouping uses only `section.hierarchy.chapter`, chapter frontmatter heading fallback is the exact literal `Chapter {chapter}`, and uncategorized sections are a report-only warning path, not `parseErrors`.
@@ -245,6 +253,12 @@
     - `resolveCachedOlrcTitleZipPath()` so `transform` reads the selected-vintage cache layout
     - `uscDoc.main.title` parsing with namespace tolerance and legacy `uslm.title` fallback
     - larger bounded OLRC XML entry allowance for current Title 42
+  - issue #21 historical OLRC release-point layer:
+    - `fetch --source=olrc --list-vintages` performs discovery-only listing and must not write cache or manifest state
+    - `fetch --source=olrc --vintage=<pl-number>` first discovers vintages, rejects unknown vintages with `error.code="unknown_vintage"`, and writes only to `data/cache/olrc/vintages/<pl-number>/`
+    - `fetch --source=olrc --all-vintages` discovers once, iterates every vintage in descending order, keeps successful earlier vintages on disk when later ones fail, and reports per-vintage results
+    - manifest normalization is additive only: old manifests load with `vintages: {}` and `available_vintages: null`
+    - latest-mode compatibility remains intentional: plain `fetch --source=olrc` still fetches only the newest vintage and mirrors that state to top-level `selected_vintage` + `titles`
   - issue #10 canonical `<num>` extraction layer:
     - `readCanonicalNumText(...)` prefers non-empty `@_value` for title/chapter/section numbers
     - fallback `cleanDecoratedNumText(...)` strips leading `§`, `Title `, `Chapter ` and trailing mixed `.` / `—` decoration

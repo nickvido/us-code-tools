@@ -305,3 +305,24 @@
 - **Decision:** `src/milestones/manifest.ts` acquires `.us-code-tools/milestones.lock` via exclusive create, persists exactly `pid`, `hostname`, `command`, and `timestamp`, and on conflict surfaces those same fields in `lock_conflict` output without overwriting or deleting the existing lock.
 - **Consequence:** Operators can inspect and manually clear stale locks, but the tool never auto-breaks them. Future agents should keep this contract deterministic and repo-local.
 - **Feature:** #18 Git tags and GitHub Releases for legal milestones
+
+### ADR-043: Historical OLRC discovery is a single shared pass reused across list/latest/single/all-vintages modes
+- **Status:** Active
+- **Context:** Issue #21 adds `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages`, and the spec/architecture require deterministic dedupe, ordering, and requested-vintage lookup.
+- **Decision:** `src/sources/olrc.ts` centralizes releasepoint discovery in `fetchOlrcVintagePlan()`, which returns descending `availableVintages`, the selected latest vintage, and the discovered per-vintage title URL maps used by every OLRC mode.
+- **Consequence:** Future agents should extend that shared discovery seam rather than adding mode-specific OLRC listing logic that can drift in ordering or sparse-vintage behavior.
+- **Feature:** #21 Historical OLRC annual release-point fetch
+
+### ADR-044: Historical OLRC state is canonical per vintage, with a latest-mode compatibility mirror
+- **Status:** Active
+- **Context:** Pre-issue-21 manifests could represent only one OLRC vintage via top-level `selected_vintage` + `titles`, but historical fetch needs machine-readable state for multiple vintages without breaking existing consumers.
+- **Decision:** `src/utils/manifest.ts` keeps `sources.olrc.selected_vintage` and top-level `titles` as the compatibility mirror for plain latest-mode fetches, while canonical historical state lives under `sources.olrc.vintages` plus additive `available_vintages` metadata.
+- **Consequence:** Future agents must preserve normalization of old manifests to `vintages: {}` / `available_vintages: null` and avoid redefining the top-level mirror as the canonical historical source of truth.
+- **Feature:** #21 Historical OLRC annual release-point fetch
+
+### ADR-045: Sparse historical OLRC vintages must reuse discovered title links instead of synthesizing missing URLs
+- **Status:** Active
+- **Context:** Adversary review found that non-latest historical vintages were fabricating `1..54` title URLs, turning real discovery gaps into 404-driven `upstream_request_failed` runs.
+- **Decision:** `OlrcVintagePlan` now retains `titleUrlsByVintage`, and `selectVintagePlan()` clones the discovered map for the requested vintage so absent titles remain represented by `missing_titles` rather than invented download requests.
+- **Consequence:** Future agents should treat sparse vintage listings as valid upstream input and should not reintroduce fallback URL synthesis for titles missing from the discovered listing.
+- **Feature:** #21 Historical OLRC annual release-point fetch

@@ -129,6 +129,8 @@
 - **Issue #16 keeps chapter filename normalization as the sole filename boundary:** numeric chapters zero-pad to width 3; non-numeric chapters flow through `chapterFileSafeId()` / `chapterOutputFilename()` using the spec-defined ASCII-safe normalization contract.
 - **Issue #16 collision detection is integrity hardening, not optional polish:** because chapter normalization is many-to-one by design, future agents must preserve the explicit pre-write collision check instead of letting later buckets overwrite earlier ones.
 - **Issue #16 warning classification is part of the public contract:** uncategorized sections surface via `TransformWarning` / `warnings[]`, not `ParseError`, so successful runs can still report zero `parse_errors`.
+- **Issue #21 historical OLRC fetches must remain discovery-driven:** once the listing is parsed, `selectVintagePlan()` must reuse the discovered per-vintage title URL map rather than synthesizing `resolveTitleUrl(title, vintage)` for titles that were never advertised.
+- **Issue #21 listing mode is intentionally side-effect free:** `listOlrcVintages()` may perform OLRC discovery but must not persist manifest state, cache artifacts, or cookie material.
 
 ## Things Future Agents Should Not Mislabel as Bugs
 - No database/auth/RLS: intentional; this repo is a local CLI, not a service.
@@ -147,6 +149,8 @@
 - Issue #16 chapter-grouped output is required additive behavior when `--group-by chapter` is passed; falling back to `section-*.md` output in that mode is a contract regression.
 - Issue #16 `_uncategorized.md` plus `warnings[]` is expected behavior for chapter-less sections and should not be mislabeled as a failed transform.
 - Zero-padded section filenames are part of the transform safety/correctness contract now because lexicographic directory order must match canonical numeric order during local review and downstream processing.
+- Issue #21 sparse historical vintages are valid upstream behavior; missing discovered links should populate `missing_titles`, not trigger fabricated 404 fetch failures.
+- Issue #21 only updates the top-level OLRC compatibility mirror (`selected_vintage` + `titles`) for plain latest-mode fetches; historical single-vintage and all-vintages runs persist canonical state under `sources.olrc.vintages` without redefining latest-mode semantics.
 
 ## Milestones / Releases Security Notes (Issue #18)
 
@@ -209,6 +213,7 @@
   - issue #12 transform hardening: one shared normalization boundary for XML-derived identifiers reused in frontmatter/paths/links, recursive hierarchy coverage for positive-law titles, preserved statutory note wrapper metadata, and fail-closed relative USC ref rendering
   - issue #14 transform integrity hardening: preserve-order structured-body parsing prevents chapeau/body/continuation loss or sibling drift, and markdown label normalization now preserves readable numbering without changing canonical parser identifiers
   - issue #16 output-integrity hardening: one shared chapter filename boundary, explicit pre-write collision rejection, report-only uncategorized warnings, and non-zero exit on any chapter write failure
+  - issue #21 historical OLRC hardening: duplicate/malformed `--vintage` rejection before discovery, in-memory-only cookie reuse across list/latest/single/all-vintages modes, additive manifest normalization for old OLRC state, and discovery-driven sparse-vintage handling
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes
