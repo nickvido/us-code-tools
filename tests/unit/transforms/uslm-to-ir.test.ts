@@ -5,7 +5,11 @@ import { XMLParser } from 'fast-xml-parser';
 import { pickCallable, safeImport, ensureModuleLoaded } from '../../utils/module-helpers';
 
 function readFixture(relativePath: string): string {
-  return readFileSync(resolve(process.cwd(), 'tests', 'fixtures', 'xml', 'title-01', relativePath), 'utf8');
+  return readFixtureFrom('title-01', relativePath);
+}
+
+function readFixtureFrom(titleDir: string, relativePath: string): string {
+  return readFileSync(resolve(process.cwd(), 'tests', 'fixtures', 'xml', titleDir, relativePath), 'utf8');
 }
 
 function normalizeParseResult(result: unknown): {
@@ -317,6 +321,82 @@ describe('uslm-to-ir parser', () => {
     expect(titleIr.titleNumber).toBe(1);
     expect(titleIr.sections).toHaveLength(53);
     expect(titleIr.sections[0].sectionNumber).toBe('1');
+  });
+
+  it('preserves section chapeau and all ten numbered paragraph bodies for title 42 section 10307', async () => {
+    const result = await parseXmlFixture(readFixtureFrom('title-42', '42-section-10307.xml'));
+    const section = result.titleIr.sections.find((entry: any) => entry.sectionNumber === '10307');
+
+    expect(section).toBeTruthy();
+    expect(section.heading).toBe('Types of research and development');
+    expect(Array.isArray(section.content)).toBe(true);
+    expect(section.content[0]).toMatchObject({
+      type: 'text',
+      text: 'The type of research and development to be undertaken under section 10304 of this title shall include the following:',
+    });
+
+    const paragraphs = section.content.filter((node: any) => node.type === 'paragraph');
+    expect(paragraphs).toHaveLength(10);
+    expect(paragraphs.map((node: any) => node.label)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '10',
+    ]);
+    expect(paragraphs.map((node: any) => node.text)).toEqual([
+      'Aspects of the hydrologic cycle;',
+      'Supply and demand for water;',
+      'Conservation and best use of available supplies of water;',
+      'Methods of increasing the effective use of water;',
+      'Methods of increasing the effective use of precipitation;',
+      'More efficient use of water in agriculture;',
+      'Methods of reclaiming water and wastewater;',
+      'Methods of reducing water pollution;',
+      'Effects of water pollution on water supplies and on the environment; and',
+      'Improved forecasting of water demand and availability.',
+    ]);
+    expect(result.parseErrors).toEqual([]);
+  });
+
+  it('preserves continuation text after nested children and does not drop subclause bodies', async () => {
+    const result = await parseXmlFixture(readFixtureFrom('title-26', '26-deep-hierarchy-sections.xml'));
+    const section = result.titleIr.sections.find((entry: any) => entry.sectionNumber === '2');
+
+    expect(section).toBeTruthy();
+
+    const subsection = section.content.find((node: any) => node.type === 'subsection' && node.label === 'b');
+    expect(subsection).toBeTruthy();
+
+    const paragraph = subsection.children.find((node: any) => node.type === 'paragraph' && node.label === '1');
+    expect(paragraph).toBeTruthy();
+    expect(String(paragraph.text ?? '')).toContain('For purposes of this subtitle, an individual shall be considered a head of a household');
+
+    const subparagraph = paragraph.children.find((node: any) => node.type === 'subparagraph' && node.label === 'A');
+    expect(subparagraph).toBeTruthy();
+    expect(String(subparagraph.text ?? '')).toContain('maintains as his home a household');
+
+    const clause = subparagraph.children.find((node: any) => node.type === 'clause' && node.label === 'i');
+    expect(clause).toBeTruthy();
+    expect(String(clause.text ?? '')).toContain('a qualifying child of the individual');
+    expect(clause.children.map((node: any) => node.type)).toEqual(['subclause', 'subclause']);
+    expect(clause.children.map((node: any) => node.label)).toEqual(['I', 'II']);
+    expect(clause.children.map((node: any) => node.text)).toEqual([
+      'is married at the close of the taxpayer’s taxable year, and',
+      'is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or',
+    ]);
+
+    expect(
+      paragraph.children.some(
+        (node: any) => node.type === 'text' && String(node.text).includes('For purposes of this paragraph, an individual shall be considered as maintaining a household'),
+      ),
+    ).toBe(true);
+    expect(result.parseErrors).toEqual([]);
   });
 });
 
