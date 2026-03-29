@@ -182,6 +182,11 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
     expect(parsed10.content).not.toMatch(/\[[^\]]+\]\(\.\.\.\/title-10\/section-00125d\.md\)/u);
     expect(parsed10.content).toContain('Aug. 10, 1956, ch. 1041');
     expect(parsed10.content).toContain('70A Stat. 3');
+    expect(parsed10.content).toContain(
+      '(or under the second sentence of [section 125(d) of this title](../title-10/section-00125d.md) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department',
+    );
+    expect(parsed10.data.source_credit).toContain('(Aug. 10, 1956, ch. 1041, 70A Stat. 3;');
+    expect(parsed10.data.source_credit).toContain('Pub. L. 85–861, §§ 1(1), 33(a)(1), Sept. 2, 1958, 72 Stat. 1437, 1564;');
     expect(parsed10.content).not.toContain('[Aug. 10, 1956, ch. 1041](/us/act/1956-08-10/ch1041)');
     expect(parsed10.content).not.toContain('[70A Stat. 3](/us/stat/70A/3)');
 
