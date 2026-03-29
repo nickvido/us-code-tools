@@ -295,6 +295,39 @@
   - `rtk err npx tsc --noEmit` ✅
   - `rtk test npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts` ✅
 
+## Feature #21 — Historical OLRC annual release-point fetch
+- Updated `src/commands/fetch.ts`:
+  - added `FetchArgs.listVintages`, `FetchArgs.vintage`, and `FetchArgs.allVintages`
+  - added pre-discovery validation for OLRC-only historical selectors
+  - rejects duplicate `--vintage` flags and malformed `--vintage=<pl-number>` values with stderr JSON `error.code="invalid_arguments"` and exit `2`
+  - routes OLRC fetches through `listOlrcVintages()`, `fetchSpecificOlrcVintage()`, `fetchAllOlrcVintages()`, or latest-mode `fetchOlrcSource()`
+- Updated `src/sources/olrc.ts`:
+  - centralized OLRC vintage discovery in `fetchOlrcVintagePlan()`
+  - derives descending unique `available_vintages` from releasepoint links
+  - added discovery-only `listOlrcVintages()`
+  - added requested-vintage fetch and fail-open `--all-vintages` orchestration
+  - stores discovered per-vintage title maps on `OlrcVintagePlan.titleUrlsByVintage`
+  - fixed the adversary regression by making `selectVintagePlan()` reuse discovered sparse-vintage links instead of synthesizing `1..54` URLs
+  - persists per-vintage outcomes with `buildVintageManifestState()` / `buildAvailableVintagesState()`
+- Updated `src/utils/manifest.ts`:
+  - added `OlrcVintageState`, `OlrcAvailableVintagesState`, and additive `OlrcManifestState.vintages` / `available_vintages`
+  - preserved latest-mode compatibility via top-level `selected_vintage` + `titles`
+  - normalizes pre-feature OLRC manifests without migration
+- Added/expanded coverage:
+  - `tests/cli/issue21-historical-olrc.test.ts`
+  - `tests/utils/issue21-manifest-historical.test.ts`
+- Review/fix history captured on this branch:
+  - `2f85150` — QA historical-mode + manifest compatibility tests
+  - `6a29112` — main historical OLRC implementation
+  - `0b3663c` — sparse-vintage adversary regression test
+  - `051ce97` — discovered-link reuse fix for sparse historical vintages and aggregate historical runs
+  - `[adversary-review]` is APPROVED with no remaining findings
+  - active PR is `#24` on branch `df2/issue-21`
+- Verification captured from issue context / branch notes:
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `npm test` ✅ (`166/166` passing at the final dev handoff)
+
 ## Feature #18 — Git tags and GitHub Releases for legal milestones
 - Added milestone CLI dispatch in `src/index.ts` and `src/commands/milestones.ts` for:
   - `milestones plan --target <repo> --metadata <file>`

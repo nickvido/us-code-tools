@@ -30,6 +30,9 @@
 - Focused issue #16 tests:
   - `npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts`
   - spot-checks: chapter filename normalization examples, `heading: Chapter {chapter}` fallback, collision rejection, and partial chapter write failure exit semantics
+- Focused issue #21 tests:
+  - `npx vitest run tests/cli/issue21-historical-olrc.test.ts tests/utils/issue21-manifest-historical.test.ts`
+  - full regression proof from dev handoff: `npm test` (`166/166` passing at commit `051ce97`)
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
@@ -54,8 +57,8 @@
 - No YAML/CSV parser dependency yet for issue #5; `src/sources/unitedstates.ts` and `src/sources/voteview.ts` currently use lightweight ad hoc parsing helpers
 
 ## File Layout
-- `src/index.ts` — dispatches `transform`, `backfill`, and `fetch`
-- `src/commands/fetch.ts` — fetch CLI parsing/dispatch/status output
+- `src/index.ts` — dispatches `transform`, `backfill`, `fetch`, and milestone flows
+- `src/commands/fetch.ts` — fetch CLI parsing/dispatch/status output, including OLRC historical selector validation (`--list-vintages`, `--vintage`, `--all-vintages`)
 - `src/backfill/constitution/dataset.ts` — static Constitution records + author metadata
 - `src/backfill/renderer.ts` — Constitution markdown/frontmatter renderer
 - `src/backfill/messages.ts` — exact historical commit-message templates
@@ -63,7 +66,7 @@
 - `src/backfill/target-repo.ts` — repo prep / preflight / prefix detection / remote resolution
 - `src/backfill/git-adapter.ts` — git wrapper + fast-import commit creation
 - `src/backfill/orchestrator.ts` — applies missing suffix events and pushes current branch
-- `src/sources/olrc.ts` — OLRC homepage bootstrap/cookie handling, `download.shtml` vintage discovery, ZIP acquisition + extraction, reserved-empty Title 53 classification, and selected-vintage cache resolution
+- `src/sources/olrc.ts` — OLRC homepage bootstrap/cookie handling, `download.shtml` vintage discovery, list/single/all-vintage orchestration, ZIP acquisition + extraction, reserved-empty Title 53 classification, sparse-vintage discovered-link reuse, and selected-vintage cache resolution
 - `src/sources/congress.ts` — Congress fetch orchestration
 - `src/sources/congress-member-snapshot.ts` — member snapshot freshness contract
 - `src/sources/govinfo.ts` — GovInfo collection walk/checkpointing
@@ -80,15 +83,15 @@
 
 ### If you're modifying... → Read these first:
 - `src/index.ts` → `src/commands/fetch.ts`, `src/backfill/orchestrator.ts`, `src/sources/olrc.ts`, `src/transforms/uslm-to-ir.ts`, `src/transforms/write-output.ts` (issue #8/#16: `transform` now resolves OLRC ZIPs via manifest-backed selected-vintage cache state instead of the legacy `.cache/olrc/title-XX` layout, parses `--group-by chapter`, surfaces additive `warnings`, and must return non-zero on any `OUTPUT_WRITE_FAILED` from chapter-mode writes)
-- `src/commands/fetch.ts` → `src/utils/manifest.ts`, `src/utils/fetch-config.ts`, every `src/sources/*.ts` fetch entrypoint (this file owns CLI contract + deterministic `--all` ordering)
+- `src/commands/fetch.ts` → `src/utils/manifest.ts`, `src/utils/fetch-config.ts`, every `src/sources/*.ts` fetch entrypoint (this file owns CLI contract + deterministic `--all` ordering; issue #21 also makes it the pre-discovery validation boundary for duplicate/malformed `--vintage` and invalid OLRC historical selector combinations)
 - `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source uses `getSharedApiDataGovLimiter()` and throws numeric `nextRequestAt` values that `normalizeError()` serializes into the public `next_request_at` field)
 - `src/sources/congress-member-snapshot.ts` → `src/utils/manifest.ts` (freshness derives from manifest snapshot metadata + artifact existence)
 - `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (this source also uses `getSharedApiDataGovLimiter()` and preserves numeric `nextRequestAt` through `normalizeError()`)
 - `src/sources/unitedstates.ts` → `src/utils/manifest.ts`, `src/sources/congress-member-snapshot.ts`, current Congress cache layout in `src/sources/congress.ts`
 - `src/sources/voteview.ts` → `src/utils/manifest.ts` and its in-memory index cache (`inMemoryIndexes`)
-- `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, `src/utils/manifest.ts`, `src/utils/logger.ts` (issue #8: this module owns OLRC homepage bootstrap, in-memory cookie forwarding, `download.shtml` parsing, Title 53 `reserved_empty` classification, the 128 MiB large-title entry cap, and `resolveCachedOlrcTitleZipPath()`)
+- `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, `src/utils/manifest.ts`, `src/utils/logger.ts` (issue #8/#21: this module owns OLRC homepage bootstrap, in-memory cookie forwarding, `download.shtml` parsing, descending/deduped vintage discovery, discovered per-vintage title URL maps, Title 53 `reserved_empty` classification, the 128 MiB large-title entry cap, aggregate `--all-vintages` execution, and `resolveCachedOlrcTitleZipPath()`)
 - `src/utils/cache.ts` → `src/utils/manifest.ts` consumers in Congress/GovInfo; cache key normalization strips `api_key`
-- `src/utils/manifest.ts` → all fetch sources + `src/commands/fetch.ts` (manifest shape is the contract; issue #8 hardened `sources.olrc.titles[title]` into concrete `downloaded` vs `reserved_empty` states)
+- `src/utils/manifest.ts` → all fetch sources + `src/commands/fetch.ts` (manifest shape is the contract; issue #8 hardened `sources.olrc.titles[title]` into concrete `downloaded` vs `reserved_empty` states, and issue #21 adds additive `sources.olrc.vintages` + `available_vintages` while preserving latest-mode compatibility fields)
 - `src/backfill/orchestrator.ts` → `src/backfill/planner.ts`, `src/backfill/constitution/dataset.ts`, `src/backfill/target-repo.ts`, `src/backfill/git-adapter.ts`
 - `src/backfill/target-repo.ts` → `src/backfill/planner.ts`, `src/backfill/git-adapter.ts` (prefix checks depend on planned commit metadata and git inspection)
 - `src/backfill/git-adapter.ts` → `src/backfill/planner.ts` (commit creation consumes `HistoricalEvent`)
@@ -105,16 +108,22 @@ src/index.ts (main)
   → runFetchCommand()
     → parseFetchArgs()
     → runAllSources() | runSingleSource()
-      → fetchOlrcSource()
+      → listOlrcVintages() | fetchSpecificOlrcVintage() | fetchAllOlrcVintages() | fetchOlrcSource()
         → fetchOlrcVintagePlan()
-          → fetchWithRetry()
-            → fetchWithOlrcCookies()
-              → bootstrapOlrcSession()
-        → getOrCreateZipPath()
-          → fetchWithRetry()
-          → classifyReservedEmptyPayload() / classifyReservedEmptyError()
-        → extractXmlEntriesFromZip()
-        → writeManifest()
+          → fetchPreferredOlrcListing()
+          → extractReleasepointLinks()
+          → compareVintageDescending()
+        → selectVintagePlan()
+          → reuse discovery-retained titleUrlsByVintage (issue #21 sparse-vintage contract)
+        → fetchDiscoveredOlrcVintage()
+          → getOrCreateZipPath()
+            → fetchWithRetry()
+              → fetchWithOlrcCookies()
+                → bootstrapOlrcSession()
+            → classifyReservedEmptyPayload() / classifyReservedEmptyError()
+          → extractXmlEntriesFromZip()
+          → buildVintageManifestState() / buildAvailableVintagesState()
+          → writeManifest()
       → fetchCongressSource()
         → resolveCurrentCongressScope()
         → ensureMemberSnapshot()
@@ -161,9 +170,10 @@ src/index.ts (main)
 ```
 
 ### Key Interfaces (the contracts)
-- `FetchArgs` in `src/commands/fetch.ts` — normalized CLI request for `fetch`
+- `FetchArgs` in `src/commands/fetch.ts` — normalized CLI request for `fetch`, including issue #21 `listVintages`, `vintage`, and `allVintages`
 - `FetchManifest` in `src/utils/manifest.ts` — persisted acquisition state contract
-- `OlrcTitleState` / `OlrcTitleReservedEmptyState` in `src/utils/manifest.ts` — per-title OLRC cache/result contract for issue #8
+- `OlrcTitleState` / `OlrcTitleReservedEmptyState` in `src/utils/manifest.ts` — per-title OLRC cache/result contract for issues #8/#21
+- `OlrcVintageState` / `OlrcAvailableVintagesState` / `OlrcManifestState` in `src/utils/manifest.ts` — historical OLRC manifest contract and latest-mode compatibility mirror
 - `CongressMemberSnapshotState` / `CongressRunState` / `GovInfoCheckpointState` / `LegislatorsCrossReferenceState` in `src/utils/manifest.ts` — per-source manifest contracts
 - `CurrentCongressResolution` in `src/utils/fetch-config.ts` — `override`/`live`/`fallback` current-congress contract
 - `RawResponseCacheMetadata` in `src/utils/cache.ts` — raw API response cache metadata contract
@@ -195,6 +205,9 @@ src/index.ts (main)
   - `src/utils/retry.ts` still exposes only a minimal `withRetry()` loop and does not own HTTP `Retry-After` translation today
   - OLRC requests bootstrap the homepage once per fetch context and then reuse an in-memory `Cookie` header for listing + ZIP requests; do not persist or log it
   - OLRC vintage discovery is `download.shtml`-first; only Title 53 may be classified as `reserved_empty`
+  - issue #21 historical modes must reuse the exact discovery pass results: do not synthesize `resolveTitleUrl(title, vintage)` for titles the listing did not advertise for that vintage
+  - `--list-vintages` is intentionally side-effect free; no manifest/cache writes belong on that path
+  - latest-mode compatibility is deliberate: only plain `fetch --source=olrc` updates the top-level `sources.olrc.selected_vintage` + `titles` mirror
   - legislators cross-reference must delete stale `bioguide-crosswalk.json` whenever the result status is not `completed`
   - VoteView indexes are currently in-memory only via `inMemoryIndexes`, so repeated lookups in one process avoid reparsing but cross-process persistence is not implemented
 - Summary/result objects are JSON-first and use spec-style keys like `requested_scope`, `bulk_scope`, `next_request_at`, and `last_success_at`.
@@ -338,6 +351,12 @@ src/index.ts
     - chapter files composed from existing section markdown with exact `heading: Chapter {chapter}` fallback when `TitleIR.chapters` lacks a match
     - `_uncategorized.md` + report-only `warnings[]` for sections missing `hierarchy.chapter`
     - pre-write normalized chapter filename collision rejection and non-zero exit on any chapter write failure
+  - issue #21 historical OLRC fetch work:
+    - additive fetch selectors `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages`
+    - duplicate `--vintage` and malformed `--vintage` values fail in `parseFetchArgs()` before any OLRC discovery or disk mutation
+    - `fetchOlrcVintagePlan()` is the one discovery pass for list/latest/single/all-vintages modes
+    - `fetchDiscoveredOlrcVintage()` persists canonical per-vintage state and only updates the latest-mode mirror when `updateSelectedVintageMirror` is true
+    - sparse historical vintages are expected: absent title links belong in `missing_titles`, not fabricated ZIP requests
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories

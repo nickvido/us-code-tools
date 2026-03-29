@@ -1,6 +1,14 @@
 import { readManifest, type SourceName } from '../utils/manifest.js';
 import { resolveCurrentCongressScope } from '../utils/fetch-config.js';
-import { fetchOlrcSource, type OlrcFetchResult } from '../sources/olrc.js';
+import {
+  fetchAllOlrcVintages,
+  fetchOlrcSource,
+  fetchSpecificOlrcVintage,
+  listOlrcVintages,
+  type OlrcAllVintagesResult,
+  type OlrcFetchResult,
+  type OlrcListVintagesResult,
+} from '../sources/olrc.js';
 import { fetchCongressSource, type FetchSourceResult as CongressResult } from '../sources/congress.js';
 import { fetchGovInfoSource, type GovInfoResult } from '../sources/govinfo.js';
 import { fetchVoteViewSource, type VoteViewResult } from '../sources/voteview.js';
@@ -12,6 +20,9 @@ export interface FetchArgs {
   all: boolean;
   source: SourceName | null;
   congress: number | null;
+  listVintages: boolean;
+  vintage: string | null;
+  allVintages: boolean;
 }
 
 interface ValidationError {
@@ -19,7 +30,7 @@ interface ValidationError {
   message: string;
 }
 
-type FetchResult = OlrcFetchResult | CongressResult | GovInfoResult | VoteViewResult | UnitedStatesResult;
+type FetchResult = OlrcFetchResult | OlrcListVintagesResult | OlrcAllVintagesResult | CongressResult | GovInfoResult | VoteViewResult | UnitedStatesResult;
 
 export async function runFetchCommand(argv: string[]): Promise<number> {
   const parsed = parseFetchArgs(argv);
@@ -51,6 +62,9 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
   let all = false;
   let source: SourceName | null = null;
   let congress: number | null = null;
+  let listVintages = false;
+  let vintage: string | null = null;
+  let allVintages = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -67,6 +81,28 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
 
     if (token === '--all') {
       all = true;
+      continue;
+    }
+
+    if (token === '--list-vintages') {
+      listVintages = true;
+      continue;
+    }
+
+    if (token === '--all-vintages') {
+      allVintages = true;
+      continue;
+    }
+
+    if (token.startsWith('--vintage=')) {
+      const candidate = token.slice('--vintage='.length);
+      if (vintage !== null) {
+        return invalid('Only one --vintage value is allowed');
+      }
+      if (!/^\d+-\d+$/.test(candidate)) {
+        return invalid('--vintage must match <congress>-<law-number>');
+      }
+      vintage = candidate;
       continue;
     }
 
@@ -99,10 +135,33 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
   }
 
   if (status) {
-    if (force || all || source !== null || congress !== null) {
+    if (force || all || source !== null || congress !== null || listVintages || vintage !== null || allVintages) {
       return invalid('--status cannot be combined with other fetch selectors or --force');
     }
-    return { ok: true, value: { status, force, all, source, congress } };
+    return { ok: true, value: { status, force, all, source, congress, listVintages, vintage, allVintages } };
+  }
+
+  const hasHistoricalOlrcSelector = listVintages || vintage !== null || allVintages;
+  if (hasHistoricalOlrcSelector && source !== 'olrc') {
+    return invalid('OLRC historical selectors require --source=olrc');
+  }
+
+  if (listVintages) {
+    if (vintage !== null || allVintages || all || status || congress !== null || force) {
+      return invalid('--list-vintages cannot be combined with --vintage, --all-vintages, --all, --status, --congress, or --force');
+    }
+  }
+
+  if (allVintages) {
+    if (vintage !== null || all || status || congress !== null) {
+      return invalid('--all-vintages cannot be combined with --vintage, --all, --status, or --congress');
+    }
+  }
+
+  if (vintage !== null) {
+    if (all || status || congress !== null || listVintages || allVintages) {
+      return invalid('--vintage cannot be combined with --all, --status, --congress, --list-vintages, or --all-vintages');
+    }
   }
 
   if (!all && source === null) {
@@ -123,7 +182,7 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
 
   return {
     ok: true,
-    value: { status, force, all, source, congress },
+    value: { status, force, all, source, congress, listVintages, vintage, allVintages },
   };
 }
 
@@ -153,6 +212,15 @@ async function runAllSources(args: FetchArgs): Promise<FetchResult[]> {
 async function runSingleSource(args: FetchArgs): Promise<FetchResult> {
   switch (args.source) {
     case 'olrc':
+      if (args.listVintages) {
+        return listOlrcVintages();
+      }
+      if (args.vintage !== null) {
+        return fetchSpecificOlrcVintage({ force: args.force, vintage: args.vintage });
+      }
+      if (args.allVintages) {
+        return fetchAllOlrcVintages({ force: args.force });
+      }
       return fetchOlrcSource({ force: args.force });
     case 'congress':
       return fetchCongressSource({ force: args.force, congress: args.congress, mode: 'single' });

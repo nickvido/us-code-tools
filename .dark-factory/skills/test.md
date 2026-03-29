@@ -15,10 +15,12 @@
 - `tests/unit/backfill-planner.test.ts` — 28-event chronology, stable Bill of Rights ordering, suffix/resume expectations.
 - `tests/unit/backfill-git-env.test.ts` — exact UTC-midnight git env strings and malformed-date rejection.
 - `tests/cli/fetch.test.ts` — fetch CLI validation, `--status`, source ordering, bulk scope behavior.
+- `tests/cli/issue21-historical-olrc.test.ts` — historical OLRC CLI contract coverage for duplicate `--vintage`, side-effect-free `--list-vintages`, `unknown_vintage`, `--all-vintages` fail-open behavior, and sparse historical vintage discovery reuse.
 - `tests/utils/fetch-config.test.ts` — current Congress override/live/fallback behavior.
 - `tests/utils/manifest.test.ts` — manifest normalization/defaulting and atomic write expectations.
+- `tests/utils/issue21-manifest-historical.test.ts` — pre-feature OLRC manifest compatibility for additive `vintages` / `available_vintages` normalization.
 - `tests/utils/rate-limit.test.ts` — limiter arithmetic and exhaustion timing for the shared helper primitives.
-- `tests/unit/sources/olrc.test.ts` — OLRC source/cache behavior, cookie bootstrap, `download.shtml` discovery, Title 42 extraction ceiling, Title 53 reserved-empty classification, and selected-vintage cache regressions.
+- `tests/unit/sources/olrc.test.ts` — OLRC source/cache behavior, cookie bootstrap, `download.shtml` discovery, Title 42 extraction ceiling, Title 53 reserved-empty classification, selected-vintage cache regressions, and the source-level seams historical-vintage behavior builds on.
 - `tests/unit/transforms/uslm-to-ir.test.ts` — legacy `uslm` fixtures plus current namespace-qualified `uscDoc` fixture coverage, canonical `<num @value>` precedence, empty-attribute fallback, disagreement cases, mixed punctuation cleanup, structural XSD-shape assertions, and issue #14 fixture regressions for section `chapeau`, paragraph body text, subsection body text, nested subclause bodies, and parent-level continuation text.
 - `tests/unit/transforms/issue12-recursive-metadata.test.ts` — real-fixture regression suite for recursive hierarchy walking, hierarchy frontmatter, singular `source_credit`, statutory notes, preserved `noteType`, relative USC ref rendering, canonical ordering, mixed-case suffix ordering, and zero-padded filename derivation.
 - `tests/unit/transforms/markdown.test.ts` — markdown rendering contracts, including issue #14 regression coverage for Title 42 § 10307 paragraph completeness, parenthesized label normalization, deterministic deep-hierarchy indentation/order, and continuation placement after nested children.
@@ -46,10 +48,12 @@
     - `tests/fixtures/xml/title-42/42-section-10307.xml`
     - `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
 - `tests/utils/module-helpers.ts` provides safe dynamic imports for source-module unit tests.
+- Issue #21 CLI tests use a process-level `--import` hook (`createMockOlrcImport(...)`) to replace `globalThis.fetch` with an OLRC fixture responder; preserve that approach for end-to-end fetch selector coverage instead of introducing live OLRC requests.
 
 ## Patterns to Follow
 - For pure backfill modules, import source files directly and assert behavior without shelling out where possible.
 - For fetch utilities/sources, prefer fixture-backed unit tests over live requests; default `npm test` remains offline.
+- For historical OLRC fetch modes, keep fixtures capable of expressing sparse vintages where a requested vintage advertises only a subset of title ZIPs; that is how the branch locks in the “missing_titles, not fabricated 404 failures” contract.
 - When touching OLRC fetch logic, isolate `US_CODE_TOOLS_DATA_DIR` in tests that depend on uncached fetch behavior so ambient `data/` state cannot suppress the request path.
 - For CLI tests, build first and run `dist/index.js` with `spawnSync`.
 - For git behavior, prefer temp repos created in the test rather than mocks when validating actual history semantics.
@@ -68,6 +72,7 @@
 - Git/repo changes: cover empty-dir bootstrap, populated-dir rejection, dirty-tree rejection, unrelated-history rejection, prefix resume, idempotent rerun, and explicit remote push semantics.
 - CLI changes: assert usage/error text and no-side-effect behavior for bad invocations.
 - OLRC issue #8 changes: cover homepage cookie bootstrap, authenticated follow-on requests, `download.shtml` parsing, current `uscDoc` parsing, selected-vintage transform lookup, Title 42 large-entry acceptance, and Title 53 reserved-empty handling without live outbound access.
+- Issue #21 historical OLRC changes: cover duplicate `--vintage` pre-discovery rejection, side-effect-free `--list-vintages`, unknown-vintage no-mutation behavior, `--all-vintages` fail-open aggregation, sparse-vintage discovered-link reuse, and pre-feature manifest normalization to `vintages: {}` / `available_vintages: null`.
 - Issue #10 parser changes: assert `@value` beats display text for title/chapter/section nodes, whitespace-only attributes fall back cleanly, mixed trailing `.—` decoration is removed in fallback mode, Title 1 current-format fixture yields `titleIr.chapters.length === 1` + 53 canonical section numbers, and output paths never contain decorated `<num>` text.
 - Issue #12 transform changes: assert fixture `<section>` count equality for Titles 1/5/10/26, rendered hierarchy frontmatter for sampled deep-nesting sections, `source_credit` presence when `<sourceCredit>` exists, `## Statutory Notes` rendering when `<notes>` exists, preserved `noteType: 'uscNote'`, relative markdown links for transformable USC refs, canonical slash-ref mapping (`/us/usc/t10/s125/d` → `../title-10/section-00125d.md`), zero-padded filenames, canonical mixed-width/mixed-case section ordering (`106`, `106A`, `106a`, `106b`), and normalized mixed-content source-credit/note text retention (`Aug. 10, 1956, ch. 1041`, `70A Stat. 3`).
 - Issue #14 transform changes: assert Title 42 § 10307 preserves section `chapeau` plus all ten numbered paragraph bodies, Title 26 § 2 preserves subsection body text + nested subclause text + parent continuation text, rendered labels are parenthesized exactly once, and repeated renders are byte-identical for fixture-backed sections.
@@ -75,6 +80,7 @@
 - Latest issue #12 branch state at head `2fb5c52`: the earlier slash-ref / mixed-case-suffix regressions and the final mixed-content ordering seam are all covered and currently passing.
 - Latest issue #14 branch state at head `fa568ae`: the QA red regressions for missing paragraph/subsection bodies, bare labels, and dropped continuation text are all covered in `tests/unit/transforms/uslm-to-ir.test.ts` + `tests/unit/transforms/markdown.test.ts` and currently passing.
 - Latest issue #16 branch state at head `3c6f834`: the earlier collision-overwrite path and the final partial-chapter-write exit-code path are both covered in `tests/integration/issue16-transform-cli.test.ts` and currently passing.
+- Latest issue #21 branch state at head `051ce97`: the original historical-mode contract tests plus the sparse-vintage adversary regression in `tests/cli/issue21-historical-olrc.test.ts` all pass; `tests/utils/issue21-manifest-historical.test.ts` covers additive manifest normalization for old OLRC manifests.
 - Fastest focused verification for issue #12 now is:
   - `rtk test npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts tests/unit/transforms/write-output.test.ts`
   - expected result at current head: all tests pass, including the Title 10 assertions that require `Aug. 10, 1956, ch. 1041` and `70A Stat. 3` to survive around inline refs.
@@ -146,6 +152,7 @@
   - issue #10 transform regression coverage for canonical `@value` extraction, fallback decoration cleanup, Title 1 chapter/section equality against source fixture values, path-safe output names, and derived multi-title current-format fixtures
   - issue #12 regression coverage for recursive hierarchy fixtures, hierarchy markdown frontmatter, `source_credit`, statutory note wrapper metadata, relative USC refs, and zero-padded section filenames
   - issue #16 regression coverage for additive chapter-mode CLI validation, chapter frontmatter/embedding contracts, filename normalization, collision rejection, and partial write exit semantics
+  - issue #21 regression coverage for historical OLRC selector validation, discovery-only listing mode, unknown-vintage handling, fail-open all-vintages execution, sparse-vintage discovered-link reuse, and additive manifest compatibility
   - existing transform regression coverage remains intact
 - What's intentionally deferred:
   - live external Constitution-source verification during tests

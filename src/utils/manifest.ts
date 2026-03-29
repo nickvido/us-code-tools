@@ -126,9 +126,28 @@ export interface OlrcTitleReservedEmptyState {
 
 export type OlrcTitleState = OlrcTitleSuccessState | OlrcTitleReservedEmptyState;
 
+export interface OlrcVintageState extends SourceStatusSummary {
+  vintage: string;
+  listing_url: string;
+  discovered_at: string;
+  completed_at: string | null;
+  status: 'complete' | 'partial' | 'failed';
+  missing_titles: number[];
+  titles_downloaded: number;
+  titles: Record<string, OlrcTitleState>;
+}
+
+export interface OlrcAvailableVintagesState {
+  values: string[];
+  discovered_at: string;
+  listing_url: string;
+}
+
 export interface OlrcManifestState extends SourceStatusSummary {
   selected_vintage: string | null;
   titles: Record<string, OlrcTitleState>;
+  vintages: Record<string, OlrcVintageState>;
+  available_vintages: OlrcAvailableVintagesState | null;
 }
 
 export interface LegislatorsManifestState extends SourceStatusSummary {
@@ -154,7 +173,7 @@ export function createEmptyManifest(): FetchManifest {
     version: 1,
     updated_at: new Date(0).toISOString(),
     sources: {
-      olrc: { selected_vintage: null, last_success_at: null, last_failure: null, titles: {} },
+      olrc: { selected_vintage: null, last_success_at: null, last_failure: null, titles: {}, vintages: {}, available_vintages: null },
       congress: {
         last_success_at: null,
         last_failure: null,
@@ -278,6 +297,8 @@ function normalizeOlrcState(value: unknown): OlrcManifestState {
       ? candidate.selected_vintage
       : null,
     titles: normalizeOlrcTitles(candidate?.titles),
+    vintages: normalizeOlrcVintages(candidate?.vintages),
+    available_vintages: normalizeOlrcAvailableVintages(candidate?.available_vintages),
   };
 }
 
@@ -517,9 +538,11 @@ function normalizeOlrcTitles(value: unknown): Record<string, OlrcTitleState> {
     }
 
     const zipPath = typeof entry.zip_path === 'string' ? entry.zip_path : null;
-    const extractionPath = typeof entry.extraction_path === 'string' ? entry.extraction_path : null;
-    const fetchedAt = typeof entry.fetched_at === 'string' ? entry.fetched_at : null;
-    if (zipPath === null || extractionPath === null || fetchedAt === null) {
+    const extractionPath = typeof entry.extraction_path === 'string'
+      ? entry.extraction_path
+      : (zipPath === null ? null : resolve(dirname(zipPath), 'extracted'));
+    const fetchedAt = typeof entry.fetched_at === 'string' ? entry.fetched_at : new Date(0).toISOString();
+    if (zipPath === null || extractionPath === null) {
       continue;
     }
 
@@ -536,6 +559,60 @@ function normalizeOlrcTitles(value: unknown): Record<string, OlrcTitleState> {
   }
 
   return normalized;
+}
+
+function normalizeOlrcVintages(value: unknown): Record<string, OlrcVintageState> {
+  if (!isObject(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, OlrcVintageState> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!isObject(entry)) {
+      continue;
+    }
+
+    const vintage = typeof entry.vintage === 'string' ? entry.vintage : key;
+    const listingUrl = typeof entry.listing_url === 'string' ? entry.listing_url : null;
+    const discoveredAt = typeof entry.discovered_at === 'string' ? entry.discovered_at : null;
+    if (listingUrl === null || discoveredAt === null) {
+      continue;
+    }
+
+    normalized[key] = {
+      ...normalizeSourceStatus(entry),
+      vintage,
+      listing_url: listingUrl,
+      discovered_at: discoveredAt,
+      completed_at: typeof entry.completed_at === 'string' || entry.completed_at === null ? (entry.completed_at as string | null) : null,
+      status: entry.status === 'complete' || entry.status === 'partial' || entry.status === 'failed' ? entry.status : 'failed',
+      missing_titles: Array.isArray(entry.missing_titles)
+        ? entry.missing_titles.filter((title): title is number => typeof title === 'number' && Number.isSafeInteger(title) && title > 0)
+        : [],
+      titles_downloaded: toNonNegativeInteger(entry.titles_downloaded),
+      titles: normalizeOlrcTitles(entry.titles),
+    };
+  }
+
+  return normalized;
+}
+
+function normalizeOlrcAvailableVintages(value: unknown): OlrcAvailableVintagesState | null {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const listingUrl = typeof value.listing_url === 'string' ? value.listing_url : null;
+  const discoveredAt = typeof value.discovered_at === 'string' ? value.discovered_at : null;
+  if (listingUrl === null || discoveredAt === null) {
+    return null;
+  }
+
+  return {
+    values: Array.isArray(value.values) ? value.values.filter((entry): entry is string => typeof entry === 'string') : [],
+    discovered_at: discoveredAt,
+    listing_url: listingUrl,
+  };
 }
 
 function normalizeDownloadedFileList(value: unknown): DownloadedFileManifestEntry[] {
