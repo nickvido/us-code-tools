@@ -4,8 +4,10 @@ import { asArray, normalizeWhitespace, sectionFileSafeId } from '../domain/norma
 
 const MAX_NORMALIZED_FIELD_LENGTH = 1_048_576;
 const HIERARCHY_TAGS = ['subtitle', 'part', 'subpart', 'chapter', 'subchapter'] as const;
+const SECTION_BODY_TAGS = ['subsection', 'paragraph', 'subparagraph', 'clause', 'subclause', 'item', 'subitem'] as const;
 
 type HierarchyTag = typeof HIERARCHY_TAGS[number];
+type SectionBodyTag = typeof SECTION_BODY_TAGS[number];
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -151,6 +153,7 @@ interface XmlNode {
   continuation?: XmlNode | XmlNode[];
   chapeau?: XmlNode | XmlNode[];
   subclause?: XmlNode | XmlNode[];
+  subitem?: XmlNode | XmlNode[];
   'cross-reference'?: XmlNode | XmlNode[];
 }
 
@@ -349,8 +352,9 @@ function parseContent(
     if (text) content.push({ type: 'text', text });
   }
 
-  content.push(...asArray(contentRoot.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
-  content.push(...asArray(contentRoot.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
+  for (const tag of SECTION_BODY_TAGS) {
+    content.push(...asArray(contentRoot[tag]).map((child) => parseLabeledNode(tag, child, parseErrors, xmlPath, sectionHint)));
+  }
 
   if (content.length === 0) {
     const text = optionalText(parseErrors, contentRoot.p ?? contentRoot.text ?? contentRoot, xmlPath, 'section text', sectionHint);
@@ -397,8 +401,8 @@ function parseOrderedContentChildren(
       continue;
     }
 
-    if (tag === 'subsection' || tag === 'paragraph') {
-      content.push(parseLabeledNodeOrdered(tag, entry, parseErrors, xmlPath, sectionHint));
+    if (SECTION_BODY_TAGS.includes(tag as SectionBodyTag)) {
+      content.push(parseLabeledNodeOrdered(tag as SectionBodyTag, entry, parseErrors, xmlPath, sectionHint));
       continue;
     }
 
@@ -415,47 +419,54 @@ function parseOrderedContentChildren(
 }
 
 function parseLabeledNode(
-  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'item',
+  type: SectionBodyTag,
   node: XmlNode,
   parseErrors: ParseError[],
   xmlPath: string | undefined,
   sectionHint: string,
 ): ContentNode {
   const children: ContentNode[] = [];
+  const inlineParts: string[] = [];
 
-  for (const textNode of [...asArray(node.chapeau), ...asArray(node.continuation)]) {
-    const text = readNodeText(parseErrors, textNode, xmlPath, sectionHint, `${type} text`);
-    if (text) children.push({ type: 'text', text });
+  for (const chapeauNode of asArray(node.chapeau)) {
+    const text = readNodeText(parseErrors, chapeauNode, xmlPath, sectionHint, `${type} text`);
+    if (text) inlineParts.push(text);
   }
 
-  children.push(...asArray(node.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.subparagraph).map((child) => parseLabeledNode('subparagraph', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.clause).map((child) => parseLabeledNode('clause', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.subclause).map((child) => parseLabeledNode('item', child, parseErrors, xmlPath, sectionHint)));
-  children.push(...asArray(node.item).map((child) => parseLabeledNode('item', child, parseErrors, xmlPath, sectionHint)));
-
   const inlineText = optionalText(parseErrors, node.content ?? node.text ?? node.p, xmlPath, `${type} text`, sectionHint);
+  if (inlineText) {
+    inlineParts.push(inlineText);
+  }
+
+  for (const tag of SECTION_BODY_TAGS) {
+    children.push(...asArray(node[tag]).map((child) => parseLabeledNode(tag, child, parseErrors, xmlPath, sectionHint)));
+  }
+
+  for (const continuationNode of asArray(node.continuation)) {
+    const text = readNodeText(parseErrors, continuationNode, xmlPath, sectionHint, `${type} text`);
+    if (text) children.push({ type: 'text', text });
+  }
 
   return {
     type,
     label: readCanonicalNumText(parseErrors, node.num, xmlPath, `${type} label`, sectionHint),
     heading: optionalText(parseErrors, node.heading, xmlPath, `${type} heading`, sectionHint),
-    text: inlineText,
+    text: inlineParts.length > 0 ? inlineParts.join(' ') : undefined,
     children: children.filter((entry) => !(entry.type === 'text' && !entry.text)),
   };
 }
 
 function parseLabeledNodeOrdered(
-  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'item',
+  type: SectionBodyTag,
   entry: OrderedEntry,
   parseErrors: ParseError[],
   xmlPath: string | undefined,
   sectionHint: string,
 ): ContentNode {
   const children: ContentNode[] = [];
+  const inlineParts: string[] = [];
   const nodeChildren = orderedChildArray(entry, type);
-  let inlineText: string | undefined;
+  let sawNestedChild = false;
 
   for (const child of nodeChildren) {
     const tag = orderedEntryTag(child);
@@ -463,21 +474,37 @@ function parseLabeledNodeOrdered(
       continue;
     }
 
-    if (tag === 'chapeau' || tag === 'continuation') {
+    if (tag === 'chapeau') {
       const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
       if (text) {
-        children.push({ type: 'text', text });
+        inlineParts.push(text);
       }
       continue;
     }
 
-    if (tag === 'subsection' || tag === 'paragraph' || tag === 'subparagraph' || tag === 'clause' || tag === 'subclause' || tag === 'item') {
-      children.push(parseLabeledNodeOrdered(tag === 'subclause' ? 'item' : tag, child, parseErrors, xmlPath, sectionHint));
+    if (SECTION_BODY_TAGS.includes(tag as SectionBodyTag)) {
+      sawNestedChild = true;
+      children.push(parseLabeledNodeOrdered(tag as SectionBodyTag, child, parseErrors, xmlPath, sectionHint));
       continue;
     }
 
-    if (!inlineText && (tag === 'content' || tag === 'text' || tag === 'p')) {
-      inlineText = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+    if (tag === 'continuation') {
+      const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+      if (text) {
+        if (sawNestedChild) {
+          children.push({ type: 'text', text });
+        } else {
+          inlineParts.push(text);
+        }
+      }
+      continue;
+    }
+
+    if (tag === 'content' || tag === 'text' || tag === 'p') {
+      const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+      if (text) {
+        inlineParts.push(text);
+      }
     }
   }
 
@@ -485,7 +512,7 @@ function parseLabeledNodeOrdered(
     type,
     label: readOrderedCanonicalNumEntry(orderedFindFirst(nodeChildren, 'num')),
     heading: readOrderedOptionalText(parseErrors, orderedChildArrayFromChildren(nodeChildren, 'heading'), xmlPath, `${type} heading`, sectionHint),
-    text: inlineText,
+    text: inlineParts.length > 0 ? inlineParts.join(' ') : undefined,
     children: children.filter((child) => !(child.type === 'text' && !child.text)),
   };
 }

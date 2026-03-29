@@ -24,8 +24,13 @@ export function renderSectionMarkdown(section: SectionIR): string {
 
   const lines = [`# § ${section.sectionNumber}. ${section.heading}`.trim()];
 
+  const duplicateTextTracker = buildDuplicateTextTracker(section.content);
+
   for (const node of section.content) {
-    lines.push(renderContentNode(node));
+    const rendered = renderContentNode(node, 0, duplicateTextTracker);
+    if (rendered) {
+      lines.push(rendered);
+    }
   }
 
   if (section.statutoryNotes && section.statutoryNotes.length > 0) {
@@ -74,36 +79,94 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-function renderContentNode(node: ContentNode, depth = 0): string {
+function renderContentNode(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string {
   if (node.type === 'text') {
-    return `${' '.repeat(depth)}${node.text}`.trimEnd();
+    const key = node.text.trim();
+    const remaining = duplicateTextTracker.get(key) ?? 0;
+    if (remaining > 1) {
+      duplicateTextTracker.set(key, remaining - 1);
+      return '';
+    }
+
+    if (remaining === 1) {
+      duplicateTextTracker.delete(key);
+    }
+
+    return `${' '.repeat(indent)}${node.text.trimEnd()}`.trimEnd();
   }
 
   if (node.type === 'subsection') {
-    const heading = [node.label, node.heading].filter(Boolean).join(' ');
-    const parts = [`## ${heading}`.trim()];
-    if (node.text) parts.push(node.text);
-    for (const child of node.children) parts.push(renderContentNode(child, 0));
-    return parts.join('\n');
+    const headingLine = ['##', formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
+    const lines = [headingLine.trimEnd()];
+    for (const child of node.children) {
+      const rendered = renderContentNode(child, 0, duplicateTextTracker);
+      if (rendered) {
+        lines.push(rendered);
+      }
+    }
+    return lines.join('\n');
   }
 
-  const indent = indentationForNode(node.type);
-  const labelLine = [`${node.label}`, node.heading, node.text].filter(Boolean).join(' ');
+  const labelLine = [formatLabel(node.label), node.heading, node.text].filter(Boolean).join(' ');
   const lines = [`${' '.repeat(indent)}${labelLine}`.trimEnd()];
-  for (const child of node.children) lines.push(renderContentNode(child, depth + 2));
+  for (const child of node.children) {
+    const rendered = renderContentNode(child, indent + 2, duplicateTextTracker);
+    if (rendered) {
+      lines.push(rendered);
+    }
+  }
   return lines.join('\n');
 }
 
-function indentationForNode(type: Exclude<ContentNode['type'], 'text' | 'subsection'>): number {
+function buildDuplicateTextTracker(nodes: ContentNode[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  collectTextNodeCounts(nodes, counts);
+  for (const [key, value] of counts.entries()) {
+    if (value < 2) {
+      counts.delete(key);
+    }
+  }
+  return counts;
+}
+
+function collectTextNodeCounts(nodes: ContentNode[], counts: Map<string, number>): void {
+  for (const node of nodes) {
+    if (node.type === 'text') {
+      const key = node.text.trim();
+      if (key) {
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      continue;
+    }
+
+    collectTextNodeCounts(node.children, counts);
+  }
+}
+
+function formatLabel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed.startsWith('(') ? trimmed : `(${trimmed})`;
+}
+
+function indentationForNode(type: Exclude<ContentNode['type'], 'text'>): number {
   switch (type) {
+    case 'subsection':
     case 'paragraph':
       return 0;
     case 'subparagraph':
       return 2;
     case 'clause':
       return 4;
-    case 'item':
+    case 'subclause':
       return 6;
+    case 'item':
+      return 8;
+    case 'subitem':
+      return 10;
   }
 }
 

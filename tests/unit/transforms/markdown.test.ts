@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { pickCallable, safeImport, ensureModuleLoaded } from '../../utils/module-helpers';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import matter from 'gray-matter';
 
 function pickSectionRenderer(moduleExports: Record<string, unknown>): (section: any) => string {
@@ -308,8 +309,120 @@ describe('markdown renderer', () => {
 
     expect(markdown).toMatchSnapshot();
   });
+
+  it('renders title 42 section 10307 with chapeau text and all ten paragraph bodies', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-42',
+      relativePath: '42-section-10307.xml',
+      sectionNumber: '10307',
+    });
+
+    expect(markdown).toContain('# § 10307. Types of research and development');
+    expect(markdown).toContain('The type of research and development to be undertaken under section 10304 of this title shall include the following:');
+
+    const expectedParagraphs = [
+      '(1) Aspects of the hydrologic cycle;',
+      '(2) Supply and demand for water;',
+      '(3) Conservation and best use of available supplies of water;',
+      '(4) Methods of increasing the effective use of water;',
+      '(5) Methods of increasing the effective use of precipitation;',
+      '(6) More efficient use of water in agriculture;',
+      '(7) Methods of reclaiming water and wastewater;',
+      '(8) Methods of reducing water pollution;',
+      '(9) Effects of water pollution on water supplies and on the environment; and',
+      '(10) Improved forecasting of water demand and availability.',
+    ];
+
+    for (const paragraph of expectedParagraphs) {
+      expect(markdown).toContain(paragraph);
+    }
+
+    const renderedTwice = await renderFixtureSection({
+      titleDir: 'title-42',
+      relativePath: '42-section-10307.xml',
+      sectionNumber: '10307',
+    });
+    expect(renderedTwice).toBe(markdown);
+  });
+
+  it('renders deep hierarchy content in source order, including continuation text after nested children', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-26',
+      relativePath: '26-deep-hierarchy-sections.xml',
+      sectionNumber: '2',
+    });
+
+    expect(markdown).toContain('# § 2. Definitions and special rules');
+    expect(markdown).toContain('(b) Definition of head of household');
+    expect(markdown).toContain('(1) In general For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
+    expect(markdown).toContain('  (A) maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
+    expect(markdown).toContain('    (i) a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
+    expect(markdown).toContain('      (I) is married at the close of the taxpayer’s taxable year, and');
+    expect(markdown).toContain('      (II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
+    expect(markdown).toContain('For purposes of this paragraph, an individual shall be considered as maintaining a household only if over half of the cost of maintaining the household during the taxable year is furnished by such individual.');
+
+    const orderChecks = [
+      '(A) maintains as his home a household',
+      '(i) a qualifying child of the individual',
+      '(I) is married at the close of the taxpayer’s taxable year, and',
+      '(II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or',
+      'For purposes of this paragraph, an individual shall be considered as maintaining a household only if over half of the cost of maintaining the household during the taxable year is furnished by such individual.',
+    ];
+
+    const indexes = orderChecks.map((snippet) => markdown.indexOf(snippet));
+    expect(indexes.every((index) => index >= 0)).toBe(true);
+    expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
+  });
+
+  it('renders subsection lines as heading blocks and keeps deep nested indentation stable', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-26',
+      relativePath: '26-deep-hierarchy-sections.xml',
+      sectionNumber: '2',
+    });
+
+    const lines = markdown.split('\n');
+    expect(lines).toContain('## (b) Definition of head of household');
+    expect(lines).toContain('(1) In general For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
+    expect(lines).toContain('  (A) maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
+    expect(lines).toContain('    (i) a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
+    expect(lines).toContain('      (I) is married at the close of the taxpayer’s taxable year, and');
+    expect(lines).toContain('      (II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
+  });
 });
 
 function parseFrontmatter(markdown: string) {
   return matter(markdown);
+}
+
+function readFixtureFrom(titleDir: string, relativePath: string): string {
+  return readFileSync(resolve(process.cwd(), 'tests', 'fixtures', 'xml', titleDir, relativePath), 'utf8');
+}
+
+async function renderFixtureSection(xmlFixture: { titleDir: string; relativePath: string; sectionNumber: string }) {
+  const parseModulePath = resolve(process.cwd(), 'src', 'transforms', 'uslm-to-ir.ts');
+  const parseModule = await safeImport(parseModulePath);
+  ensureModuleLoaded(parseModulePath, parseModule);
+  const parseUslmToIr = pickCallable(parseModule, [
+    'parseUslmToIr',
+    'parseUslmToIR',
+    'parseUslmXml',
+    'parseUslmXmlToIr',
+    'parseXmlToIr',
+    'parseTitleXml',
+    'parseTitleXmlToIr',
+    'transformUslmXml',
+  ]) as (xml: string) => Promise<any>;
+
+  const renderModulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
+  const renderModule = await safeImport(renderModulePath);
+  ensureModuleLoaded(renderModulePath, renderModule);
+  const renderSectionMarkdown = pickSectionRenderer(renderModule);
+
+  const parsed = await parseUslmToIr(readFixtureFrom(xmlFixture.titleDir, xmlFixture.relativePath));
+  const titleIr = parsed.titleIr ?? parsed.ir ?? parsed.title ?? parsed.result;
+  const section = titleIr.sections.find((entry: any) => entry.sectionNumber === xmlFixture.sectionNumber);
+
+  expect(section).toBeTruthy();
+  return renderSectionMarkdown(section);
 }
