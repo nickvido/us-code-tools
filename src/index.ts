@@ -196,8 +196,12 @@ async function runTransformCommand(args: string[]): Promise<number> {
     }
 
     const hasOutputWriteFailure = writeResult.parseErrors.some((parseError) => parseError.code === 'OUTPUT_WRITE_FAILED');
-    if (hasOutputWriteFailure) {
+    if (hasOutputWriteFailure && groupBy === 'chapter') {
       return 1;
+    }
+
+    if (groupBy === 'section') {
+      return writeResult.filesWritten > 0 ? 0 : 1;
     }
 
     return writeResult.filesWritten > 1 ? 0 : 1;
