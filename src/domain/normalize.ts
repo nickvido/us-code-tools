@@ -40,7 +40,7 @@ export function compareSectionNumbers(left: string, right: string): number {
     return leftParts.numeric - rightParts.numeric;
   }
 
-  return leftParts.suffix.localeCompare(rightParts.suffix, 'en', { sensitivity: 'base', numeric: true });
+  return leftParts.suffix.localeCompare(rightParts.suffix, 'en', { sensitivity: 'variant', numeric: true });
 }
 
 export function sectionFileSafeId(sectionNumber: string): string {
