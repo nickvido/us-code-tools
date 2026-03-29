@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { ContentNode, HierarchyIR, NoteIR, ParseError, ParsedTitleResult, SectionIR, StatutoryNoteIR, TitleIR } from '../domain/model.js';
-import { asArray, normalizeWhitespace, sectionFileSafeId } from '../domain/normalize.js';
+import { asArray, normalizeWhitespace, resolveKnownTitleHeading, sectionFileSafeId, titleDirectoryName } from '../domain/normalize.js';
 
 const MAX_NORMALIZED_FIELD_LENGTH = 1_048_576;
 const HIERARCHY_TAGS = ['subtitle', 'part', 'subpart', 'chapter', 'subchapter'] as const;
@@ -837,8 +837,11 @@ function hrefToMarkdownLink(href: string): string | null {
   // Collapse slash-separated subsection identifiers (e.g., "125/d" → "125d")
   // so that ref links match the canonical filenames generated from @value attributes
   const collapsedSection = sectionTail.replaceAll('/', '');
-  const title = String(titleNumber).padStart(2, '0');
-  return `../title-${title}/section-${sectionFileSafeId(collapsedSection)}.md`;
+  const titleDirectory = titleDirectoryName({
+    titleNumber,
+    heading: resolveKnownTitleHeading(titleNumber),
+  });
+  return `../${titleDirectory}/section-${sectionFileSafeId(collapsedSection)}.md`;
 }
 
 function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {

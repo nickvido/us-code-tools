@@ -151,7 +151,7 @@ describe('issue #12 CLI transform QA', () => {
         source_credit: expect.any(String),
       });
       expect(parsedSection.content).toContain('## Statutory Notes');
-      expect(parsedSection.content).toContain('[section 125(d) of this title](../title-10/section-00125d.md)');
+      expect(parsedSection.content).toContain('[section 125(d) of this title](../title-10-armed-forces/section-00125d.md)');
       expect(parsedSection.content).not.toContain('section 125(d) of this title](/us/usc/t10/s125/d)');
       expect(parsedSection.content).not.toContain('[section 125(d) of this title]()');
     } finally {
