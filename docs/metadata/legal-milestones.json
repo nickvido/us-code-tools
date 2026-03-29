@@ -1,0 +1,67 @@
+{
+  "annual_snapshots": [
+    {
+      "annual_tag": "annual/2013",
+      "snapshot_date": "2013-01-21",
+      "release_point": "PL 113-1",
+      "commit_selector": "annual/2013-placeholder",
+      "congress": 113,
+      "president_term": "obama-2",
+      "is_congress_boundary": false,
+      "release_notes": {
+        "scope": "annual",
+        "notable_laws": [
+          "American Taxpayer Relief Act of 2012"
+        ],
+        "summary_counts": {
+          "titles_changed": 1,
+          "chapters_changed": 1,
+          "sections_added": 1,
+          "sections_amended": 0,
+          "sections_repealed": 0
+        },
+        "narrative": "Initial annual baseline snapshot for the in-scope OLRC timeline."
+      }
+    },
+    {
+      "annual_tag": "annual/2015",
+      "snapshot_date": "2015-01-20",
+      "release_point": "PL 113-295",
+      "commit_selector": "annual/2015-placeholder",
+      "congress": 113,
+      "president_term": "obama-2",
+      "is_congress_boundary": true,
+      "release_notes": {
+        "scope": "congress",
+        "notable_laws": [
+          "Carl Levin and Howard P. \"Buck\" McKeon National Defense Authorization Act for Fiscal Year 2015"
+        ],
+        "summary_counts": {
+          "titles_changed": 5,
+          "chapters_changed": 6,
+          "sections_added": 7,
+          "sections_amended": 8,
+          "sections_repealed": 1
+        },
+        "narrative": "Congress-wide release metadata for the 113th Congress baseline boundary."
+      }
+    }
+  ],
+  "president_terms": [
+    {
+      "slug": "obama-1",
+      "inauguration_date": "2009-01-20",
+      "president_name": "Barack Obama"
+    },
+    {
+      "slug": "obama-2",
+      "inauguration_date": "2013-01-20",
+      "president_name": "Barack Obama"
+    },
+    {
+      "slug": "trump-1",
+      "inauguration_date": "2017-01-20",
+      "president_name": "Donald Trump"
+    }
+  ]
+}

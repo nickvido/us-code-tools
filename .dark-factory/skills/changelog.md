@@ -294,3 +294,37 @@
   - `rtk err npm run build` ✅
   - `rtk err npx tsc --noEmit` ✅
   - `rtk test npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts` ✅
+
+## Feature #18 — Git tags and GitHub Releases for legal milestones
+- Added milestone CLI dispatch in `src/index.ts` and `src/commands/milestones.ts` for:
+  - `milestones plan --target <repo> --metadata <file>`
+  - `milestones apply --target <repo> --metadata <file>`
+  - `milestones release --target <repo> --metadata <file>`
+- Added committed seed metadata at `docs/metadata/legal-milestones.json` and in-code metadata validation/normalization in `src/milestones/metadata.ts`.
+- Added milestone planning/types in:
+  - `src/milestones/types.ts`
+  - `src/milestones/plan.ts`
+  - `src/milestones/president-tags.ts`
+  - `src/milestones/title-renderer.ts`
+- Added repo mutation/runtime safety layers in:
+  - `src/milestones/git.ts` — once-per-process absolute-path resolution for `git` / `gh`, repo cleanliness checks, commit-selector resolution, tag conflict detection
+  - `src/milestones/manifest.ts` — metadata digesting, atomic manifest writes, repo-local lock handling with surfaced stale-lock diagnostics
+  - `src/milestones/apply.ts` — deterministic annual/pl/congress/president tag application plus manifest persistence
+- Added GitHub Release publication flow in:
+  - `src/milestones/release-renderer.ts` — exact `## Diff Stat`, `## Summary`, `## Notable Laws`, `## Narrative` body format
+  - `src/milestones/releases.ts` — manifest freshness validation, diff-stat rendering, `gh release view/create/edit` upsert behavior
+- Added milestone regression coverage:
+  - `tests/cli/milestones.test.ts`
+  - `tests/integration/milestones-workflow.test.ts`
+- Review/fix history captured from this branch:
+  - `32d414b` — initial release publication implementation
+  - `811df23` — hardened binary resolution and lock diagnostics
+  - `d509644` — fixed detached-HEAD classification and ensured `git` resolves before `apply` plan-building
+  - `[adversary-review]` is APPROVED with no remaining findings
+  - active PR is `#19` on branch `df2/issue-18`
+- Verification captured from issue context / branch notes:
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `npx vitest run` ✅ (`160/160` passing at the dev handoff)
+- Knowledge-capture correction recorded here:
+  - current production code validates milestone metadata manually in `src/milestones/metadata.ts` and currently creates plain tags via `git tag <tag> <sha>` despite the helper name `createAnnotatedTag(...)`; future docs should describe branch reality, not only the architecture aspiration.

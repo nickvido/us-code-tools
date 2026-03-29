@@ -277,3 +277,31 @@
 - **Decision:** After emitting the JSON report, `src/index.ts` explicitly returns non-zero whenever `writeResult.parseErrors` contains any `OUTPUT_WRITE_FAILED`, not just duplicate-section collisions.
 - **Consequence:** Partial chapter writes are surfaced through the existing write-error path and cannot be mistaken for a successful transform.
 - **Feature:** #16 Transform: chapter-level output mode
+
+### ADR-039: Milestone metadata is validated in code and normalized before any tag/release work
+- **Status:** Active
+- **Context:** Issue #18 introduces a committed legal-milestones metadata file that drives git tags, repo-local manifest state, and GitHub Releases. Wrong or ambiguous rows would mutate history or publish incorrect releases.
+- **Decision:** `src/milestones/metadata.ts` performs manual schema + semantic validation in code, including duplicate annual tags, duplicate snapshot dates, duplicate normalized `pl/*` tags, release-point/congress consistency, president-term reference checks, scope parity, and monotonic congress ordering, then sorts rows deterministically before downstream planning.
+- **Consequence:** Future agents should extend the existing validation seam instead of scattering milestone invariants across CLI/apply/release code paths.
+- **Feature:** #18 Git tags and GitHub Releases for legal milestones
+
+### ADR-040: Trusted `git` and `gh` binaries are resolved once per process and reused by absolute path
+- **Status:** Active
+- **Context:** Milestone `apply` mutates git tags and `release` writes GitHub Releases. Repeated bare-name PATH lookups would make the subprocess boundary vulnerable to PATH spoofing or inconsistent host state during one command run.
+- **Decision:** `src/milestones/git.ts` resolves `git` / `gh` once into absolute executable paths, caches the resulting promise in `resolvedBinaryCache`, and routes all later subprocess execution through `execFile` with that resolved path.
+- **Consequence:** Failure to resolve now fails closed with `git_cli_unavailable` or `github_cli_unavailable`, and future agents should not add new milestone subprocess calls that bypass this adapter.
+- **Feature:** #18 Git tags and GitHub Releases for legal milestones
+
+### ADR-041: Milestone manifest freshness is proven against live repo tag SHAs before GitHub writes
+- **Status:** Active
+- **Context:** A repo-local `.us-code-tools/milestones.json` is convenient operational state, but it can go stale or be edited after `apply`. Publishing GitHub Releases from stale manifest data would break auditability.
+- **Decision:** `src/milestones/releases.ts` requires both metadata-digest equality and plan-shape equality against freshly resolved live repo tag SHAs (including paired `pl/*` tags) before calling `gh release create/edit`.
+- **Consequence:** Hand-edited manifests, metadata drift, or tag drift fail release publication before any GitHub write. Future agents must preserve both the digest check and the live-SHA normalization comparison.
+- **Feature:** #18 Git tags and GitHub Releases for legal milestones
+
+### ADR-042: Repo-local milestone locking is fail-closed and manual-recovery only
+- **Status:** Active
+- **Context:** `milestones apply` writes target-repo tags plus `.us-code-tools/milestones.json`; concurrent runs could otherwise interleave tag checks and manifest writes.
+- **Decision:** `src/milestones/manifest.ts` acquires `.us-code-tools/milestones.lock` via exclusive create, persists exactly `pid`, `hostname`, `command`, and `timestamp`, and on conflict surfaces those same fields in `lock_conflict` output without overwriting or deleting the existing lock.
+- **Consequence:** Operators can inspect and manually clear stale locks, but the tool never auto-breaks them. Future agents should keep this contract deterministic and repo-local.
+- **Feature:** #18 Git tags and GitHub Releases for legal milestones
