@@ -84,13 +84,31 @@ async function writeChapterOutput(
   }
 
   const orderedChapters = [...chapterBuckets.keys()].sort(compareChapterIdentifiers);
+  const chapterFilenames = new Map<string, string>();
+
+  for (const chapter of orderedChapters) {
+    const outputFilename = chapterOutputFilename(chapter);
+    const existingChapter = chapterFilenames.get(outputFilename);
+    if (existingChapter !== undefined && existingChapter !== chapter) {
+      parseErrors.push({
+        code: 'OUTPUT_WRITE_FAILED',
+        message: `Distinct chapter buckets normalize to the same output filename: ${existingChapter} and ${chapter} -> ${outputFilename}`,
+        sectionHint: `chapter:${chapter}`,
+      });
+      return { filesWritten, parseErrors, warnings };
+    }
+
+    chapterFilenames.set(outputFilename, chapter);
+  }
+
   for (const chapter of orderedChapters) {
     const sections = chapterBuckets.get(chapter) ?? [];
+    const outputFilename = chapterOutputFilename(chapter);
     const absolutePath = resolve(
       outputRoot,
       'uscode',
       `title-${padTitleNumber(titleIr.titleNumber)}`,
-      chapterOutputFilename(chapter),
+      outputFilename,
     );
 
     try {
