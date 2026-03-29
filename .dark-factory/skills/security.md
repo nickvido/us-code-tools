@@ -95,7 +95,8 @@
   - issue #12 renders USC ref links only when identifiers match the narrow `/us/usc/t{title}/s{section}` pattern; unknown refs fall back to plain text instead of malformed links
 - `src/domain/normalize.ts`
   - is now the single sanitization boundary for section sort/file/link identifiers via `splitSectionNumber()`, `compareSectionNumbers()`, and `sectionFileSafeId()`
-  - pads only the leading numeric root to width 5 while preserving suffix case and replacing `/` with `-`
+  - pads only the leading numeric root to width 5 while preserving suffix case
+  - issue #12 USC ref rendering must canonicalize slash-separated section tails to the same section-id contract used for filenames before path generation (example: `/us/usc/t10/s125/d` must target `section-00125d.md`, not a raw slash-derived variant)
 - `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale

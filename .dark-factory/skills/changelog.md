@@ -214,5 +214,10 @@
   - `32cd467` / `a72c64c` — USC ref rendering and slash-separated ref fixes
   - `b9395bc` — case-sensitive suffix ordering fix
   - `6446f2f` — preserved statutory note wrapper metadata (`noteType`)
+  - `a2b57af` — first knowledge-capture pass for issue #12
+- Follow-up reviewer knowledge captured after adversary review:
+  - slash-separated USC refs are a distinct transform contract, not just a formatting quirk; `/us/usc/t10/s125/d` must resolve to `../title-10/section-00125d.md`
+  - mixed-case suffix ordering is part of the public ordering contract for `_title.md` and any shared section-sort helper: `106` < `106A` < `106a` < `106b`
+  - regression coverage for those two adversary findings lives in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
 - Verification observed during knowledge capture:
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ✅

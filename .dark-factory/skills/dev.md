@@ -195,7 +195,9 @@ src/index.ts (main)
 - Issue #12 transform conventions:
   - never hand-roll section ordering in renderers/tests; use `sortSections()` / `compareSectionNumbers()`
   - never hand-roll section filenames or ref targets; use `sectionFileSafeId()` so writes and links stay aligned
+  - canonicalize slash-separated USC ref tails like `/us/usc/t10/s125/d` to the same section identifier contract used by filenames (`125d` → `section-00125d.md`) before generating markdown links
   - preserve suffix case in ordering and filenames (`106A` != `106a`)
+  - mixed-case suffix ordering is part of the contract now: `106` < `106A` < `106a` < `106b`
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
 ## Practical Notes
