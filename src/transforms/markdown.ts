@@ -8,8 +8,8 @@ export function renderSectionMarkdown(section: SectionIR): string {
   if (section.titleNumber !== undefined) frontmatter.title = section.titleNumber;
   if (section.sectionNumber) frontmatter.section = section.sectionNumber;
   if (section.heading) frontmatter.heading = section.heading;
-  if (section.source) frontmatter.source = section.source;
   if (section.status) frontmatter.status = section.status;
+  if (section.source) frontmatter.source = section.source;
   if (section.hierarchy?.subtitle) frontmatter.subtitle = section.hierarchy.subtitle;
   if (section.hierarchy?.part) frontmatter.part = section.hierarchy.part;
   if (section.hierarchy?.subpart) frontmatter.subpart = section.hierarchy.subpart;
