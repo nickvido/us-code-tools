@@ -27,6 +27,17 @@ function pickTitleRenderer(moduleExports: Record<string, unknown>): (titleIr: an
   ]) as (titleIr: any) => string;
 }
 
+function pickSectionLinkRenderer(
+  moduleExports: Record<string, unknown>,
+): (from: { titleNumber: number; heading?: string | null }, to: { titleNumber: number; heading?: string | null; sectionNumber: string }) => string {
+  return pickCallable(moduleExports, [
+    'sectionRelativeMarkdownLink',
+    'renderSectionRelativeMarkdownLink',
+    'sectionLinkHref',
+    'renderSectionLinkHref',
+  ]) as (from: { titleNumber: number; heading?: string | null }, to: { titleNumber: number; heading?: string | null; sectionNumber: string }) => string;
+}
+
 describe('markdown renderer', () => {
   it('renders section frontmatter including required keys', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
@@ -155,6 +166,25 @@ describe('markdown renderer', () => {
       chapters: 2,
       sections: 2,
     });
+  });
+
+  it('derives cross-title section links through the shared slugged title directory helper with fallback support', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+    const renderSectionLink = pickSectionLinkRenderer(mod);
+
+    const sluggedLink = renderSectionLink(
+      { titleNumber: 1, heading: 'General Provisions' },
+      { titleNumber: 18, heading: 'Crimes and Criminal Procedure', sectionNumber: '1' },
+    );
+    expect(sluggedLink).toBe('../title-18-crimes-and-criminal-procedure/section-00001.md');
+
+    const fallbackLink = renderSectionLink(
+      { titleNumber: 1, heading: 'General Provisions' },
+      { titleNumber: 4, heading: ` ' `, sectionNumber: '1' },
+    );
+    expect(fallbackLink).toBe('../title-04/section-00001.md');
   });
 
   it('keeps editorial/cross-reference material in rendered section snapshot', async () => {

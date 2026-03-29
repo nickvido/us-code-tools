@@ -260,8 +260,8 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
       expect(defaultResult.status).toBe(0);
       expect(chapterResult.status).toBe(0);
 
-      const defaultTree = resolve(sandboxRoot, 'out-default', 'uscode', 'title-01');
-      const chapterTree = resolve(sandboxRoot, 'out-chapter', 'uscode', 'title-01');
+      const defaultTree = resolve(sandboxRoot, 'out-default', 'uscode', 'title-01-general-provisions');
+      const chapterTree = resolve(sandboxRoot, 'out-chapter', 'uscode', 'title-01-general-provisions');
       const defaultFiles = readdirSync(defaultTree).sort();
       const chapterFiles = readdirSync(chapterTree).sort();
       const report = parseReportFromStdout(chapterResult.stdout);
@@ -297,7 +297,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
 
     try {
       expect(result.status).toBe(0);
-      const chapterTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const chapterTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions');
       const chapterFiles = readdirSync(chapterTree).filter((name) => name.startsWith('chapter-')).sort();
       expect(chapterFiles.length).toBeGreaterThan(0);
 
@@ -332,7 +332,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
     );
 
     try {
-      const outputTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const outputTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions');
       const files = existsSync(outputTree) ? readdirSync(outputTree).sort() : [];
       const report = parseReportFromStdout(result.stdout);
 
@@ -350,7 +350,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
     const fixtureZip = buildPartialChapterWriteFailureFixtureZip(sandboxRoot, 1);
     seedSelectedVintageOlrcCache(sandboxRoot, fixtureZip, '119-73', 1);
     const distEntry = resolve(process.cwd(), 'dist', 'index.js');
-    const blockedChapterPath = resolve(sandboxRoot, 'out', 'uscode', 'title-01', 'chapter-002.md');
+    const blockedChapterPath = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions', 'chapter-002.md');
     mkdirSync(blockedChapterPath, { recursive: true });
 
     const result = spawnSync(
@@ -360,7 +360,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
     );
 
     try {
-      const outputTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const outputTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-general-provisions');
       const files = existsSync(outputTree) ? readdirSync(outputTree).sort() : [];
       const report = parseReportFromStdout(result.stdout);
 

@@ -110,7 +110,9 @@ describe('issue #12 CLI transform QA', () => {
         expect(report?.sections_found).toBe(testCase.expectedSections);
         expect(report?.files_written).toBe(testCase.expectedSections + 1);
 
-        const outTree = resolve(sandboxRoot, 'out', 'uscode', `title-${String(testCase.title).padStart(2, '0')}`);
+        const uscodeDir = resolve(sandboxRoot, 'out', 'uscode');
+        const [titleDir] = readdirSync(uscodeDir).filter((entry) => entry.startsWith(`title-${String(testCase.title).padStart(2, '0')}`));
+        const outTree = resolve(uscodeDir, titleDir);
         const sectionFiles = readdirSync(outTree).filter((entry) => entry.startsWith('section-')).sort();
         expect(sectionFiles).toHaveLength(testCase.expectedSections);
       } finally {
@@ -136,7 +138,7 @@ describe('issue #12 CLI transform QA', () => {
 
       expect(result.status).toBe(0);
 
-      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-10');
+      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-10-armed-forces');
       const sectionMarkdown = readFileSync(join(outTree, 'section-00101.md'), 'utf8');
       const parsedSection = matter(sectionMarkdown);
 
@@ -201,7 +203,7 @@ describe('issue #12 CLI transform QA', () => {
       });
 
       expect(result.status).toBe(0);
-      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01-ordering-fixture');
       const written = readdirSync(outTree).filter((entry) => entry.startsWith('section-')).sort();
       expect(written).toEqual([
         'section-00001.md',

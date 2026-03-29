@@ -7,11 +7,34 @@ export function asArray<T>(value: T | T[] | undefined): T[] {
 }
 
 export function normalizeWhitespace(value: string | undefined): string {
-  return (value ?? '').replace(/\s+/gu, ' ').trim();
+  return (value ?? '').replace(/\s+/gu, ' ').trim()
 }
 
 export function padTitleNumber(titleNumber: number): string {
   return String(titleNumber).padStart(2, '0');
+}
+
+export function slugifyTitleHeading(heading: string | undefined | null): string | null {
+  const normalized = normalizeWhitespace(heading ?? undefined);
+  if (!normalized) {
+    return null;
+  }
+
+  const slug = normalized
+    .toLowerCase()
+    .replace(/['"“”‘’]/gu, '')
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '');
+
+  return slug || null;
+}
+
+export function titleDirectoryName(input: { titleNumber: number; heading?: string | null }): string {
+  const baseName = `title-${padTitleNumber(input.titleNumber)}`;
+  const headingSlug = slugifyTitleHeading(input.heading);
+
+  return headingSlug ? `${baseName}-${headingSlug}` : baseName;
 }
 
 export interface SplitSectionNumber {
