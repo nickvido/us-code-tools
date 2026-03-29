@@ -2,7 +2,7 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { extractXmlEntriesFromZip, resolveCachedOlrcTitleZipPath, resolveTitleUrl } from './sources/olrc.js';
-import type { ParseError, TitleIR } from './domain/model.js';
+import type { ParseError, TitleIR, TransformGroupBy } from './domain/model.js';
 import { parseUslmToIr } from './transforms/uslm-to-ir.js';
 import { writeTitleOutput } from './transforms/write-output.js';
 import { runConstitutionBackfill } from './backfill/orchestrator.js';
@@ -116,7 +116,7 @@ async function runTransformCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  const { titleNumber, outputDir } = parsed.value;
+  const { titleNumber, outputDir, groupBy } = parsed.value;
 
   const outputValidationError = await validateOutputDirectory(outputDir);
   if (outputValidationError) {
@@ -179,13 +179,14 @@ async function runTransformCommand(args: string[]): Promise<number> {
     }
 
     await mkdir(outputDir, { recursive: true });
-    const writeResult = await writeTitleOutput(outputDir, mergedTitle);
+    const writeResult = await writeTitleOutput(outputDir, mergedTitle, { groupBy });
     const report = {
       title: titleNumber,
       source_url: resolveTitleUrl(titleNumber),
       sections_found: mergedTitle.sections.length,
       files_written: writeResult.filesWritten,
       parse_errors: [...parseErrors, ...writeResult.parseErrors],
+      warnings: writeResult.warnings,
     };
 
     process.stdout.write(`${JSON.stringify(report)}\n`);
@@ -194,31 +195,90 @@ async function runTransformCommand(args: string[]): Promise<number> {
       return 1;
     }
 
-    const titleMetadataWriteFailed = writeResult.parseErrors.some(
-      (parseError) => parseError.code === 'OUTPUT_WRITE_FAILED' && parseError.sectionHint === '_title.md',
-    );
-    const sectionFilesWritten = writeResult.filesWritten - (titleMetadataWriteFailed ? 0 : 1);
+    const hasOutputWriteFailure = writeResult.parseErrors.some((parseError) => parseError.code === 'OUTPUT_WRITE_FAILED');
+    if (hasOutputWriteFailure && groupBy === 'chapter') {
+      return 1;
+    }
 
-    return sectionFilesWritten > 0 ? 0 : 1;
+    if (groupBy === 'section') {
+      return writeResult.filesWritten > 0 ? 0 : 1;
+    }
+
+    return writeResult.filesWritten > 1 ? 0 : 1;
   } catch (error) {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
     return 1;
   }
 }
 
-function parseTransformArgs(args: string[]): { ok: true; value: { titleNumber: number; outputDir: string } } | { ok: false; error: string } {
-  const titleIndex = args.indexOf('--title');
-  const outputIndex = args.indexOf('--output');
+function parseTransformArgs(args: string[]): { ok: true; value: { titleNumber: number; outputDir: string; groupBy: TransformGroupBy } } | { ok: false; error: string } {
+  let title: string | null = null;
+  let output: string | null = null;
+  let groupBy: TransformGroupBy = 'section';
+  let sawGroupBy = false;
 
-  if (titleIndex === -1 || !args[titleIndex + 1]) {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === '--title') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --title flag' };
+      }
+      if (title !== null) {
+        return { ok: false, error: 'Duplicate --title flag' };
+      }
+      title = value;
+      index += 1;
+      continue;
+    }
+
+    if (token === '--output') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --output flag' };
+      }
+      if (output !== null) {
+        return { ok: false, error: 'Duplicate --output flag' };
+      }
+      output = value;
+      index += 1;
+      continue;
+    }
+
+    if (token === '--group-by') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('--')) {
+        return { ok: false, error: 'Missing required value for --group-by (expected: chapter)' };
+      }
+      if (sawGroupBy) {
+        return { ok: false, error: 'Duplicate --group-by flag' };
+      }
+      if (value !== 'chapter') {
+        return { ok: false, error: `Unsupported --group-by '${value}'; expected 'chapter'` };
+      }
+      groupBy = 'chapter';
+      sawGroupBy = true;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith('--')) {
+      return { ok: false, error: `Unknown flag '${token}'` };
+    }
+
+    return { ok: false, error: `Unknown argument '${token}'` };
+  }
+
+  if (title === null) {
     return { ok: false, error: 'Missing required --title flag' };
   }
 
-  if (outputIndex === -1 || !args[outputIndex + 1]) {
+  if (output === null) {
     return { ok: false, error: 'Missing required --output flag' };
   }
 
-  const titleNumber = Number(args[titleIndex + 1]);
+  const titleNumber = Number(title);
   if (!Number.isInteger(titleNumber) || titleNumber < 1 || titleNumber > 54) {
     return { ok: false, error: '--title must be an integer between 1 and 54 (1 through 54)' };
   }
@@ -227,7 +287,8 @@ function parseTransformArgs(args: string[]): { ok: true; value: { titleNumber: n
     ok: true,
     value: {
       titleNumber,
-      outputDir: resolve(args[outputIndex + 1]),
+      outputDir: resolve(output),
+      groupBy,
     },
   };
 }
@@ -251,11 +312,11 @@ async function validateOutputDirectory(outputDir: string): Promise<string | null
 }
 
 function usage(error: string): void {
-  process.stderr.write(`Usage: transform --title <number> --output <dir>\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nError: ${error}\n`);
+  process.stderr.write(`Usage: transform --title <number> --output <dir> [--group-by chapter]\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nError: ${error}\n`);
 }
 
 function transformUsage(error: string): void {
-  process.stderr.write(`Usage: transform --title <number> --output <dir>\nError: ${error}\n`);
+  process.stderr.write(`Usage: transform --title <number> --output <dir> [--group-by chapter]\nError: ${error}\n`);
 }
 
 function backfillUsage(error: string): void {

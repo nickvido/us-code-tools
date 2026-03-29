@@ -45,6 +45,12 @@
   - `src/transforms/uslm-to-ir.ts` recursively walks `subtitle`, `part`, `subpart`, `chapter`, and `subchapter` containers, preserving hierarchy context on every parsed section
   - `src/transforms/markdown.ts` now serializes hierarchy keys as top-level frontmatter, emits `source_credit`, renders `## Statutory Notes`, and uses relative links for transformable `/us/usc/t{title}/s{section}` refs
   - `src/transforms/write-output.ts` writes zero-padded section filenames like `section-00001.md`
+- issue #16 adds an additive transform output mode on top of that same parsed IR:
+  - `src/index.ts` parses `--group-by chapter`, threads `TransformGroupBy` into `writeTitleOutput(...)`, emits additive `warnings`, and returns non-zero on any `OUTPUT_WRITE_FAILED` chapter-mode partial write
+  - `src/domain/model.ts` now carries `TransformGroupBy = 'section' | 'chapter'` and `TransformWarning` with report-only `UNCATEGORIZED_SECTION` diagnostics
+  - `src/domain/normalize.ts` is now also the single boundary for chapter bucket naming/ordering via `chapterFileSafeId()`, `chapterOutputFilename()`, and `compareChapterIdentifiers()`
+  - `src/transforms/markdown.ts` adds `renderChapterMarkdown(...)` and `renderUncategorizedMarkdown(...)`, both built by embedding `renderSectionMarkdown(...)` output so chapter files reuse section rendering byte-for-byte after frontmatter stripping
+  - `src/transforms/write-output.ts` preserves default section writes, adds chapter bucketing by `section.hierarchy.chapter`, writes `_uncategorized.md` for missing chapter metadata, rejects normalized filename collisions before any chapter writes, and still always writes `_title.md`
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
 - `src/backfill/messages.ts` — exact Constitution/amendment commit-message formatting.
@@ -154,6 +160,8 @@
 - Current head `2fb5c52` completes the remaining mixed-content seam in `src/transforms/uslm-to-ir.ts`: the module now dual-parses XML with a preserve-order tree and routes section body parsing, `sourceCredit`, and statutory-note extraction through ordered-text helpers (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) so inline `<ref>` / `<date>` siblings keep source document order.
 - Current issue #14 branch head `fa568ae` carries the full structured-body repair: `parseOrderedContentChildren(...)` / `parseLabeledNodeOrdered(...)` preserve chapeau text, inline labeled-node body text, nested descendants through `subitem`, and continuation text after child lists, while `src/transforms/markdown.ts` renders those nodes with normalized parenthesized labels and stable depth-based indentation.
 - `src/transforms/uslm-to-ir.ts` still keeps the legacy object-tree helpers (`readRawText(...)`, `readNodeTextInDocumentOrder(...)`) for non-preserve-order call sites, but issue #12 correctness now depends on the ordered path found via `findOrderedTitleNode(...)` / `collectOrderedSectionNodes(...)` rather than the older bucketed reconstruction.
+- Issue #16 chapter mode composes on top of that existing parser/renderer stack rather than introducing a second parsing path: grouping uses only `section.hierarchy.chapter`, chapter frontmatter heading fallback is the exact literal `Chapter {chapter}`, and uncategorized sections are a report-only warning path, not `parseErrors`.
+- Chapter filename normalization is intentionally many-to-one (`A-B` and `A / B` both normalize to `chapter-a-b.md`), so `src/transforms/write-output.ts` must keep the explicit pre-write collision guard instead of silently overwriting a bucket.
 - Current issue #12 fixture coverage is centered on Titles 1, 5, 10, and 26 plus the deterministic numeric-title integration matrix and reserved-empty Title 53 negative path.
 - PR #13 is open and no longer draft; the latest issue comments show `[dev]` and `[adversary-review]` both approved with no remaining blocker on issue #12.
 - Under the current `fast-xml-parser` config (`ignoreAttributes: false`, `attributeNamePrefix: '@_'`, `removeNSPrefix: true`), canonical USLM `value` attributes are read as `node['@_value']` even on `uscDoc` inputs.
@@ -204,7 +212,12 @@
     - `<continuation>` text is preserved after nested descendants in the same parent node
     - `ContentNode` now models `subclause` and `subitem` as first-class renderable node types rather than collapsing them into shallower levels
     - Title 42 § 10307 is the spot-check fixture for chapeau + ten paragraphs; Title 26 § 2 is the deep-order fixture for subsection body + nested subclauses + continuation
-  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, #12, and #14
+  - issue #16 chapter-grouped transform layer:
+    - default output remains `_title.md` + `section-*.md`; chapter mode writes `_title.md` + `chapter-*.md` and optional `_uncategorized.md`
+    - numeric chapter ids zero-pad to width 3 (`1` -> `chapter-001.md`); non-numeric ids normalize through one shared helper (`IV` -> `chapter-iv.md`, `***` -> `chapter-unnamed.md`)
+    - chapter files embed existing rendered section bodies in canonical `sortSections()` order rather than re-rendering from raw content nodes
+    - partial chapter write failures and normalized chapter filename collisions are fatal reportable write errors
+  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, #12, #14, and #16
 - What's intentionally deferred:
   - non-Constitution backfill phases that consume fetched artifacts
   - rewriting/repairing non-prefix histories

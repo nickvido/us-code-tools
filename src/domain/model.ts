@@ -7,10 +7,20 @@ export interface ParseError {
   sectionHint?: string;
 }
 
+export type TransformGroupBy = 'section' | 'chapter';
+
+export interface TransformWarning {
+  code: 'UNCATEGORIZED_SECTION';
+  message: string;
+  sectionHint: string;
+  chapterHint?: string;
+}
+
 export interface ParseReport {
   sectionsFound: number;
   filesWritten: number;
   parseErrors: ParseError[];
+  warnings?: TransformWarning[];
 }
 
 export interface ChapterIR {

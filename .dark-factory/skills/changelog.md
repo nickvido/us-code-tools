@@ -260,3 +260,37 @@
   - `npx tsc --noEmit` ✅
   - `npm run build` ✅
   - `rtk test npx vitest run` ✅
+
+## Feature #16 — Transform chapter-level output mode
+- Updated `src/index.ts`:
+  - `parseTransformArgs()` now accepts `--group-by chapter`, rejects duplicate/unsupported values, and defaults to `groupBy: 'section'`
+  - `runTransformCommand()` passes the grouping mode into `writeTitleOutput(...)`, surfaces additive `warnings`, and returns non-zero whenever chapter-mode writes record `OUTPUT_WRITE_FAILED`
+- Updated `src/domain/model.ts`:
+  - added `TransformGroupBy = 'section' | 'chapter'`
+  - added `TransformWarning` for report-only `UNCATEGORIZED_SECTION` diagnostics
+  - extended transform report typing with optional `warnings`
+- Updated `src/domain/normalize.ts`:
+  - added `chapterFileSafeId()`, `chapterOutputFilename()`, and `compareChapterIdentifiers()` as the canonical chapter filename/order helpers
+  - normalization examples now match the approved spec (`IV` -> `chapter-iv.md`, `A-1 / Special` -> `chapter-a-1-special.md`, `***` -> `chapter-unnamed.md`)
+- Updated `src/transforms/markdown.ts`:
+  - added `renderChapterMarkdown(...)` with exact fallback `heading: Chapter {chapter}`
+  - added `renderUncategorizedMarkdown(...)` for `_uncategorized.md`
+  - chapter/uncategorized bodies are assembled from stripped `renderSectionMarkdown(...)` output so embedded section bodies stay aligned with section mode
+- Updated `src/transforms/write-output.ts`:
+  - preserved default section-level writes
+  - added chapter bucketing by `section.hierarchy.chapter`
+  - writes `_uncategorized.md` for chapter-less sections and emits one warning per such section
+  - rejects normalized filename collisions before any chapter write
+- Added/expanded regression coverage:
+  - `tests/unit/issue16-chapter-mode.test.ts`
+  - `tests/integration/issue16-transform-cli.test.ts`
+- Branch history / review context captured:
+  - `0c305a9` — main feature implementation
+  - `301e661` — adversary-driven fix for normalized chapter filename collisions
+  - `3c6f834` — adversary-driven fix for non-zero exit on partial chapter write failures
+  - `[adversary-review]` is APPROVED with no remaining findings
+  - PR #17 is OPEN for branch `df2/issue-16`
+- Verification observed during this knowledge-capture pass:
+  - `rtk err npm run build` ✅
+  - `rtk err npx tsc --noEmit` ✅
+  - `rtk test npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts` ✅
