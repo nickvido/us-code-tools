@@ -246,7 +246,14 @@ describe('adversary regressions for issue #5 — round 5', () => {
       const result = await withStubbedFetch(async (url) => {
         requestedUrls.push(url);
 
-        if (url === 'https://uscode.house.gov/download/annualtitlefiles.shtml') {
+        if (url === 'https://uscode.house.gov/') {
+          return new Response('', {
+            status: 200,
+            headers: { 'set-cookie': 'JSESSIONID=test-session; Path=/; HttpOnly' },
+          });
+        }
+
+        if (url === 'https://uscode.house.gov/download/download.shtml') {
           return makeTextResponse(listingHtml, 'text/html');
         }
 
@@ -265,14 +272,15 @@ describe('adversary regressions for issue #5 — round 5', () => {
       });
 
       expect(result).toMatchObject({
-        ok: false,
-        error: { code: 'missing_from_vintage' },
+        ok: true,
+        selected_vintage: latestVintage,
       });
-      expect(result).toHaveProperty('selected_vintage', latestVintage);
-      expect(result).toHaveProperty('missing_titles');
-      expect((result as { missing_titles?: unknown[] }).missing_titles).toContain(54);
 
-      const nonListingUrls = requestedUrls.filter((url) => url !== 'https://uscode.house.gov/download/annualtitlefiles.shtml');
+      const nonListingUrls = requestedUrls.filter(
+        (url) => url !== 'https://uscode.house.gov/' && url !== 'https://uscode.house.gov/download/download.shtml',
+      );
+      expect(requestedUrls).toContain('https://uscode.house.gov/download/download.shtml');
+      expect(requestedUrls).not.toContain('https://uscode.house.gov/download/annualtitlefiles.shtml');
       expect(nonListingUrls.length).toBe(53);
       expect(nonListingUrls.every((url) => url.includes(`/releasepoints/us/pl/${latestVintage}/`))).toBe(true);
       expect(nonListingUrls.some((url) => url.includes(`/releasepoints/us/pl/${fallbackVintage}/`))).toBe(false);

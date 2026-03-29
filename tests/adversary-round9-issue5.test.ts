@@ -116,6 +116,9 @@ describe('adversary regressions for issue #5 — round 9', () => {
   it('removes a previously written legislators crosswalk when a later run skips cross-reference because the latest Congress snapshot is stale', async () => {
     const root = process.cwd();
     const tempDataDir = mkdtempSync(join(tmpdir(), 'us-code-tools-legislators-stale-crosswalk-'));
+    const nowMs = Date.now();
+    const initialFreshSnapshotCompletedAt = new Date(nowMs - 60_000).toISOString();
+    const staleSnapshotCompletedAt = new Date(nowMs - 120_000).toISOString();
     process.env.US_CODE_TOOLS_DATA_DIR = tempDataDir;
 
     const freshSnapshotDir = resolve(tempDataDir, 'cache', 'congress', 'members', 'snapshots', 'snapshot-fresh');
@@ -135,13 +138,13 @@ describe('adversary regressions for issue #5 — round 9', () => {
       sources: {
         olrc: { selected_vintage: null, last_success_at: null, last_failure: null, titles: {} },
         congress: {
-          last_success_at: '2026-03-28T00:00:00.000Z',
+          last_success_at: initialFreshSnapshotCompletedAt,
           last_failure: null,
           bulk_scope: null,
           member_snapshot: {
             snapshot_id: 'snapshot-fresh',
             status: 'complete',
-            snapshot_completed_at: '2026-03-28T00:00:00.000Z',
+            snapshot_completed_at: initialFreshSnapshotCompletedAt,
             cache_ttl_ms: 86_400_000,
             member_page_count: 1,
             member_detail_count: 2,
@@ -203,13 +206,13 @@ describe('adversary regressions for issue #5 — round 9', () => {
         sources: {
           olrc: { selected_vintage: null, last_success_at: null, last_failure: null, titles: {} },
           congress: {
-            last_success_at: '2026-03-28T00:00:00.000Z',
+            last_success_at: staleSnapshotCompletedAt,
             last_failure: null,
             bulk_scope: null,
             member_snapshot: {
               snapshot_id: 'snapshot-fresh',
               status: 'complete',
-              snapshot_completed_at: '2026-03-25T00:00:00.000Z',
+              snapshot_completed_at: staleSnapshotCompletedAt,
               cache_ttl_ms: 60_000,
               member_page_count: 1,
               member_detail_count: 2,

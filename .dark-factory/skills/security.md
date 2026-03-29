@@ -83,7 +83,12 @@
   - rejects unsafe/non-regular entries
   - rejects duplicate normalized destinations
   - enforces extraction-size caps
+  - uses a bounded 128 MiB large-title per-entry ceiling plus total extracted XML cap for current OLRC compatibility
   - validates cached/downloaded ZIP openability with `yauzl`
+- `src/transforms/uslm-to-ir.ts`
+  - strips namespace prefixes in parser configuration (`removeNSPrefix: true`)
+  - accepts `uscDoc.main.title` first and falls back to legacy `uslm.title`
+  - keeps section identifiers as strings through the current-format parser path
 - `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale
@@ -95,6 +100,8 @@
 - **Manifest/cache as the only persistence layer for issue #5:** avoids hidden state and keeps partial-write safety testable.
 - **Redacted structured logging:** prevents `API_DATA_GOV_KEY` leakage in stderr logs while still preserving request observability.
 - **Skip-path crosswalk cleanup:** a skipped legislators cross-reference is not allowed to leave a stale success artifact behind; this is both correctness and data-integrity hardening.
+- **OLRC cookie jar stays in-memory only:** `src/sources/olrc.ts` may forward the session cookie for homepage/listing/ZIP requests during one fetch operation, but it must never persist into manifest JSON, cache metadata, logs, or markdown output.
+- **Reserved-empty downgrade is Title-53-only:** current unreadable/non-zip/empty payload handling is intentionally narrow so other title failures remain operator-visible instead of being silently reclassified.
 
 ## Things Future Agents Should Not Mislabel as Bugs
 - No database/auth/RLS: intentional; this repo is a local CLI, not a service.
@@ -104,6 +111,8 @@
 - `git fast-import` is intentional for historical author/date control; do not replace it casually with ordinary `git commit` without revalidating exact-history guarantees.
 - Congress and GovInfo no longer keep separate module-local limiter instances; both sources now import the shared singleton from `src/utils/rate-limit.ts`, so future agents should treat duplicate per-source limiter state as obsolete branch knowledge.
 - Congress and GovInfo parse upstream `Retry-After` and preserve the parsed numeric `nextRequestAt` until `normalizeError()` serializes the public `next_request_at` field; future changes should keep that boundary intact.
+- OLRC cookie bootstrap and `download.shtml` discovery are required production behavior, not temporary test scaffolding.
+- Title 53 `reserved_empty` manifest entries are expected machine-readable skip states, not generic fetch failures and not cache artifacts.
 - VoteView indexing is currently in-memory only; lack of on-disk index files is an implementation choice, not accidental data loss.
 - The fallback current-congress path is expected to mark runs degraded/operator-review-required; that warning path is part of the contract.
 
@@ -116,11 +125,13 @@
   - explicit-branch remote push behavior
   - legacy transform ZIP/output hardening remains in place
   - issue #5 cache/manifest atomicity, redacted network logging, member-snapshot freshness checks, and skip-path crosswalk cleanup
+  - issue #8 OLRC hardening: in-memory cookie bootstrap, Title-53-only reserved-empty downgrade, namespace-tolerant parser root discovery, and bounded larger-title XML extraction
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes
   - automatic recovery/repair for malformed target histories
   - runtime fetching/verification of Constitution text from remote sources
+  - appendix-title CLI support
   - stronger host-allowlist / disk-ceiling enforcement promised by architecture but not yet fully centralized in code
 - What's a test double vs production:
   - temp repos and bare remotes in tests are doubles for downstream targets

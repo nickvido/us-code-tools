@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<uscDoc xmlns="http://xml.house.gov/schemas/uslm/1.0" schemaLocation="http://xml.house.gov/schemas/uslm/1.0 USLM-1.0.15.xsd">
+  <meta>
+    <docNumber>1</docNumber>
+    <docTitle>General Provisions</docTitle>
+  </meta>
+  <main>
+    <title identifier="/us/usc/t1">
+      <num>Title 1</num>
+      <heading>General Provisions</heading>
+      <chapter identifier="/us/usc/t1/ch1">
+        <num>Chapter 1</num>
+        <heading>Rules of Construction</heading>
+        <section identifier="USC-prelim-title1-section1"><num>1</num><heading>Section 1 heading</heading><content><p>Section 1 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section2"><num>2</num><heading>Section 2 heading</heading><content><p>Section 2 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section3"><num>3</num><heading>Section 3 heading</heading><content><p>Section 3 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section4"><num>4</num><heading>Section 4 heading</heading><content><p>Section 4 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section5"><num>5</num><heading>Section 5 heading</heading><content><p>Section 5 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section6"><num>6</num><heading>Section 6 heading</heading><content><p>Section 6 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section7"><num>7</num><heading>Section 7 heading</heading><content><p>Section 7 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section8"><num>8</num><heading>Section 8 heading</heading><content><p>Section 8 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section9"><num>9</num><heading>Section 9 heading</heading><content><p>Section 9 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section10"><num>10</num><heading>Section 10 heading</heading><content><p>Section 10 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section11"><num>11</num><heading>Section 11 heading</heading><content><p>Section 11 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section12"><num>12</num><heading>Section 12 heading</heading><content><p>Section 12 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section13"><num>13</num><heading>Section 13 heading</heading><content><p>Section 13 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section14"><num>14</num><heading>Section 14 heading</heading><content><p>Section 14 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section15"><num>15</num><heading>Section 15 heading</heading><content><p>Section 15 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section16"><num>16</num><heading>Section 16 heading</heading><content><p>Section 16 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section17"><num>17</num><heading>Section 17 heading</heading><content><p>Section 17 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section18"><num>18</num><heading>Section 18 heading</heading><content><p>Section 18 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section19"><num>19</num><heading>Section 19 heading</heading><content><p>Section 19 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section20"><num>20</num><heading>Section 20 heading</heading><content><p>Section 20 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section21"><num>21</num><heading>Section 21 heading</heading><content><p>Section 21 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section22"><num>22</num><heading>Section 22 heading</heading><content><p>Section 22 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section23"><num>23</num><heading>Section 23 heading</heading><content><p>Section 23 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section24"><num>24</num><heading>Section 24 heading</heading><content><p>Section 24 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section25"><num>25</num><heading>Section 25 heading</heading><content><p>Section 25 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section26"><num>26</num><heading>Section 26 heading</heading><content><p>Section 26 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section27"><num>27</num><heading>Section 27 heading</heading><content><p>Section 27 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section28"><num>28</num><heading>Section 28 heading</heading><content><p>Section 28 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section29"><num>29</num><heading>Section 29 heading</heading><content><p>Section 29 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section30"><num>30</num><heading>Section 30 heading</heading><content><p>Section 30 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section31"><num>31</num><heading>Section 31 heading</heading><content><p>Section 31 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section32"><num>32</num><heading>Section 32 heading</heading><content><p>Section 32 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section33"><num>33</num><heading>Section 33 heading</heading><content><p>Section 33 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section34"><num>34</num><heading>Section 34 heading</heading><content><p>Section 34 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section35"><num>35</num><heading>Section 35 heading</heading><content><p>Section 35 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section36"><num>36</num><heading>Section 36 heading</heading><content><p>Section 36 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section37"><num>37</num><heading>Section 37 heading</heading><content><p>Section 37 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section38"><num>38</num><heading>Section 38 heading</heading><content><p>Section 38 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section39"><num>39</num><heading>Section 39 heading</heading><content><p>Section 39 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section40"><num>40</num><heading>Section 40 heading</heading><content><p>Section 40 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section41"><num>41</num><heading>Section 41 heading</heading><content><p>Section 41 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section42"><num>42</num><heading>Section 42 heading</heading><content><p>Section 42 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section43"><num>43</num><heading>Section 43 heading</heading><content><p>Section 43 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section44"><num>44</num><heading>Section 44 heading</heading><content><p>Section 44 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section45"><num>45</num><heading>Section 45 heading</heading><content><p>Section 45 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section46"><num>46</num><heading>Section 46 heading</heading><content><p>Section 46 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section47"><num>47</num><heading>Section 47 heading</heading><content><p>Section 47 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section48"><num>48</num><heading>Section 48 heading</heading><content><p>Section 48 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section49"><num>49</num><heading>Section 49 heading</heading><content><p>Section 49 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section50"><num>50</num><heading>Section 50 heading</heading><content><p>Section 50 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section51"><num>51</num><heading>Section 51 heading</heading><content><p>Section 51 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section52"><num>52</num><heading>Section 52 heading</heading><content><p>Section 52 text.</p></content></section>
+        <section identifier="USC-prelim-title1-section53"><num>53</num><heading>Section 53 heading</heading><content><p>Section 53 text.</p></content></section>
+      </chapter>
+    </title>
+  </main>
+</uscDoc>

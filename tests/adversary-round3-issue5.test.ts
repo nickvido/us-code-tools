@@ -237,6 +237,8 @@ describe('adversary regressions for issue #5 — round 3', () => {
   it('writes bioguide-crosswalk.json and exact match counts when legislators use an eligible complete Congress snapshot', async () => {
     const root = process.cwd();
     const tempDataDir = mkdtempSync(join(tmpdir(), 'us-code-tools-legislators-crosswalk-'));
+    const nowMs = Date.now();
+    const freshSnapshotCompletedAt = new Date(nowMs - 60_000).toISOString();
     process.env.US_CODE_TOOLS_DATA_DIR = tempDataDir;
 
     const congressCacheDir = resolve(tempDataDir, 'cache', 'congress', 'members', 'snapshots', 'snapshot-fresh');
@@ -257,13 +259,13 @@ describe('adversary regressions for issue #5 — round 3', () => {
       sources: {
         olrc: { selected_vintage: null, last_success_at: null, last_failure: null, titles: {} },
         congress: {
-          last_success_at: '2026-03-28T00:00:00.000Z',
+          last_success_at: freshSnapshotCompletedAt,
           last_failure: null,
           bulk_scope: null,
           member_snapshot: {
             snapshot_id: 'snapshot-fresh',
             status: 'complete',
-            snapshot_completed_at: '2026-03-28T00:00:00.000Z',
+            snapshot_completed_at: freshSnapshotCompletedAt,
             cache_ttl_ms: 86_400_000,
             member_page_count: 1,
             member_detail_count: 2,

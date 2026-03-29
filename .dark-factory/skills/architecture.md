@@ -10,12 +10,17 @@
   1. OLRC USLM XML → IR → markdown (`transform`)
   2. Static Constitution dataset → planned historical events → rendered files + backdated git history (`backfill`)
   3. Raw-source acquisition + manifest-backed caching for OLRC, Congress.gov, GovInfo, VoteView, and UnitedStates (`fetch`)
+- Issue #8 hardened the OLRC flow to the current releasepoint site:
+  - `src/sources/olrc.ts` bootstraps an in-memory OLRC session from `https://uscode.house.gov/`
+  - listing discovery now prefers `https://uscode.house.gov/download/download.shtml`
+  - per-title OLRC manifest state distinguishes `status: 'downloaded'` vs `status: 'reserved_empty'`
+  - `src/transforms/uslm-to-ir.ts` accepts both legacy `uslm.title` and current `uscDoc.main.title`
 
 ## Codebase Map
 - `src/index.ts` — top-level CLI dispatcher, arg parsing, usage/error text, process exit policy.
 - `src/commands/fetch.ts` — `fetch` CLI arg validation, `--status`, single-source dispatch, deterministic `--all` order.
 - `src/domain/` — transform-only IR and normalization helpers for USLM ingestion.
-- `src/sources/olrc.ts` — OLRC listing scrape, latest-vintage selection, ZIP download/extraction, transform ZIP helpers.
+- `src/sources/olrc.ts` — OLRC homepage bootstrap + in-memory cookie jar, `download.shtml` releasepoint scrape, latest-vintage selection, per-title ZIP download/extraction, reserved-empty Title 53 classification, transform ZIP helpers, and manifest-backed cache resolution for `transform`.
 - `src/sources/congress.ts` — Congress.gov bulk fetch orchestration, shared-rate-limit use, member snapshot reuse, congress checkpoint updates.
 - `src/sources/congress-member-snapshot.ts` — freshness evaluation for the reusable Congress global-member snapshot.
 - `src/sources/govinfo.ts` — GovInfo PLAW walk, checkpointed resume state, retained-package summary/granule finalization.
@@ -26,7 +31,7 @@
 - `src/utils/fetch-config.ts` — current Congress resolution (`override`/`live`/`fallback`) and fallback warning path.
 - `src/utils/logger.ts` — structured network logging with `api_key` redaction.
 - `src/utils/rate-limit.ts` — sliding-window limiter helpers plus the shared `getSharedApiDataGovLimiter()` singleton/reset hook used by both `src/sources/congress.ts` and `src/sources/govinfo.ts` for the single `API_DATA_GOV_KEY` in-process budget.
-- `src/transforms/` — USLM parsing, markdown rendering, and output writing for `transform`.
+- `src/transforms/` — namespace-tolerant USLM parsing (`uscDoc.main.title` + legacy `uslm.title`), markdown rendering, and output writing for `transform`.
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
 - `src/backfill/messages.ts` — exact Constitution/amendment commit-message formatting.
@@ -98,6 +103,7 @@
   - TTL-governed raw API responses: Congress + GovInfo via `src/utils/cache.ts`
 - Manifest state tracked in `src/utils/manifest.ts` includes:
   - per-source `last_success_at` / `last_failure`
+  - OLRC `selected_vintage` plus per-title `status: 'downloaded' | 'reserved_empty'`
   - Congress `bulk_scope`, `member_snapshot`, `congress_runs`, `bulk_history_checkpoint`
   - GovInfo `query_scopes` and `checkpoints`
   - legislators `cross_reference` state with explicit skip statuses
@@ -121,6 +127,9 @@
   - legislators skip states must not leave a stale `data/cache/legislators/bioguide-crosswalk.json` on disk
   - Congress and GovInfo now both consult the shared in-process limiter singleton from `src/utils/rate-limit.ts`, so one process no longer keeps separate per-source budgets for the same `API_DATA_GOV_KEY`
   - Congress/GovInfo `429` handling now keeps `nextRequestAt` numeric through the throw path and converts it to ISO only in `normalizeError()`, preserving the public `next_request_at` summary
+  - OLRC cookie state is memory-only inside `src/sources/olrc.ts`; it must never be persisted in manifest/cache metadata/output
+  - OLRC releasepoint discovery is `download.shtml`-first and only Title 53 may be downgraded to `reserved_empty`
+  - OLRC ZIP extraction now tolerates current large-title payloads via the 128 MiB large-entry ceiling while keeping bounded extraction caps
 
 ## Things Future Agents Should Notice
 - `docs/architecture/3-architecture.md` proposes an `authors.ts` split, but the current implementation keeps author identity inside `src/backfill/constitution/dataset.ts`; do not assume a separate author module exists.
@@ -143,7 +152,14 @@
     - VoteView CSV download + in-memory lookup indexes
     - UnitedStates YAML download + optional bioguide crosswalk
     - manifest-backed source status and raw-response caching
-  - unit, integration, snapshot, and adversary coverage for issues #3 and #5
+  - issue #8 OLRC compatibility layer:
+    - homepage bootstrap + in-memory cookie propagation for OLRC requests
+    - `download.shtml` listing scrape with releasepoint URL parsing
+    - per-title OLRC manifest states for `downloaded` vs `reserved_empty`
+    - `resolveCachedOlrcTitleZipPath()` so `transform` reads the selected-vintage cache layout
+    - `uscDoc.main.title` parsing with namespace tolerance and legacy `uslm.title` fallback
+    - larger bounded OLRC XML entry allowance for current Title 42
+  - unit, integration, snapshot, and adversary coverage for issues #3, #5, and #8
 - What's intentionally deferred:
   - non-Constitution backfill phases that consume fetched artifacts
   - rewriting/repairing non-prefix histories

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pickCallable, safeImport, ensureModuleLoaded } from '../../utils/module-helpers';
 
 function readFixture(relativePath: string): string {
-  return readFile(resolve(process.cwd(), 'tests', 'fixtures', 'xml', 'title-01', relativePath), 'utf8');
+  return readFileSync(resolve(process.cwd(), 'tests', 'fixtures', 'xml', 'title-01', relativePath), 'utf8');
 }
 
 function normalizeParseResult(result: unknown): {
@@ -120,6 +121,62 @@ describe('uslm-to-ir parser', () => {
     expect(titleIr.sections[0].sectionNumber).toBe('2/3');
     expect(Array.isArray(parseErrors)).toBe(true);
     expect(parseErrors.some((error: any) => String(error.code ?? '').includes('MISSING_SECTION_NUMBER'))).toBe(true);
+  });
+
+  it('parses current uscDoc fixtures with namespaces and returns all 53 sections', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'transforms', 'uslm-to-ir.ts');
+    const parseModule = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, parseModule);
+    const parseXml = pickCallable(parseModule, [
+      'parseUslmToIr',
+      'parseUslmToIR',
+      'parseUslmXml',
+      'parseUslmXmlToIr',
+      'parseXmlToIr',
+      'parseTitleXml',
+      'parseTitleXmlToIr',
+      'transformUslmXml',
+    ]);
+
+    const result = normalizeParseResult(await parseXml(readFixture('04-current-uscdoc.xml')));
+    const titleIr = result.titleIr;
+    const parseErrors = result.parseErrors;
+
+    expect(titleIr).toBeTypeOf('object');
+    expect(titleIr.titleNumber).toBe(1);
+    expect(titleIr.heading).toBe('General Provisions');
+    expect(Array.isArray(titleIr.sections)).toBe(true);
+    expect(titleIr.sections).toHaveLength(53);
+    expect(titleIr.sections[0].sectionNumber).toBe('1');
+    expect(titleIr.sections[52].sectionNumber).toBe('53');
+    expect(titleIr.sections.every((section: any) => typeof section.sectionNumber === 'string')).toBe(true);
+    expect(parseErrors.some((error: any) => String(error.code ?? '').includes('INVALID_XML'))).toBe(false);
+  });
+
+  it('tolerates raw namespaced uscDoc XML without caller-side preprocessing', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'transforms', 'uslm-to-ir.ts');
+    const parseModule = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, parseModule);
+    const parseXml = pickCallable(parseModule, [
+      'parseUslmToIr',
+      'parseUslmToIR',
+      'parseUslmXml',
+      'parseUslmXmlToIr',
+      'parseXmlToIr',
+      'parseTitleXml',
+      'parseTitleXmlToIr',
+      'transformUslmXml',
+    ]);
+
+    const xml = readFixture('04-current-uscdoc.xml').replace(/<uscDoc/g, '<ns:uscDoc').replace(/<\/uscDoc>/g, '</ns:uscDoc>').replace(/<main>/g, '<ns:main>').replace(/<\/main>/g, '</ns:main>').replace(/<title /g, '<ns:title ').replace(/<\/title>/g, '</ns:title>').replace(/<chapter /g, '<ns:chapter ').replace(/<\/chapter>/g, '</ns:chapter>').replace(/<section /g, '<ns:section ').replace(/<\/section>/g, '</ns:section>').replace(/<num>/g, '<ns:num>').replace(/<\/num>/g, '</ns:num>').replace(/<heading>/g, '<ns:heading>').replace(/<\/heading>/g, '</ns:heading>').replace(/<content>/g, '<ns:content>').replace(/<\/content>/g, '</ns:content>').replace(/<p>/g, '<ns:p>').replace(/<\/p>/g, '</ns:p>').replace('schemaLocation=', 'xmlns:ns="http://xml.house.gov/schemas/uslm/1.0" schemaLocation=');
+
+    const result = normalizeParseResult(await parseXml(xml));
+    const titleIr = result.titleIr;
+
+    expect(titleIr).toBeTypeOf('object');
+    expect(titleIr.titleNumber).toBe(1);
+    expect(titleIr.sections).toHaveLength(53);
+    expect(titleIr.sections[0].sectionNumber).toBe('1');
   });
 });
 
