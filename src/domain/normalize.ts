@@ -40,7 +40,11 @@ export function compareSectionNumbers(left: string, right: string): number {
     return leftParts.numeric - rightParts.numeric;
   }
 
-  return leftParts.suffix.localeCompare(rightParts.suffix, 'en', { sensitivity: 'variant', numeric: true });
+  // Use codepoint comparison for deterministic ordering:
+  // uppercase before lowercase (A < a), so 106A < 106a
+  if (leftParts.suffix < rightParts.suffix) return -1;
+  if (leftParts.suffix > rightParts.suffix) return 1;
+  return 0;
 }
 
 export function sectionFileSafeId(sectionNumber: string): string {

@@ -392,8 +392,11 @@ function hrefToMarkdownLink(href: string): string | null {
     return null;
   }
 
+  // Collapse slash-separated subsection identifiers (e.g., "125/d" → "125d")
+  // so that ref links match the canonical filenames generated from @value attributes
+  const collapsedSection = sectionTail.replaceAll('/', '');
   const title = String(titleNumber).padStart(2, '0');
-  return `../title-${title}/section-${sectionFileSafeId(sectionTail)}.md`;
+  return `../title-${title}/section-${sectionFileSafeId(collapsedSection)}.md`;
 }
 
 function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
