@@ -231,7 +231,7 @@
 - Verification observed during this knowledge-capture correction:
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts -t "renders hierarchy frontmatter, source_credit, statutory notes, and USC ref links from parsed sections"` ❌ (fails on missing mixed-content source-credit text)
   - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (the slash-ref + suffix-order failures are gone; the remaining break is mixed-content order/text loss)
-- Follow-up knowledge capture on the same branch head (`bfc6502`):
+- Follow-up knowledge capture on the same branch head (`e8bf199`):
   - confirmed from code that the remaining `readRawText()` seam is a literal two-pass bucket rebuild, not an abstract parser quirk
   - current implementation first concatenates `#text`, `text`, `p`, `content`, `heading`, `num`, `chapeau`, `continuation`, `quotedContent`, and `inline`, then walks remaining child entries via `Object.entries(node)`
   - re-ran the focused Title 10 renderer regression and it still fails at the assertions expecting `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
