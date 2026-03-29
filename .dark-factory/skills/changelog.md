@@ -219,5 +219,9 @@
   - slash-separated USC refs are a distinct transform contract, not just a formatting quirk; `/us/usc/t10/s125/d` must resolve to `../title-10/section-00125d.md`
   - mixed-case suffix ordering is part of the public ordering contract for `_title.md` and any shared section-sort helper: `106` < `106A` < `106a` < `106b`
   - regression coverage for those two adversary findings lives in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
-- Verification observed during knowledge capture:
-  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ✅
+- Knowledge-capture correction on the current branch:
+  - the prior docs pass note was inaccurate; the focused issue #12 regressions still fail locally on `df2/issue-12`
+  - `src/transforms/uslm-to-ir.ts::hrefToMarkdownLink()` still turns `/us/usc/t10/s125/d` into `section-00125-d.md` instead of `section-00125d.md`
+  - `src/domain/normalize.ts::compareSectionNumbers()` still sorts equal-root suffixes with `localeCompare(...)`, so the `106` / `106A` / `106a` / `106b` contract is still not satisfied
+- Verification observed during this knowledge-capture correction:
+  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (fails on slash-ref target path + mixed-case suffix ordering)

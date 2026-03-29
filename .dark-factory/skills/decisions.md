@@ -209,14 +209,14 @@
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
 
 ### ADR-029: Slash-separated USC refs must canonicalize to the same section identifier used for filenames
-- **Status:** Active
+- **Status:** Active (desired contract; current branch still violates it)
 - **Context:** OLRC `<ref href="/us/usc/t10/s125/d">` links use slash-separated section tails that describe the same generated section document as canonical section id `125d`.
 - **Decision:** Relative markdown link generation for transformable USC refs must normalize slash-separated tails into the canonical section identifier before calling the shared filename helper.
 - **Consequence:** Ref targets and generated section files stay aligned; future agents should not feed raw `/s...` tails directly into path generation.
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
 
 ### ADR-030: Mixed-case section suffix ordering is explicit and deterministic
-- **Status:** Active
+- **Status:** Active (desired contract; current branch still violates it)
 - **Context:** Locale-sensitive suffix comparison can drift across environments for identifiers like `106A` and `106a`, which breaks `_title.md` ordering and filename/link expectations.
 - **Decision:** The canonical section-order contract for equal numeric roots is explicit and regression-tested: `106` < `106A` < `106a` < `106b`.
 - **Consequence:** Future agents must preserve this exact ordering behavior when changing normalization helpers or renderer sorting.

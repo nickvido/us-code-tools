@@ -64,6 +64,9 @@
 - OLRC issue #8 changes: cover homepage cookie bootstrap, authenticated follow-on requests, `download.shtml` parsing, current `uscDoc` parsing, selected-vintage transform lookup, Title 42 large-entry acceptance, and Title 53 reserved-empty handling without live outbound access.
 - Issue #10 parser changes: assert `@value` beats display text for title/chapter/section nodes, whitespace-only attributes fall back cleanly, mixed trailing `.—` decoration is removed in fallback mode, Title 1 current-format fixture yields `titleIr.chapters.length === 1` + 53 canonical section numbers, and output paths never contain decorated `<num>` text.
 - Issue #12 transform changes: assert fixture `<section>` count equality for Titles 1/5/10/26, rendered hierarchy frontmatter for sampled deep-nesting sections, `source_credit` presence when `<sourceCredit>` exists, `## Statutory Notes` rendering when `<notes>` exists, preserved `noteType: 'uscNote'`, relative markdown links for transformable USC refs, canonical slash-ref mapping (`/us/usc/t10/s125/d` → `../title-10/section-00125d.md`), zero-padded filenames, and canonical mixed-width/mixed-case section ordering (`106`, `106A`, `106a`, `106b`).
+- Current branch warning: `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts` are still the authoritative regressions for the two open adversary findings, and they currently fail because:
+  - `hrefToMarkdownLink()` still passes raw slash tails through to `sectionFileSafeId()`
+  - `compareSectionNumbers()` still uses locale-sensitive equal-root suffix ordering
 
 ## Known Test Behaviors
 - `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.
