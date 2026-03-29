@@ -122,9 +122,17 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
   });
 
   it('extracts sourceCredit and statutory notes into dedicated section fields for real OLRC fixtures', async () => {
-    const title5 = (await parseXmlFixture(readFixture('title-05/05-part-chapter-sections.xml'))).titleIr;
-    const title10 = (await parseXmlFixture(readFixture('title-10/10-subtitle-part-chapter-sections.xml'))).titleIr;
-    const title26 = (await parseXmlFixture(readFixture('title-26/26-deep-hierarchy-sections.xml'))).titleIr;
+    const title5Xml = readFixture('title-05/05-part-chapter-sections.xml');
+    const title10Xml = readFixture('title-10/10-subtitle-part-chapter-sections.xml');
+    const title26Xml = readFixture('title-26/26-deep-hierarchy-sections.xml');
+
+    expect(title5Xml).toContain('<notes type="uscNote"');
+    expect(title10Xml).toContain('<notes type="uscNote"');
+    expect(title26Xml).toContain('<notes type="uscNote"');
+
+    const title5 = (await parseXmlFixture(title5Xml)).titleIr;
+    const title10 = (await parseXmlFixture(title10Xml)).titleIr;
+    const title26 = (await parseXmlFixture(title26Xml)).titleIr;
 
     for (const [titleIr, sectionNumber] of [
       [title5, '101'],
@@ -139,8 +147,11 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
       expect(section.statutoryNotes[0]).toEqual(
         expect.objectContaining({
           text: expect.any(String),
+          topic: expect.any(String),
+          noteType: 'uscNote',
         }),
       );
+      expect(section.statutoryNotes.every((note: any) => note.noteType === 'uscNote')).toBe(true);
     }
   });
 
