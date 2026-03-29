@@ -199,6 +199,7 @@ src/index.ts (main)
   - preserve suffix case in ordering and filenames (`106A` != `106a`)
   - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; branch commit `07b954e` replaced locale-sensitive suffix sorting with direct codepoint comparison to keep that order deterministic
   - the remaining open issue #12 parser seam is mixed-content inline ordering: `readRawText()` still buckets `#text`/`text`/`p` ahead of other children, so source-credit and statutory-note text around inline `<ref>` / `<date>` nodes can be reordered or dropped
+  - exact current seam at `bfc6502`: `readRawText()` concatenates `node['#text']`, `text`, `p`, `content`, `heading`, `num`, `chapeau`, `continuation`, `quotedContent`, and `inline` before a second `Object.entries(node)` walk for everything else; replace that two-pass rebuild with one document-order walker instead of patching individual child names
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
 ## Practical Notes
