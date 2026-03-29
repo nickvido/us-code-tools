@@ -20,9 +20,11 @@ Update the OLRC transform pipeline so current USLM/uscDoc titles with deep posit
 - [ ] `src/transforms/uslm-to-ir.ts` replaces the fixed `title → chapter → section` traversal with a recursive walk that discovers `<section>` nodes at any nesting depth beneath `<title>`, including at minimum `subtitle`, `part`, `subpart`, `chapter`, and `subchapter` containers.
   <!-- Touches: src/transforms/uslm-to-ir.ts, tests/unit/transforms/uslm-to-ir.test.ts -->
 - [ ] For every discovered section, the parser emits a stable hierarchy-path object on `SectionIR` containing each encountered structural level from the set `{ subtitle, part, subpart, chapter, subchapter }`; omitted levels remain absent rather than empty strings.
-  <!-- Touches: src/domain/model.ts, src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts, tests/unit/transforms/uslm-to-ir.test.ts, tests/unit/transforms/markdown.test.ts -->
-- [ ] Fixture-backed parser tests for Title 1, Title 5, Title 10, and Title 26 assert the parsed section count exactly equals the source XML `<section>` element count for each fixture and that no section is dropped solely because it is nested deeper than one chapter level.
-  <!-- Touches: tests/fixtures/xml/**, tests/unit/transforms/uslm-to-ir.test.ts -->
+  <!-- Touches: src/domain/model.ts, src/transforms/uslm-to-ir.ts, tests/unit/transforms/uslm-to-ir.test.ts -->
+- [ ] Section markdown frontmatter serializes every present hierarchy-path level as its own top-level key (`subtitle`, `part`, `subpart`, `chapter`, `subchapter`) using the parsed container number/text for that level, and omits keys for levels not present on that section.
+  <!-- Touches: src/domain/model.ts, src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
+- [ ] Fixture-backed parser and markdown tests for Title 1, Title 5, Title 10, and Title 26 assert the parsed section count exactly equals the source XML `<section>` element count for each fixture, no section is dropped solely because it is nested deeper than one chapter level, and sampled rendered sections include the expected hierarchy frontmatter keys for their source parent chain.
+  <!-- Touches: tests/fixtures/xml/**, tests/unit/transforms/uslm-to-ir.test.ts, tests/unit/transforms/markdown.test.ts -->
 - [ ] The selected-vintage integration matrix in `tests/integration/transform-cli.test.ts` (or a successor deterministic transform integration test) proves all numeric titles `1..52` and `54` exit `0`, while reserved-empty title `53` continues to return the existing non-success diagnostic path.
   <!-- Touches: tests/integration/transform-cli.test.ts -->
 
@@ -78,12 +80,13 @@ Update the OLRC transform pipeline so current USLM/uscDoc titles with deep posit
 2. Parse a Title 5 fixture whose sections are nested under `<part>` and verify the parser returns non-zero sections plus `part` metadata on each parsed section.
 3. Parse a Title 10 fixture whose sections are nested under `<subtitle>` and verify the parser returns non-zero sections plus `subtitle` metadata on each parsed section.
 4. Parse a Title 26 fixture with mixed `subtitle → part → chapter → section` nesting and verify section counts match source XML counts and path metadata includes every encountered hierarchy level.
-5. Render a section that contains `<sourceCredit>` and verify markdown frontmatter includes `source_credit:` with the normalized source text.
-6. Render a section that contains `<notes>` and verify markdown contains `## Statutory Notes` after the main content plus one rendered bullet/entry per parsed note in source order.
-7. Render a note/content block containing `<ref identifier="/us/usc/t2/s285b">` and verify the output contains a relative markdown link to the generated section file for Title 2 §285b.
-8. Derive filenames for `1`, `101`, `1234`, `106a`, `7702B`, and `2/3` and verify they equal `section-00001.md`, `section-00101.md`, `section-01234.md`, `section-00106a.md`, `section-07702B.md`, and `section-00002-3.md` respectively.
-9. Transform a mixed-width fixture title and verify sorted directory listing order matches canonical section order and `_title.md` lists sections in the same order.
-10. Run the selected-vintage transform matrix for numeric titles `1..54` and verify titles `1..52` and `54` succeed, title `53` retains its reserved-empty failure path, and non-reserved titles produce at least one section file.
+5. Render sampled sections from Title 5, Title 10, and Title 26 fixtures and verify markdown frontmatter includes the expected hierarchy keys (`part`, `subtitle`, `chapter`, etc.) for levels present in the XML parent chain while omitting absent levels.
+6. Render a section that contains `<sourceCredit>` and verify markdown frontmatter includes `source_credit:` with the normalized source text.
+7. Render a section that contains `<notes>` and verify markdown contains `## Statutory Notes` after the main content plus one rendered bullet/entry per parsed note in source order.
+8. Render a note/content block containing `<ref identifier="/us/usc/t2/s285b">` and verify the output contains a relative markdown link to the generated section file for Title 2 §285b.
+9. Derive filenames for `1`, `101`, `1234`, `106a`, `7702B`, and `2/3` and verify they equal `section-00001.md`, `section-00101.md`, `section-01234.md`, `section-00106a.md`, `section-07702B.md`, and `section-00002-3.md` respectively.
+10. Transform a mixed-width fixture title and verify sorted directory listing order matches canonical section order and `_title.md` lists sections in the same order.
+11. Run the selected-vintage transform matrix for numeric titles `1..54` and verify titles `1..52` and `54` succeed, title `53` retains its reserved-empty failure path, and non-reserved titles produce at least one section file.
 
 ## Edge Case Catalog
 - **Hierarchy depth:** sections directly under `<title>`, under `<chapter>`, under `<part>`, under `<subtitle>`, and under mixed chains such as `subtitle → part → subpart → chapter → subchapter → section`.
@@ -102,6 +105,7 @@ Update the OLRC transform pipeline so current USLM/uscDoc titles with deep posit
   - Every parsed section corresponds to exactly one source `<section>` node in the fixture under test.
   - All generated section filenames are path-safe and begin with `section-` followed by a 5-digit numeric root.
   - `_title.md` section order equals the canonical sort order derived from parsed section identifiers.
+  - Every rendered section emits top-level frontmatter keys for each hierarchy level present in its parsed parent chain and omits hierarchy keys for absent levels.
   - Sections with `<sourceCredit>` always emit `source_credit` frontmatter; sections without it never emit an empty key.
   - Relative markdown links are produced only for recognized USC section references; unrecognized refs never produce malformed `[]()` output.
 - **Purity boundary:** XML parsing, ZIP extraction, and filesystem writes remain the effectful shell; hierarchy discovery, metadata normalization, sort-key derivation, and markdown rendering decisions remain unit-testable logic.
