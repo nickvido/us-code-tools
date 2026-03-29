@@ -33,10 +33,10 @@ Add an optional chapter-grouped transform mode to the CLI so `us-code-tools tran
 - [ ] `_title.md` is still generated in chapter-grouped mode and continues to report title metadata plus the full section index. The chapter-grouped mode does not remove or rename `_title.md`. <!-- Touches: src/transforms/write-output.ts, src/transforms/markdown.ts, tests/integration/transform-cli.test.ts -->
 
 #### 4. Uncategorized-section behavior
-- [ ] If a codified section lacks `hierarchy.chapter`, chapter-grouped output does not drop it silently. The implementation must place such sections into a dedicated `_uncategorized.md` file with frontmatter keys `title`, `heading`, `section_count`, and `source`, where `heading` is the literal string `Uncategorized`, and it must append one parse/report diagnostic per uncategorized section using an existing error shape or a newly documented parse error code. <!-- Touches: src/transforms/write-output.ts, src/transforms/markdown.ts, src/domain/model.ts if needed, tests/unit/transforms/write-output.test.ts, tests/integration/transform-cli.test.ts -->
+- [ ] If a codified section lacks `hierarchy.chapter`, chapter-grouped output does not drop it silently. The implementation must place such sections into a dedicated `_uncategorized.md` file with frontmatter keys `title`, `heading`, `section_count`, and `source`, where `heading` is the literal string `Uncategorized`. It must also append one structured **warning** per uncategorized section to a dedicated `warnings` array in the JSON report; these warnings are report-only diagnostics and MUST NOT be added to `parse_errors`. <!-- Touches: src/transforms/write-output.ts, src/transforms/markdown.ts, src/domain/model.ts if needed, src/index.ts, tests/unit/transforms/write-output.test.ts, tests/integration/transform-cli.test.ts -->
 
 #### 5. End-to-end transform guarantees
-- [ ] A deterministic integration test seeded from local OLRC fixtures proves that `transform --group-by chapter` exits `0` for all non-reserved numeric titles `1..52` and `54`, preserves the existing reserved-empty failure path for title `53`, and reports zero parse errors for the successful titles when the same fixture set also succeeds in default section mode. <!-- Touches: tests/integration/transform-cli.test.ts -->
+- [ ] A deterministic integration test seeded from local OLRC fixtures proves that `transform --group-by chapter` exits `0` for all non-reserved numeric titles `1..52` and `54`, preserves the existing reserved-empty failure path for title `53`, and reports zero `parse_errors` for the successful titles when the same fixture set also succeeds in default section mode. Fixtures that contain uncategorized sections may emit `warnings`, but those warnings do not change the exit code when chapter files are still written successfully. <!-- Touches: tests/integration/transform-cli.test.ts -->
 - [ ] The same integration coverage proves that the total generated file count in chapter-grouped mode equals `1 + categorizedChapterFileCount + uncategorizedFileCount` for each transformed title and is strictly less than the default section-level file count for every title fixture containing at least two sections in the same chapter. <!-- Touches: tests/integration/transform-cli.test.ts -->
 
 ### Non-Functional
@@ -70,13 +70,13 @@ Add an optional chapter-grouped transform mode to the CLI so `us-code-tools tran
 5. Open `chapter-001.md` and verify frontmatter contains `title`, `chapter`, `heading`, `section_count`, and `source`.
 6. Verify the chapter file contains the expected section headings in canonical order: `# § ...` for each member section.
 7. For one sampled section, compare the standalone `renderSectionMarkdown(section)` output to the corresponding slice inside the chapter file and verify the section body text, notes, source credit, and links are identical.
-8. Transform a fixture with at least one section lacking `hierarchy.chapter` and verify `_uncategorized.md` is written, includes that section, and the JSON report includes a diagnostic for the uncategorized section.
-9. Run the full title matrix in chapter mode and verify titles `1..52` and `54` succeed, title `53` keeps its current reserved-empty failure path, and successful titles report zero parse errors.
+8. Transform a fixture with at least one section lacking `hierarchy.chapter` and verify `_uncategorized.md` is written, includes that section, and the JSON report includes one entry in `warnings` per uncategorized section while `parse_errors` remains unchanged.
+9. Run the full title matrix in chapter mode and verify titles `1..52` and `54` succeed, title `53` keeps its current reserved-empty failure path, and successful titles report zero `parse_errors` even when `warnings` are present.
 10. Compare file counts for the same title fixture in default mode vs chapter mode and verify chapter mode writes fewer files whenever multiple sections share a chapter.
 
 ## Edge Case Catalog
 - **Malformed input:** `--group-by` present with no value, duplicate `--group-by`, or unknown mode such as `--group-by foo` must fail with a usage error before any output files are written.
-- **Partial data:** a title contains both chapter-tagged and chapter-less sections; tagged sections go to their chapter files, untagged sections go to `_uncategorized.md`, and transform still succeeds with diagnostics.
+- **Partial data:** a title contains both chapter-tagged and chapter-less sections; tagged sections go to their chapter files, untagged sections go to `_uncategorized.md`, and transform still succeeds with one report-only `warnings[]` entry per uncategorized section and no added `parse_errors`.
 - **Delimiter edge cases:** chapter identifiers that include punctuation, spaces, roman numerals, or mixed case must map to deterministic file-safe stems through one shared helper; tests must define the exact mapping used by the implementation.
 - **Encoding issues:** chapter headings containing em dashes, quotes, non-breaking spaces, or non-ASCII characters render correctly in frontmatter/body and do not corrupt filenames.
 - **Ordering boundaries:** section ordering within a chapter must stay canonical for values such as `1`, `2`, `10`, `106a`, `106A`, and `106b`; chapter bucket ordering must stay deterministic for `1`, `2`, `10`, and non-numeric identifiers.
@@ -92,6 +92,7 @@ Add an optional chapter-grouped transform mode to the CLI so `us-code-tools tran
   - Every rendered codified section appears exactly once in chapter-grouped mode: either in one `chapter-*` file or in `_uncategorized.md`.
   - The sum of `section_count` across all chapter-grouped output files equals the number of written codified sections for that title.
   - For any section with `hierarchy.chapter = X`, the section appears only in bucket `X`.
+  - Each uncategorized section contributes exactly one `warnings[]` entry and zero additional `parse_errors` entries.
   - Extracted section bodies are byte-identical between standalone section rendering and embedded chapter rendering.
   - Output filenames and file ordering are deterministic for the same input fixture set.
 - **Purity boundary:** XML parsing, ZIP extraction, and filesystem writes remain in the effectful shell; grouping, sorting, filename derivation, chapter frontmatter assembly, and markdown concatenation remain unit-testable pure logic.
@@ -99,7 +100,7 @@ Add an optional chapter-grouped transform mode to the CLI so `us-code-tools tran
 ## Infrastructure Requirements
 - **Database:** None.
 - **API endpoints:** None.
-- **Infrastructure:** Existing local filesystem output tree and fixture-backed Vitest integration harness only.
+- **Infrastructure:** Existing local filesystem output tree and fixture-backed Vitest integration harness only; JSON stdout report schema may be extended with a report-only `warnings` array.
 - **Environment variables / secrets:** None.
 
 ## Complexity Estimate
