@@ -310,6 +310,41 @@ describe('markdown renderer', () => {
     expect(markdown).toMatchSnapshot();
   });
 
+  it('keeps default section frontmatter key order byte-stable for status before source', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+    const renderSectionMarkdown = pickSectionRenderer(mod);
+
+    const markdown = renderSectionMarkdown({
+      titleNumber: 1,
+      sectionNumber: '2',
+      heading: 'Section notes',
+      status: 'in-force',
+      source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section2',
+      content: [
+        {
+          type: 'paragraph',
+          label: '(1)',
+          text: 'See 10 U.S.C. § 101 for definition.',
+          children: [],
+        },
+      ],
+    });
+
+    const frontmatterLines = markdown.split('\n').slice(0, 7);
+    expect(frontmatterLines).toEqual([
+      '---',
+      'title: 1',
+      "section: '2'",
+      'heading: Section notes',
+      'status: in-force',
+      "source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section2'",
+      '---',
+    ]);
+    expect(markdown.indexOf('\nstatus: in-force\n')).toBeLessThan(markdown.indexOf('\nsource: \'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-section2\'\n'));
+  });
+
   it('renders title 42 section 10307 with chapeau text and all ten paragraph bodies', async () => {
     const markdown = await renderFixtureSection({
       titleDir: 'title-42',
