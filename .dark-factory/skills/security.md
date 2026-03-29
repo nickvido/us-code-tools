@@ -89,6 +89,8 @@
   - strips namespace prefixes in parser configuration (`removeNSPrefix: true`)
   - accepts `uscDoc.main.title` first and falls back to legacy `uslm.title`
   - keeps section identifiers as strings through the current-format parser path
+  - prefers non-empty `node['@_value']` for title/chapter/section `<num>` extraction and only falls back to cleaned display text when the attribute is absent/empty
+  - removes mixed trailing display decoration (`.` / `—`) in one pass so canonical numbers cannot retain path-unsafe punctuation
 - `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale
@@ -102,6 +104,8 @@
 - **Skip-path crosswalk cleanup:** a skipped legislators cross-reference is not allowed to leave a stale success artifact behind; this is both correctness and data-integrity hardening.
 - **OLRC cookie jar stays in-memory only:** `src/sources/olrc.ts` may forward the session cookie for homepage/listing/ZIP requests during one fetch operation, but it must never persist into manifest JSON, cache metadata, logs, or markdown output.
 - **Reserved-empty downgrade is Title-53-only:** current unreadable/non-zip/empty payload handling is intentionally narrow so other title failures remain operator-visible instead of being silently reclassified.
+- **Canonical `@value` wins over decorated display text:** when `<num value="7">§ 8.</num>` disagrees, the parser must emit `7` because the XSD defines `@value` as machine-readable canonical data; future agents should not add reconciliation or warning logic that rewrites canonical numbers from the display string.
+- **Fallback cleanup is path-safety hardening, not cosmetic formatting:** `cleanDecoratedNumText(...)` exists to keep `sectionFileSafeId()` inputs undecorated so filenames like `section-§-1..md` never appear.
 
 ## Things Future Agents Should Not Mislabel as Bugs
 - No database/auth/RLS: intentional; this repo is a local CLI, not a service.
@@ -126,6 +130,7 @@
   - legacy transform ZIP/output hardening remains in place
   - issue #5 cache/manifest atomicity, redacted network logging, member-snapshot freshness checks, and skip-path crosswalk cleanup
   - issue #8 OLRC hardening: in-memory cookie bootstrap, Title-53-only reserved-empty downgrade, namespace-tolerant parser root discovery, and bounded larger-title XML extraction
+  - issue #10 transform hardening: canonical `@_value` extraction for `<num>` nodes and mixed-decoration fallback cleanup so display punctuation does not leak into identifiers or paths
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes

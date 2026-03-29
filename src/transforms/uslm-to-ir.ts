@@ -41,14 +41,14 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     };
   }
 
-  const titleNumber = parseTitleNumber(readNormalizedText(parseErrors, titleNode.num, xmlPath, 'title number'));
+  const titleNumber = parseTitleNumber(readCanonicalNumText(parseErrors, titleNode.num, xmlPath, 'title number'));
   const heading = readNormalizedText(parseErrors, titleNode.heading, xmlPath, 'title heading');
   const titleIr: TitleIR = {
     titleNumber,
     heading,
     positiveLaw: null,
     chapters: asArray(titleNode.chapter).map((chapter) => ({
-      number: readNormalizedText(parseErrors, chapter.num, xmlPath, 'chapter number'),
+      number: readCanonicalNumText(parseErrors, chapter.num, xmlPath, 'chapter number'),
       heading: readNormalizedText(parseErrors, chapter.heading, xmlPath, 'chapter heading'),
     })),
     sections: [],
@@ -56,7 +56,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
   };
 
   for (const sectionNode of collectSectionNodes(titleNode)) {
-    const sectionNumber = readNormalizedText(parseErrors, sectionNode.num, xmlPath, 'section number');
+    const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number');
     const sectionHint = readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading');
 
     if (!sectionNumber) {
@@ -90,6 +90,8 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
 }
 
 interface XmlNode {
+  '@_value'?: string;
+  '#text'?: string;
   num?: XmlValue;
   heading?: XmlValue;
   status?: XmlValue;
@@ -129,7 +131,7 @@ function parseSection(
   parseErrors: ParseError[],
   xmlPath?: string,
 ): SectionIR {
-  const sectionNumber = readNormalizedText(parseErrors, sectionNode.num, xmlPath, 'section number');
+  const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number');
   const source = optionalText(parseErrors, sectionNode.source, xmlPath, 'section source')
     ?? defaultSectionSource(titleNumber, sectionNumber);
   const parsedNotes = parseNotes(sectionNode, parseErrors, xmlPath, sectionNumber);
@@ -258,9 +260,39 @@ function readRawText(value: XmlValue | undefined): string {
   }
 
   const node = value;
-  const pieces = [node.text, node.p, node.xref, node.heading, node.num, node.content].map((entry) => readRawText(entry)).filter(Boolean);
+  const pieces = [node['#text'], node.text, node.p, node.xref, node.heading, node.num, node.content]
+    .map((entry) => readRawText(entry))
+    .filter(Boolean);
 
   return pieces.join(' ');
+}
+
+function readCanonicalNumText(
+  parseErrors: ParseError[],
+  value: XmlValue | undefined,
+  xmlPath: string | undefined,
+  fieldName: string,
+  sectionHint?: string,
+): string {
+  if (!value || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || Array.isArray(value)) {
+    return cleanDecoratedNumText(readNormalizedText(parseErrors, value, xmlPath, fieldName, sectionHint));
+  }
+
+  const normalizedValue = normalizeWhitespace(value['@_value'] ?? '');
+  if (normalizedValue) {
+    return enforceNormalizedFieldLimit(parseErrors, normalizedValue, xmlPath, fieldName, sectionHint);
+  }
+
+  return cleanDecoratedNumText(readNormalizedText(parseErrors, value, xmlPath, fieldName, sectionHint));
+}
+
+function cleanDecoratedNumText(value: string): string {
+  return normalizeWhitespace(value)
+    .replace(/^§\s*/u, '')
+    .replace(/^Title\s+/iu, '')
+    .replace(/^Chapter\s+/iu, '')
+    .replace(/[.—]+$/u, '')
+    .trim();
 }
 
 function readNormalizedText(
@@ -270,7 +302,22 @@ function readNormalizedText(
   fieldName: string,
   sectionHint?: string,
 ): string {
-  const text = normalizeWhitespace(readRawText(value));
+  return enforceNormalizedFieldLimit(
+    parseErrors,
+    normalizeWhitespace(readRawText(value)),
+    xmlPath,
+    fieldName,
+    sectionHint,
+  );
+}
+
+function enforceNormalizedFieldLimit(
+  parseErrors: ParseError[],
+  text: string,
+  xmlPath: string | undefined,
+  fieldName: string,
+  sectionHint?: string,
+): string {
   if (text.length > MAX_NORMALIZED_FIELD_LENGTH) {
     parseErrors.push({
       code: 'UNSUPPORTED_STRUCTURE',
@@ -280,6 +327,7 @@ function readNormalizedText(
     });
     return '';
   }
+
   return text;
 }
 

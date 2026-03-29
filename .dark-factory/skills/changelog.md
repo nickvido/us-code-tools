@@ -148,3 +148,31 @@
 - What's a test double vs production:
   - transform fixtures and temp repos/remotes are intentional test doubles
   - committed Constitution dataset, fetch manifest/cache, and current source modules are production application code
+
+## Feature #10 — Parser: prefer `<num @value>` + XSD-driven contract coverage
+- Updated `src/transforms/uslm-to-ir.ts` so title/chapter/section number extraction now flows through `readCanonicalNumText(...)`:
+  - non-empty `@_value` is authoritative
+  - absent/empty `@_value` falls back to cleaned display text
+  - `cleanDecoratedNumText(...)` removes leading `§` / `Title ` / `Chapter ` and trailing mixed `.` / `—` decoration
+- Refreshed `tests/fixtures/xml/title-01/04-current-uscdoc.xml` to the current XSD-shaped `uscDoc` contract:
+  - `meta` + `main`
+  - title identifier `/us/usc/t1`
+  - one chapter identifier `/us/usc/t1/ch1`
+  - 53 section identifiers `/us/usc/t1/s...`
+  - decorated display `<num>` text with clean canonical `value` attributes
+- Expanded `tests/unit/transforms/uslm-to-ir.test.ts` coverage for:
+  - `@value` precedence across title/chapter/section nodes
+  - absent-attribute fallback cleanup
+  - empty/whitespace-attribute fallback cleanup
+  - disagreement cases where `@value` wins over cleaned display text
+  - structural fixture assertions proving the XSD-shaped `uscDoc` contract
+  - mixed punctuation fallback regression (`.—`) so canonical outputs stay undecorated
+- Expanded `tests/integration/transform-cli.test.ts` coverage for:
+  - selected-vintage current-format Title 1 transform success
+  - exactly 53 emitted section markdown files
+  - path-safe output names (`title-01`, `section-1.md`) with no decorated display text in filenames
+  - derived current-format title matrix for titles `1..52` and `54`, while Title `53` remains the reserved-empty diagnostic case
+- Reviewer/status context captured in this branch:
+  - spec + architecture explicitly require non-empty `@value` to win even on mismatch
+  - adversary-reviewed fallback cleanup bug for mixed trailing decoration was fixed by changing trailing cleanup to `/[.—]+$/u`
+  - latest branch verification in issue context reports `npm run build`, `npx tsc --noEmit`, and `npm test` passing for this change set

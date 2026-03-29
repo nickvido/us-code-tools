@@ -27,9 +27,9 @@ function buildCurrentFormatFixtureZip(outputDir: string, title: number): string 
   const xml = readFileSync(resolve(process.cwd(), 'tests/fixtures/xml/title-01/04-current-uscdoc.xml'), 'utf8')
     .replace(/<docNumber>1<\/docNumber>/g, `<docNumber>${title}</docNumber>`)
     .replace(/identifier="\/us\/usc\/t1"/g, `identifier="/us/usc/t${title}"`)
-    .replace(/<num>Title 1<\/num>/g, `<num>Title ${title}</num>`)
-    .replace(/USC-prelim-title1-section/g, `USC-prelim-title${title}-section`)
-    .replace(/\/us\/usc\/t1\//g, `/us/usc/t${title}/`);
+    .replace(/identifier="\/us\/usc\/t1\/ch1"/g, `identifier="/us/usc/t${title}/ch1"`)
+    .replace(/identifier="\/us\/usc\/t1\/s(\d+)"/g, `identifier="/us/usc/t${title}/s$1"`)
+    .replace(/<num value="1">Title 1—<\/num>/g, `<num value="${title}">Title ${title}—</num>`);
 
   writeFileSync(resolve(fixtureDir, `usc${String(title).padStart(2, '0')}.xml`), xml);
   const command = `cd ${JSON.stringify(fixtureDir)} && zip -qr ${JSON.stringify(zipPath)} .`;
@@ -127,6 +127,44 @@ describe('CLI integration — Title 1 fixture run', () => {
     rmSync(sandboxRoot, { recursive: true, force: true });
   });
 
+  it('transforms selected-vintage Title 1 current-format fixtures with 53 sections and path-safe output names', async () => {
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-it-selected-vintage-current-'));
+    const fixtureZip = buildCurrentFormatFixtureZip(sandboxRoot, 1);
+    seedSelectedVintageOlrcCache(sandboxRoot, fixtureZip, '119-73', 1);
+
+    const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+    const result = spawnSync(process.execPath, [distEntry, 'transform', '--title', '1', '--output', './out'], {
+      cwd: sandboxRoot,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: process.env,
+    });
+
+    try {
+      expect(result.status).toBe(0);
+
+      const report = parseReportFromStdout(result.stdout);
+      expect(report?.title).toBe(1);
+      expect(report?.sections_found).toBe(53);
+      expect(report?.files_written).toBe(54);
+
+      const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
+      const written = readdirSync(outTree).sort();
+      expect(written).toContain('_title.md');
+      expect(written.filter((name) => /^section-.*\.md$/u.test(name))).toHaveLength(53);
+      expect(written).toContain('section-1.md');
+      expect(written.some((name) => /§|Title-1|Chapter-1|—|\.\.md/u.test(name))).toBe(false);
+      expect(existsSync(join(outTree, 'section-§-1..md'))).toBe(false);
+
+      const titleMarkdown = readFileSync(join(outTree, '_title.md'), 'utf8');
+      const parsedTitle = parseFrontmatter(titleMarkdown);
+      expect(parsedTitle.data.title).toBe(1);
+      expect(parsedTitle.data.sections).toBe(53);
+    } finally {
+      rmSync(sandboxRoot, { recursive: true, force: true });
+    }
+  });
+
   it('transforms numeric titles 1..52 and 54 from selected-vintage cache fixtures while surfacing a reserved-empty diagnostic for title 53', async () => {
     const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-it-title-matrix-'));
     const vintage = '119-73';
@@ -163,13 +201,16 @@ describe('CLI integration — Title 1 fixture run', () => {
 
         expect(result.status).toBe(0);
         const report = parseReportFromStdout(result.stdout);
-        expect(report?.sections_found).toBeGreaterThan(0);
-        expect(report?.files_written).toBeGreaterThanOrEqual(2);
+        expect(report?.title).toBe(title);
+        expect(report?.sections_found).toBe(53);
+        expect(report?.files_written).toBe(54);
 
         const outTree = resolve(outputDir, 'uscode', `title-${String(title).padStart(2, '0')}`);
-        const written = readdirSync(outTree);
+        const written = readdirSync(outTree).sort();
         expect(written).toContain('_title.md');
-        expect(written.some((name) => name.startsWith('section-'))).toBe(true);
+        expect(written.filter((name) => /^section-.*\.md$/u.test(name))).toHaveLength(53);
+        expect(written).toContain('section-1.md');
+        expect(written.some((name) => /§|Title-|Chapter-|—|\.\.md/u.test(name))).toBe(false);
       }
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
@@ -189,7 +230,6 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('1 through 54');
 
-    const outTree = resolve(outputDir, 'uscode', 'title-99');
     expect(readdirSync(outputDir).length).toBe(0);
     rmSync(outputDir, { recursive: true, force: true });
   });

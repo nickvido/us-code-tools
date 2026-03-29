@@ -17,6 +17,9 @@
   - `npx vitest run tests/unit/sources/olrc.test.ts`
   - `npx vitest run tests/unit/transforms/uslm-to-ir.test.ts`
   - `npx vitest run tests/integration/transform-cli.test.ts`
+- Focused issue #10 tests:
+  - `npx vitest run tests/unit/transforms/uslm-to-ir.test.ts`
+  - `npx vitest run tests/integration/transform-cli.test.ts`
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
@@ -82,7 +85,7 @@
 - `src/backfill/planner.ts` → `src/backfill/constitution/dataset.ts`, `src/backfill/renderer.ts`, `src/backfill/messages.ts`
 - `src/backfill/renderer.ts` → `src/backfill/constitution/dataset.ts`, `gray-matter`
 - `src/backfill/messages.ts` → no downstream state; keep pure and template-exact
-- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8: parser config uses `removeNSPrefix: true` and root discovery falls back from `uscDoc.main.title` to `uslm.title`)
+- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, and canonical title/chapter/section numbers now flow through `readCanonicalNumText(...)`)
 - `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`
 
 ### Call Chain: Entry Point → Your Code
@@ -134,6 +137,8 @@ src/index.ts (main)
     → resolveCachedOlrcTitleZipPath()
     → extractXmlEntriesFromZip()
     → parseUslmToIr()
+      → readCanonicalNumText()
+        → normalizeWhitespace(value['@_value']) OR cleanDecoratedNumText(readNormalizedText(...))
     → writeTitleOutput()
 
 src/index.ts (main)
@@ -159,6 +164,7 @@ src/index.ts (main)
 - `PreparedTargetRepo` in `src/backfill/target-repo.ts` — repo bootstrap + resume state handoff
 - `BackfillSummary` in `src/backfill/orchestrator.ts` — CLI success payload
 - `TitleIR`, `SectionIR`, `ParseError`, `XmlEntry` in `src/domain/model.ts` — existing transform contracts
+- `readCanonicalNumText(...)` / `cleanDecoratedNumText(...)` in `src/transforms/uslm-to-ir.ts` — the canonical `<num>` extraction boundary for issue #10; future parser changes should extend this seam instead of adding ad hoc cleanup elsewhere
 
 ## Conventions / Patterns
 - Keep `planner.ts`, `renderer.ts`, and `messages.ts` pure.
@@ -204,6 +210,10 @@ src/index.ts (main)
     - manifest-backed selected-vintage transform lookup
     - current `uscDoc` parser compatibility with namespace stripping
     - reserved-empty Title 53 handling
+  - issue #10 parser correctness work:
+    - non-empty `@_value` wins for title/chapter/section numbers even when display text disagrees
+    - absent/empty `@_value` falls back to cleaned display `<num>` text
+    - path-safe filenames depend on undecorated canonical section numbers reaching `sectionFileSafeId()`
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories

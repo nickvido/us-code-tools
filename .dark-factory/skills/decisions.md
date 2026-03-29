@@ -172,3 +172,17 @@
   - history repair/rewrite semantics for non-prefix repos
 - What's a test double vs production:
   - temp repos and local bare remotes are test doubles; committed Constitution dataset, acquisition manifest/cache, and git orchestration are production design choices
+
+### ADR-024: Canonical USLM numbers come from `<num @value>` when present
+- **Status:** Active
+- **Context:** Current OLRC `uscDoc` XML wraps decorated display numbers like `§ 1.` and `Title 1—` inside `<num>`, while the USLM XSD defines `@value` as the normalized machine-readable form.
+- **Decision:** `src/transforms/uslm-to-ir.ts` routes title, chapter, and section number extraction through `readCanonicalNumText(...)`, which uses non-empty `node['@_value']` first and falls back to cleaned display text only when the attribute is absent or whitespace-only.
+- **Consequence:** Canonical numbers stay stable for IR fields, validation, and output paths even when display text includes decoration or disagrees with the attribute.
+- **Feature:** #10 Parser: read @value attribute from `<num>` elements + XSD-driven test validations
+
+### ADR-025: Current-format multi-title transform coverage is derived from one committed Title 1 fixture
+- **Status:** Active
+- **Context:** The approved spec requires coverage for titles `2..54` (excluding reserved-empty `53`) without introducing live OLRC downloads or a large committed fixture matrix.
+- **Decision:** `tests/integration/transform-cli.test.ts` keeps one committed current-format fixture at `tests/fixtures/xml/title-01/04-current-uscdoc.xml` and generates the other numeric titles via deterministic substitutions inside `buildCurrentFormatFixtureZip(...)`.
+- **Consequence:** Integration coverage remains offline, reproducible, and easy to update when the current-format contract changes.
+- **Feature:** #10 Parser: read @value attribute from `<num>` elements + XSD-driven test validations
