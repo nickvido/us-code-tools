@@ -195,9 +195,10 @@ src/index.ts (main)
 - Issue #12 transform conventions:
   - never hand-roll section ordering in renderers/tests; use `sortSections()` / `compareSectionNumbers()`
   - never hand-roll section filenames or ref targets; use `sectionFileSafeId()` so writes and links stay aligned
-  - slash-separated USC ref tails like `/us/usc/t10/s125/d` are a distinct canonicalization step before `sectionFileSafeId()`; on the current branch `hrefToMarkdownLink()` still forwards the raw tail and therefore produces the wrong target (`section-00125-d.md` instead of `section-00125d.md`)
+  - slash-separated USC ref tails like `/us/usc/t10/s125/d` must be canonicalized before path generation; branch commit `07b954e` now collapses the slash tail in `hrefToMarkdownLink()` so links resolve to `section-00125d.md`
   - preserve suffix case in ordering and filenames (`106A` != `106a`)
-  - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; on the current branch `compareSectionNumbers()` still delegates equal-root suffix ordering to `localeCompare(...)`, so the regression remains open
+  - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; branch commit `07b954e` replaced locale-sensitive suffix sorting with direct codepoint comparison to keep that order deterministic
+  - the remaining open issue #12 parser seam is mixed-content inline ordering: `readRawText()` still buckets `#text`/`text`/`p` ahead of other children, so source-credit and statutory-note text around inline `<ref>` / `<date>` nodes can be reordered or dropped
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
 ## Practical Notes

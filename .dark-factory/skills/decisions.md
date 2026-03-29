@@ -209,15 +209,22 @@
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
 
 ### ADR-029: Slash-separated USC refs must canonicalize to the same section identifier used for filenames
-- **Status:** Active (desired contract; current branch still violates it)
+- **Status:** Active
 - **Context:** OLRC `<ref href="/us/usc/t10/s125/d">` links use slash-separated section tails that describe the same generated section document as canonical section id `125d`.
 - **Decision:** Relative markdown link generation for transformable USC refs must normalize slash-separated tails into the canonical section identifier before calling the shared filename helper.
-- **Consequence:** Ref targets and generated section files stay aligned; future agents should not feed raw `/s...` tails directly into path generation.
+- **Consequence:** Ref targets and generated section files stay aligned; branch commit `07b954e` implements this by collapsing slash tails before `sectionFileSafeId()`.
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
 
 ### ADR-030: Mixed-case section suffix ordering is explicit and deterministic
-- **Status:** Active (desired contract; current branch still violates it)
+- **Status:** Active
 - **Context:** Locale-sensitive suffix comparison can drift across environments for identifiers like `106A` and `106a`, which breaks `_title.md` ordering and filename/link expectations.
 - **Decision:** The canonical section-order contract for equal numeric roots is explicit and regression-tested: `106` < `106A` < `106a` < `106b`.
-- **Consequence:** Future agents must preserve this exact ordering behavior when changing normalization helpers or renderer sorting.
+- **Consequence:** Future agents must preserve this exact ordering behavior when changing normalization helpers or renderer sorting; branch commit `07b954e` now uses direct codepoint comparison to enforce it.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-031: Mixed-content XML normalization must preserve source order across text and inline children
+- **Status:** Active (desired contract; current branch still violates it)
+- **Context:** `sourceCredit` and statutory-note nodes interleave plain text with inline `<ref>` and `<date>` children, and bucketed reconstruction in `readRawText()` reorders or drops source text like `Aug. 10, 1956, ch. 1041` / `70A Stat. 3`.
+- **Decision:** The normalization boundary for mixed-content XML must walk text nodes and inline children in document order before deciding whether each ref becomes a markdown link or plain text fallback.
+- **Consequence:** Recognized USC refs can still link, non-transformable refs stay plain text, and surrounding punctuation/dates survive in rendered order.
 - **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy

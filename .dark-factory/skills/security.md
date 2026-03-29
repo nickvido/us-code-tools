@@ -96,7 +96,9 @@
 - `src/domain/normalize.ts`
   - is the intended single sanitization boundary for section sort/file/link identifiers via `splitSectionNumber()`, `compareSectionNumbers()`, and `sectionFileSafeId()`
   - pads only the leading numeric root to width 5 while preserving suffix case
-  - the current branch still has one open issue-#12 gap at that boundary: slash-separated USC ref tails must be canonicalized before path generation (example: `/us/usc/t10/s125/d` must target `section-00125d.md`), but `hrefToMarkdownLink()` still forwards the raw tail
+  - branch commit `07b954e` restored the intended boundary behavior for slash-separated USC ref tails by collapsing `/us/usc/t10/s125/d` to the same canonical section id used for filenames (`section-00125d.md`)
+- `src/transforms/uslm-to-ir.ts`
+  - still has one open issue-#12 normalization/order gap: `readRawText()` rebuilds mixed-content XML by bucket rather than source order, so inline `<ref>` and `<date>` nodes can scramble surrounding plain text in `sourceCredit`, statutory notes, and other normalized text fields
 - `src/utils/fs.ts` still enforces safe output-root containment for transform output.
 
 ## Security Decisions with Rationale

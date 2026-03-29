@@ -211,17 +211,19 @@
   - `tests/integration/transform-cli.test.ts`
 - Branch history captured for future agents:
   - `a5a0b6a` — main implementation landed
-  - `32cd467` / `a72c64c` — USC ref rendering and slash-separated ref fixes
-  - `b9395bc` — case-sensitive suffix ordering fix
+  - `32cd467` / `a72c64c` — earlier USC ref rendering follow-ups
   - `6446f2f` — preserved statutory note wrapper metadata (`noteType`)
+  - `f78d979` — corrected stale knowledge notes after adversary review
+  - `07b954e` — fixed slash-ref canonicalization and deterministic mixed-case suffix ordering
   - `a2b57af` — first knowledge-capture pass for issue #12
 - Follow-up reviewer knowledge captured after adversary review:
   - slash-separated USC refs are a distinct transform contract, not just a formatting quirk; `/us/usc/t10/s125/d` must resolve to `../title-10/section-00125d.md`
   - mixed-case suffix ordering is part of the public ordering contract for `_title.md` and any shared section-sort helper: `106` < `106A` < `106a` < `106b`
-  - regression coverage for those two adversary findings lives in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
+  - mixed-content source-credit/statutory-note parsing must preserve the original text/link/date order instead of bucketed reconstruction
+  - regression coverage for those adversary findings lives in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
 - Knowledge-capture correction on the current branch:
-  - the prior docs pass note was inaccurate; the focused issue #12 regressions still fail locally on `df2/issue-12`
-  - `src/transforms/uslm-to-ir.ts::hrefToMarkdownLink()` still turns `/us/usc/t10/s125/d` into `section-00125-d.md` instead of `section-00125d.md`
-  - `src/domain/normalize.ts::compareSectionNumbers()` still sorts equal-root suffixes with `localeCompare(...)`, so the `106` / `106A` / `106a` / `106b` contract is still not satisfied
+  - the prior docs open-bug note is now partly obsolete: `07b954e` fixed both slash-ref path generation and deterministic mixed-case suffix ordering on `df2/issue-12`
+  - the remaining focused issue #12 failure is `src/transforms/uslm-to-ir.ts::readRawText()`, which still reorders mixed-content `sourceCredit` / statutory-note text and drops normalized text like `Aug. 10, 1956, ch. 1041` and `70A Stat. 3`
 - Verification observed during this knowledge-capture correction:
-  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (fails on slash-ref target path + mixed-case suffix ordering)
+  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts -t "renders hierarchy frontmatter, source_credit, statutory notes, and USC ref links from parsed sections"` ❌ (fails on missing mixed-content source-credit text)
+  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts` ❌ (the slash-ref + suffix-order failures are gone; the remaining break is mixed-content order/text loss)
