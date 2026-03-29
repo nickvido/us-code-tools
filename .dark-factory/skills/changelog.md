@@ -361,3 +361,30 @@
   - `npx vitest run` ✅ (`160/160` passing at the dev handoff)
 - Knowledge-capture correction recorded here:
   - current production code validates milestone metadata manually in `src/milestones/metadata.ts` and currently creates plain tags via `git tag <tag> <sha>` despite the helper name `createAnnotatedTag(...)`; future docs should describe branch reality, not only the architecture aspiration.
+
+## Feature #20 — Transform descriptive title directory names
+- Updated `src/domain/normalize.ts` with the shared title-directory normalization contract:
+  - `slugifyTitleHeading(...)` lowercases headings, strips straight/curly quotes and apostrophes, replaces non-alphanumeric runs with hyphens, collapses repeated hyphens, and trims edges
+  - `titleDirectoryName(...)` now emits `title-{NN}-{heading-slug}` when heading normalization succeeds and preserves exact legacy fallback to `title-{NN}` when it does not
+  - `resolveKnownTitleHeading(...)` provides a canonical title-number → heading map for parser-path cross-title links that only know the destination title number
+- Updated `src/transforms/write-output.ts` so default section output, `--group-by chapter` output, `_uncategorized.md`, and `_title.md` all route through `titleFileDirectoryPath(...)` and land under the same slugged title directory.
+- Updated `src/transforms/markdown.ts` helper links to compute relative section targets through `titleDirectoryName(...)` instead of hard-coded `title-{NN}` directories.
+- Updated `src/transforms/uslm-to-ir.ts` so real parsed `/us/usc/t{title}/s{section}` references now emit slugged destination directories (for example Title 18 / Title 42) on the XML-to-markdown path.
+- Added/updated regression coverage in:
+  - `tests/unit/domain/normalize-title-directory.test.ts`
+  - `tests/unit/transforms/write-output.test.ts`
+  - `tests/unit/transforms/markdown.test.ts`
+  - `tests/unit/transforms/issue12-recursive-metadata.test.ts`
+  - `tests/integration/issue12-transform-cli.test.ts`
+  - `tests/integration/transform-cli.test.ts`
+- Branch/review context captured:
+  - `ef9e125` — main slugged title-directory implementation
+  - `dd624dd` — QA adversary regression for real parser-path cross-title links
+  - `787674b` — fix: route cross-title links through slugged title directories (#20)
+  - `[adversary-review]` is APPROVED with no remaining findings
+  - active branch PR is `#23` for `df2/issue-20`
+- Verification captured from issue context:
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `npm test` ✅
+  - `npx eslint .` ⚠️ repo has no eslint config, so standalone ESLint exits before linting

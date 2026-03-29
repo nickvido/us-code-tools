@@ -306,21 +306,35 @@
 - **Consequence:** Operators can inspect and manually clear stale locks, but the tool never auto-breaks them. Future agents should keep this contract deterministic and repo-local.
 - **Feature:** #18 Git tags and GitHub Releases for legal milestones
 
-### ADR-043: Historical OLRC discovery is a single shared pass reused across list/latest/single/all-vintages modes
+### ADR-043: Title directory names are derived from a shared heading-slug helper with exact legacy fallback
+- **Status:** Active
+- **Context:** Issue #20 changes transform output roots from bare `title-{NN}` folders to descriptive directories like `title-18-crimes-and-criminal-procedure`, and adversary review showed that writers and cross-title links drift if each layer formats title paths independently.
+- **Decision:** `src/domain/normalize.ts` now owns `slugifyTitleHeading(...)` and `titleDirectoryName(...)`; all section-mode writes, chapter-mode writes, `_title.md`, `_uncategorized.md`, markdown helper links, and parser-generated USC ref links must reuse that single helper contract.
+- **Consequence:** Future agents should update the shared normalization helper instead of patching title-path strings in individual writers/renderers/tests. Missing or punctuation-only headings must continue to fall back to the exact legacy directory `title-{NN}`.
+- **Feature:** #20 Transform: descriptive title folder names
+
+### ADR-044: Real parser-path cross-title links may use a canonical title-number → heading map
+- **Status:** Active
+- **Context:** Inline USC refs like `/us/usc/t18/s4041` expose the destination title number but not the destination title heading, yet issue #20 requires those links to target the same slugged directories as emitted output.
+- **Decision:** `src/domain/normalize.ts` exports `resolveKnownTitleHeading(...)`, a canonical map for successful numeric titles, and `src/transforms/uslm-to-ir.ts` uses it only when deriving destination title directories for parser-generated cross-title markdown links.
+- **Consequence:** The real XML-to-markdown path stays aligned with emitted directory names without inventing a second slugging contract. Future agents should treat the map as a narrowly scoped fallback for destination-link rendering, not as a replacement for parsed `TitleIR.heading` where that real heading already exists.
+- **Feature:** #20 Transform: descriptive title folder names
+
+### ADR-045: Historical OLRC discovery is a single shared pass reused across list/latest/single/all-vintages modes
 - **Status:** Active
 - **Context:** Issue #21 adds `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages`, and the spec/architecture require deterministic dedupe, ordering, and requested-vintage lookup.
 - **Decision:** `src/sources/olrc.ts` centralizes releasepoint discovery in `fetchOlrcVintagePlan()`, which returns descending `availableVintages`, the selected latest vintage, and the discovered per-vintage title URL maps used by every OLRC mode.
 - **Consequence:** Future agents should extend that shared discovery seam rather than adding mode-specific OLRC listing logic that can drift in ordering or sparse-vintage behavior.
 - **Feature:** #21 Historical OLRC annual release-point fetch
 
-### ADR-044: Historical OLRC state is canonical per vintage, with a latest-mode compatibility mirror
+### ADR-046: Historical OLRC state is canonical per vintage, with a latest-mode compatibility mirror
 - **Status:** Active
 - **Context:** Pre-issue-21 manifests could represent only one OLRC vintage via top-level `selected_vintage` + `titles`, but historical fetch needs machine-readable state for multiple vintages without breaking existing consumers.
 - **Decision:** `src/utils/manifest.ts` keeps `sources.olrc.selected_vintage` and top-level `titles` as the compatibility mirror for plain latest-mode fetches, while canonical historical state lives under `sources.olrc.vintages` plus additive `available_vintages` metadata.
 - **Consequence:** Future agents must preserve normalization of old manifests to `vintages: {}` / `available_vintages: null` and avoid redefining the top-level mirror as the canonical historical source of truth.
 - **Feature:** #21 Historical OLRC annual release-point fetch
 
-### ADR-045: Sparse historical OLRC vintages must reuse discovered title links instead of synthesizing missing URLs
+### ADR-047: Sparse historical OLRC vintages must reuse discovered title links instead of synthesizing missing URLs
 - **Status:** Active
 - **Context:** Adversary review found that non-latest historical vintages were fabricating `1..54` title URLs, turning real discovery gaps into 404-driven `upstream_request_failed` runs.
 - **Decision:** `OlrcVintagePlan` now retains `titleUrlsByVintage`, and `selectVintagePlan()` clones the discovered map for the requested vintage so absent titles remain represented by `missing_titles` rather than invented download requests.
