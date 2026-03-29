@@ -247,14 +247,15 @@ Lock acquisition algorithm:
 
 1. `mkdir(.us-code-tools)` if absent.
 2. Create `milestones.lock` with `open(..., O_CREAT|O_EXCL)`.
-3. Write JSON lock payload containing PID, hostname, command, and timestamp.
+3. Write JSON lock payload containing exactly `pid`, `hostname`, `command`, and `timestamp`.
 4. On failure to acquire, exit non-zero with deterministic `lock_conflict` error.
 5. Delete lock in `finally`.
 
 Stale-lock policy:
 
 - Day-one behavior stays fail-closed; the command never auto-breaks an existing lock.
-- `lock_conflict` output must include the lock payload fields needed for manual recovery: PID, hostname, command, and timestamp.
+- `lock_conflict` output must include the exact persisted lock payload fields needed for manual recovery: `pid`, `hostname`, `command`, and `timestamp`.
+- The lock file must remain untouched on conflict: the losing process must not overwrite, truncate, or delete the existing lock.
 - The docs and error text must include a deterministic recovery instruction: inspect the recorded process, confirm it is no longer running, delete `.us-code-tools/milestones.lock`, then rerun.
 
 Index rationale:
@@ -366,6 +367,7 @@ Any other invocation is a usage error and must exit before git or GitHub mutatio
 **stderr / structured error codes**
 
 - `usage_error`
+- `git_cli_unavailable`
 - `repo_dirty`
 - `detached_head`
 - `lock_conflict`
@@ -463,11 +465,12 @@ Subprocess adapters must resolve the `git` and `gh` executable paths once at pro
 
 Rules:
 
-1. Resolve binaries with a dedicated helper using `command -v`/`which` equivalent behavior implemented via Node APIs, then store the absolute paths in process-local config.
-2. All subprocesses use `execFile`/`spawn` argument arrays with the resolved absolute executable path; never use shell interpolation.
-3. Fail closed with deterministic errors if `git` is missing for any command or if `gh` is missing for `milestones release`.
-4. Debug logs may mention only the executable basename by default; absolute binary paths are printed only in explicit verbose troubleshooting mode.
-5. Document in implementation notes and CI docs that operators must provide trusted `git` and `gh` binaries on the host.
+1. Resolve `git` exactly once per process before any metadata-driven mutation path (`apply`) or release-publication path (`release`), and resolve `gh` exactly once per process before any GitHub write path in `release`.
+2. Resolution returns absolute executable paths stored in process-local config and reused for every subprocess call in that command run.
+3. All subprocesses use `execFile`/`spawn` argument arrays with the resolved absolute executable path; never use shell interpolation and never fall back to repeated bare-name PATH lookup after startup resolution.
+4. Fail closed with deterministic errors: `git_cli_unavailable` when `git` cannot be resolved, and `github_cli_unavailable` when `gh` cannot be resolved for `milestones release`.
+5. Debug logs may mention only the executable basename by default; absolute binary paths are printed only in explicit verbose troubleshooting mode.
+6. Document in implementation notes and CI docs that operators must provide trusted `git` and `gh` binaries on the host.
 
 This directly addresses the approved medium-risk finding about PATH spoofing while preserving the CLI-only design.
 
