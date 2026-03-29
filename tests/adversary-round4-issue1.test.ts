@@ -4,7 +4,7 @@ import type { TitleIR } from '../src/domain/model.js';
 const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
-const getTitleZipPath = vi.fn(async () => '/tmp/title-01.zip');
+const resolveCachedOlrcTitleZipPath = vi.fn(async () => '/tmp/title-01.zip');
 const extractXmlEntriesFromZip = vi.fn(async () => [
   { xmlPath: 'usc01.xml', xml: '<xml />' },
   { xmlPath: 'nested/usc01-extra.xml', xml: '<xml />' },
@@ -14,7 +14,7 @@ const parseUslmToIr = vi.fn();
 const writeTitleOutput = vi.fn();
 
 vi.mock('../src/sources/olrc.js', () => ({
-  getTitleZipPath,
+  resolveCachedOlrcTitleZipPath,
   extractXmlEntriesFromZip,
   resolveTitleUrl,
 }));
@@ -30,7 +30,7 @@ vi.mock('../src/transforms/write-output.js', () => ({
 beforeEach(() => {
   stdoutWrite.mockClear();
   stderrWrite.mockClear();
-  getTitleZipPath.mockClear();
+  resolveCachedOlrcTitleZipPath.mockClear();
   extractXmlEntriesFromZip.mockClear();
   resolveTitleUrl.mockClear();
   parseUslmToIr.mockReset();
