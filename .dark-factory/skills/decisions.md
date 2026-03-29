@@ -186,3 +186,45 @@
 - **Decision:** `tests/integration/transform-cli.test.ts` keeps one committed current-format fixture at `tests/fixtures/xml/title-01/04-current-uscdoc.xml` and generates the other numeric titles via deterministic substitutions inside `buildCurrentFormatFixtureZip(...)`.
 - **Consequence:** Integration coverage remains offline, reproducible, and easy to update when the current-format contract changes.
 - **Feature:** #10 Parser: read @value attribute from `<num>` elements + XSD-driven test validations
+
+### ADR-026: Positive-law section discovery is recursive and hierarchy metadata is a rendered contract
+- **Status:** Active
+- **Context:** Fixed-depth `title -> chapter -> section` traversal dropped sections for positive-law titles whose sections live under `subtitle`, `part`, `subpart`, or `subchapter` containers.
+- **Decision:** `src/transforms/uslm-to-ir.ts` recursively walks nested hierarchy containers beneath `<title>`, accumulates normalized container numbers into `SectionIR.hierarchy`, and `src/transforms/markdown.ts` serializes every present hierarchy level as top-level frontmatter.
+- **Consequence:** Future agents must treat hierarchy frontmatter as part of the public transform contract; parser-only preservation is insufficient.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-027: One normalization helper family owns section ordering, filenames, and USC ref targets
+- **Status:** Active
+- **Context:** Section ordering, zero-padded filenames, and internal USC cross-reference targets can drift if each layer computes its own sort/path logic.
+- **Decision:** `src/domain/normalize.ts` is the shared boundary for `splitSectionNumber()`, `compareSectionNumbers()`, `sectionFileSafeId()`, and `sortSections()`, and all title-index rendering, file writes, and relative USC ref links reuse those helpers.
+- **Consequence:** Future agents should modify the shared helpers instead of patching ordering/filename/link logic independently in renderer or tests.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-028: Statutory notes preserve wrapper metadata and render separately from main content
+- **Status:** Active
+- **Context:** Current OLRC sections carry `<sourceCredit>` and `<notes type="..."><note topic="...">...</note></notes>` metadata that is distinct from main section prose and legacy editorial note handling.
+- **Decision:** `SectionIR` carries singular `sourceCredit` plus ordered `statutoryNotes`, `parseNotes()` copies wrapper `@type` onto each emitted note as `noteType`, and markdown renders them under `## Statutory Notes` while frontmatter emits `source_credit`.
+- **Consequence:** Provenance and statutory-note context survive parsing/rendering; future agents should not collapse them back into generic notes.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-029: Slash-separated USC refs must canonicalize to the same section identifier used for filenames
+- **Status:** Active
+- **Context:** OLRC `<ref href="/us/usc/t10/s125/d">` links use slash-separated section tails that describe the same generated section document as canonical section id `125d`.
+- **Decision:** Relative markdown link generation for transformable USC refs must normalize slash-separated tails into the canonical section identifier before calling the shared filename helper.
+- **Consequence:** Ref targets and generated section files stay aligned; branch commit `07b954e` implements this by collapsing slash tails before `sectionFileSafeId()`.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-030: Mixed-case section suffix ordering is explicit and deterministic
+- **Status:** Active
+- **Context:** Locale-sensitive suffix comparison can drift across environments for identifiers like `106A` and `106a`, which breaks `_title.md` ordering and filename/link expectations.
+- **Decision:** The canonical section-order contract for equal numeric roots is explicit and regression-tested: `106` < `106A` < `106a` < `106b`.
+- **Consequence:** Future agents must preserve this exact ordering behavior when changing normalization helpers or renderer sorting; branch commit `07b954e` now uses direct codepoint comparison to enforce it.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy
+
+### ADR-031: Mixed-content XML normalization must preserve source order across text and inline children
+- **Status:** Active
+- **Context:** `sourceCredit` and statutory-note nodes interleave plain text with inline `<ref>` and `<date>` children, and the earlier object-tree reconstruction in `readRawText()` reordered or dropped source text like `Aug. 10, 1956, ch. 1041` / `70A Stat. 3`.
+- **Decision:** `src/transforms/uslm-to-ir.ts` now keeps a second `fast-xml-parser` pass with `preserveOrder: true` and uses ordered helper functions (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) for section prose, `sourceCredit`, and statutory notes so normalization follows source document order before applying USC-link vs plain-text fallback logic.
+- **Consequence:** Recognized USC refs still link, non-transformable refs stay plain text, surrounding punctuation/dates survive in rendered order, and future agents should extend the ordered helper path instead of reviving tag-bucket concatenation.
+- **Feature:** #12 Transform: zero-padded filenames, rich metadata (sourceCredit/notes), recursive hierarchy

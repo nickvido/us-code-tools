@@ -18,8 +18,23 @@ export interface ChapterIR {
   heading: string;
 }
 
+export interface HierarchyIR {
+  subtitle?: string;
+  part?: string;
+  subpart?: string;
+  chapter?: string;
+  subchapter?: string;
+}
+
 export interface NoteIR {
   kind: 'editorial' | 'cross-reference' | 'source-credit' | 'misc';
+  text: string;
+}
+
+export interface StatutoryNoteIR {
+  heading?: string;
+  noteType?: string;
+  topic?: string;
   text: string;
 }
 
@@ -50,11 +65,16 @@ export interface SectionIR {
   heading: string;
   status: SectionStatus;
   source: string;
+  identifier?: string;
+  isCodifiedSection?: boolean;
   enacted?: string;
   publicLaw?: string;
   lastAmended?: string;
   lastAmendedBy?: string;
+  sourceCredit?: string;
   sourceCredits?: string[];
+  hierarchy?: HierarchyIR;
+  statutoryNotes?: StatutoryNoteIR[];
   editorialNotes?: NoteIR[];
   content: ContentNode[];
 }

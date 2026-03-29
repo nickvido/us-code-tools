@@ -176,3 +176,62 @@
   - spec + architecture explicitly require non-empty `@value` to win even on mismatch
   - adversary-reviewed fallback cleanup bug for mixed trailing decoration was fixed by changing trailing cleanup to `/[.—]+$/u`
   - latest branch verification in issue context reports `npm run build`, `npx tsc --noEmit`, and `npm test` passing for this change set
+
+## Feature #12 — Recursive hierarchy traversal, rich metadata, and zero-padded section filenames
+- Updated `src/domain/model.ts`:
+  - added `HierarchyIR` with `subtitle`, `part`, `subpart`, `chapter`, and `subchapter`
+  - added `StatutoryNoteIR` with `heading`, `noteType`, `topic`, and `text`
+  - extended `SectionIR` with singular `sourceCredit`, optional `hierarchy`, and optional `statutoryNotes`
+- Updated `src/domain/normalize.ts`:
+  - `splitSectionNumber()` now separates numeric root and suffix
+  - `compareSectionNumbers()` is the canonical mixed-width/mixed-case section sort contract
+  - `sectionFileSafeId()` zero-pads numeric roots to width 5 and normalizes `/` to `-`
+  - `sortSections()` is reused by markdown rendering and output writing
+- Updated `src/transforms/uslm-to-ir.ts`:
+  - replaced fixed-depth section collection with recursive traversal over `subtitle`, `part`, `subpart`, `chapter`, and `subchapter`
+  - preserved hierarchy metadata on every parsed section
+  - extracted `<sourceCredit>` into `sourceCredit`
+  - parsed `<notes type="...">` into ordered `statutoryNotes` and copied wrapper `@type` into each note’s `noteType`
+  - rendered transformable `/us/usc/t{title}/s{section}` refs as relative links using the shared file-stem helper
+- Updated `src/transforms/markdown.ts`:
+  - serialized hierarchy levels as top-level frontmatter keys when present
+  - emitted singular `source_credit`
+  - rendered statutory notes under `## Statutory Notes`
+  - sorted `_title.md` sections with `sortSections()` rather than parser discovery order
+- Updated `src/transforms/write-output.ts`:
+  - section output paths now always use zero-padded filenames like `section-00001.md`, `section-00106a.md`, and `section-00002-3.md`
+- Added real-fixture coverage for recursive and metadata-heavy titles:
+  - `tests/fixtures/xml/title-05/05-part-chapter-sections.xml`
+  - `tests/fixtures/xml/title-10/10-subtitle-part-chapter-sections.xml`
+  - `tests/fixtures/xml/title-26/26-deep-hierarchy-sections.xml`
+- Added/expanded issue #12 tests:
+  - `tests/unit/transforms/issue12-recursive-metadata.test.ts`
+  - `tests/integration/issue12-transform-cli.test.ts`
+  - `tests/unit/transforms/write-output.test.ts`
+  - `tests/integration/transform-cli.test.ts`
+- Branch history captured for future agents:
+  - `a5a0b6a` — main implementation landed
+  - `32cd467` / `a72c64c` — earlier USC ref rendering follow-ups
+  - `6446f2f` — preserved statutory note wrapper metadata (`noteType`)
+  - `f78d979` — corrected stale knowledge notes after adversary review
+  - `07b954e` — fixed slash-ref canonicalization and deterministic mixed-case suffix ordering
+  - `a2b57af` — first knowledge-capture pass for issue #12
+- Follow-up reviewer knowledge captured after adversary review:
+  - slash-separated USC refs are a distinct transform contract, not just a formatting quirk; `/us/usc/t10/s125/d` must resolve to `../title-10/section-00125d.md`
+  - mixed-case suffix ordering is part of the public ordering contract for `_title.md` and any shared section-sort helper: `106` < `106A` < `106a` < `106b`
+  - mixed-content source-credit/statutory-note parsing must preserve the original text/link/date order instead of bucketed reconstruction
+  - regression coverage for those adversary findings lives in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
+- Follow-up implementation landed after the earlier blocker notes:
+  - `2863584` / `2fb5c52` completed the mixed-content ordering fix by adding a preserve-order XML parse path and routing section body parsing, `sourceCredit`, and statutory-note extraction through ordered helpers in `src/transforms/uslm-to-ir.ts`
+  - the same ordered path preserves inline `<ref>` / `<date>` sibling order while keeping legacy source-credit note handling for backward compatibility
+- Latest reviewer state at branch head (`2fb5c52`):
+  - `[dev]` reports the mixed-content seam fixed and verified with `npx vitest run`, `npx tsc --noEmit`, and `npm run build`
+  - `[adversary-review]` is APPROVED with no remaining findings
+  - PR #13 is OPEN and no longer draft
+- Verification observed during this knowledge-capture pass:
+  - `rtk test npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts tests/unit/transforms/write-output.test.ts` ✅
+  - `rtk err npx tsc --noEmit` ✅
+  - `rtk err npm run build` ✅
+- Knowledge-capture correction on the current branch:
+  - the older docs that described issue #12 as still blocked on `readRawText()` are now obsolete
+  - current production behavior uses the ordered parse path for the mixed-content surfaces that matter to issue #12, and the focused Title 10 assertions for `Aug. 10, 1956, ch. 1041` / `70A Stat. 3` now pass

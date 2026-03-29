@@ -20,6 +20,10 @@
 - Focused issue #10 tests:
   - `npx vitest run tests/unit/transforms/uslm-to-ir.test.ts`
   - `npx vitest run tests/integration/transform-cli.test.ts`
+- Focused issue #12 tests:
+  - `npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts`
+  - `npx vitest run tests/unit/transforms/write-output.test.ts`
+  - `npx vitest run tests/integration/issue12-transform-cli.test.ts`
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
@@ -85,8 +89,9 @@
 - `src/backfill/planner.ts` → `src/backfill/constitution/dataset.ts`, `src/backfill/renderer.ts`, `src/backfill/messages.ts`
 - `src/backfill/renderer.ts` → `src/backfill/constitution/dataset.ts`, `gray-matter`
 - `src/backfill/messages.ts` → no downstream state; keep pure and template-exact
-- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, and canonical title/chapter/section numbers now flow through `readCanonicalNumText(...)`)
-- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`
+- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10/#12: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, canonical title/chapter/section numbers flow through `readCanonicalNumText(...)`, and recursive traversal now accumulates `subtitle`/`part`/`subpart`/`chapter`/`subchapter` context while `parseNotes()` emits `sourceCredit`, `statutoryNotes`, and note wrapper `noteType`)
+- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12: section frontmatter now serializes hierarchy keys + `source_credit`, `_title.md` must use `sortSections()`, and section prose may contain relative USC links generated from sanitized section ids)
+- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`, `src/domain/normalize.ts` (issue #12: all section file paths must use zero-padded `sectionFileSafeId()` output)
 
 ### Call Chain: Entry Point → Your Code
 ```text
@@ -163,7 +168,8 @@ src/index.ts (main)
 - `HistoricalEvent` in `src/backfill/planner.ts` — exact commit/write plan contract
 - `PreparedTargetRepo` in `src/backfill/target-repo.ts` — repo bootstrap + resume state handoff
 - `BackfillSummary` in `src/backfill/orchestrator.ts` — CLI success payload
-- `TitleIR`, `SectionIR`, `ParseError`, `XmlEntry` in `src/domain/model.ts` — existing transform contracts
+- `TitleIR`, `SectionIR`, `ParseError`, `XmlEntry`, `HierarchyIR`, `StatutoryNoteIR` in `src/domain/model.ts` — transform contracts, including issue #12 hierarchy and statutory-note metadata
+- `splitSectionNumber(...)`, `compareSectionNumbers(...)`, `sectionFileSafeId(...)`, `sortSections(...)` in `src/domain/normalize.ts` — canonical section sort/pad/file-stem contract for issue #12
 - `readCanonicalNumText(...)` / `cleanDecoratedNumText(...)` in `src/transforms/uslm-to-ir.ts` — the canonical `<num>` extraction boundary for issue #10; future parser changes should extend this seam instead of adding ad hoc cleanup elsewhere
 
 ## Conventions / Patterns
@@ -186,6 +192,15 @@ src/index.ts (main)
   - legislators cross-reference must delete stale `bioguide-crosswalk.json` whenever the result status is not `completed`
   - VoteView indexes are currently in-memory only via `inMemoryIndexes`, so repeated lookups in one process avoid reparsing but cross-process persistence is not implemented
 - Summary/result objects are JSON-first and use spec-style keys like `requested_scope`, `bulk_scope`, `next_request_at`, and `last_success_at`.
+- Issue #12 transform conventions:
+  - never hand-roll section ordering in renderers/tests; use `sortSections()` / `compareSectionNumbers()`
+  - never hand-roll section filenames or ref targets; use `sectionFileSafeId()` so writes and links stay aligned
+  - slash-separated USC ref tails like `/us/usc/t10/s125/d` must be canonicalized before path generation; branch commit `07b954e` collapses the slash tail in `hrefToMarkdownLink()` so links resolve to `section-00125d.md`
+  - preserve suffix case in ordering and filenames (`106A` != `106a`)
+  - mixed-case suffix ordering is part of the contract: `106` < `106A` < `106a` < `106b`; branch commit `07b954e` replaced locale-sensitive suffix sorting with direct codepoint comparison to keep that order deterministic
+  - mixed-content inline ordering is now handled by the preserve-order parser path at head `2fb5c52`: `parseUslmToIr()` parses both the ordinary object tree and a `preserveOrder: true` tree, aligns sections with `collectOrderedSectionNodes(...)`, and routes section prose / `sourceCredit` / statutory-note extraction through ordered helpers instead of relying on the older object-entry traversal
+  - when modifying `src/transforms/uslm-to-ir.ts`, treat `readOrderedRawText(...)` + `parseNotesOrdered(...)` as the production issue-#12 path; keep legacy `readRawText(...)` behavior only where the ordered tree is unavailable, and avoid reintroducing per-tag bucket concatenation for mixed-content nodes
+  - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
 ## Practical Notes
 - `parseBackfillArgs()` rejects duplicate flags, unknown flags, and unsupported phases before any filesystem side effects.
@@ -214,6 +229,12 @@ src/index.ts (main)
     - non-empty `@_value` wins for title/chapter/section numbers even when display text disagrees
     - absent/empty `@_value` falls back to cleaned display `<num>` text
     - path-safe filenames depend on undecorated canonical section numbers reaching `sectionFileSafeId()`
+  - issue #12 transform completeness work:
+    - recursive hierarchy traversal for positive-law titles with deep `subtitle` / `part` / `subpart` / `subchapter` nesting
+    - per-section hierarchy frontmatter + singular `source_credit`
+    - statutory notes with preserved wrapper `noteType`
+    - relative USC ref rendering and zero-padded section filenames
+    - dedicated real-fixture coverage in `tests/unit/transforms/issue12-recursive-metadata.test.ts` and `tests/integration/issue12-transform-cli.test.ts`
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories

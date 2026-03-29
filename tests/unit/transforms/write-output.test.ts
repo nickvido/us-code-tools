@@ -15,33 +15,33 @@ function pickPathRenderer(moduleExports: Record<string, unknown>): (titleNumber:
 }
 
 describe('write-output path derivation', () => {
-  it('normalizes section identifiers with slash to dash only', async () => {
+  it('normalizes section identifiers with slash and zero-pads the numeric stem', async () => {
     const mod = await safeImport(resolve(process.cwd(), 'src', 'transforms', 'write-output.ts'));
     ensureModuleLoaded(resolve(process.cwd(), 'src', 'transforms', 'write-output.ts'), mod);
     const deriveSectionPath = pickPathRenderer(mod);
 
     const path = deriveSectionPath(1, '2/3');
-    expect(path).toContain('section-2-3.md');
+    expect(path).toContain('section-00002-3.md');
     expect(path).not.toContain('2_3');
     expect(path).not.toContain('2\\3');
   });
 
-  it('preserves alphanumeric section identifiers in filenames', async () => {
+  it('preserves alphanumeric section suffixes while zero-padding numeric stems in filenames', async () => {
     const mod = await safeImport(resolve(process.cwd(), 'src', 'transforms', 'write-output.ts'));
     ensureModuleLoaded(resolve(process.cwd(), 'src', 'transforms', 'write-output.ts'), mod);
     const deriveSectionPath = pickPathRenderer(mod);
 
     const path = deriveSectionPath(1, '36B');
-    expect(path).toContain('section-36B.md');
+    expect(path).toContain('section-00036B.md');
   });
 
-  it('supports optional title number padding as title-NN convention', async () => {
+  it('uses title-NN directories and zero-padded section filenames', async () => {
     const mod = await safeImport(resolve(process.cwd(), 'src', 'transforms', 'write-output.ts'));
     ensureModuleLoaded(resolve(process.cwd(), 'src', 'transforms', 'write-output.ts'), mod);
     const deriveSectionPath = pickPathRenderer(mod);
 
     const path = deriveSectionPath(1, '1');
-    expect(path).toMatch(/title-01[\\/ ]section-1\.md$/);
+    expect(path).toMatch(/title-01[\\/ ]section-00001\.md$/);
     const path9 = deriveSectionPath(9, '1');
     expect(path9).toContain('title-09');
   });

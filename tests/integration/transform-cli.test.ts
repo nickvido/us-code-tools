@@ -37,16 +37,14 @@ function buildCurrentFormatFixtureZip(outputDir: string, title: number): string 
   return zipPath;
 }
 
-function runTransform(outputDir: string, fixtureZip: string) {
+function runTransformFromSelectedVintage(repoRoot: string, outputDir: string, fixtureZip: string) {
+  seedSelectedVintageOlrcCache(repoRoot, fixtureZip, '119-73', 1);
   const distEntry = resolve(process.cwd(), 'dist', 'index.js');
   return spawnSync(process.execPath, [distEntry, 'transform', '--title', '1', '--output', outputDir], {
-    cwd: process.cwd(),
+    cwd: repoRoot,
     encoding: 'utf8',
     timeout: 60_000,
-    env: {
-      ...process.env,
-      US_CODE_TOOLS_TITLE_01_FIXTURE_ZIP: fixtureZip,
-    },
+    env: process.env,
   });
 }
 
@@ -64,13 +62,13 @@ describe('CLI integration — Title 1 fixture run', () => {
   };
 
   it('writes expected Title 1 files and reports counts from a committed fixture', async () => {
-    const outputDir = mkdtempSync(join(tmpdir(), 'us-code-tools-it-'));
-    const fixtureZip = buildFixtureZip(outputDir);
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-it-'));
+    const fixtureZip = buildFixtureZip(sandboxRoot);
 
-    const result = runTransform(outputDir, fixtureZip);
+    const result = runTransformFromSelectedVintage(sandboxRoot, './out', fixtureZip);
     expect(result.status).toBe(0);
 
-    const outTree = resolve(outputDir, 'uscode', `title-${String(manifest.title).padStart(2, '0')}`);
+    const outTree = resolve(sandboxRoot, 'out', 'uscode', `title-${String(manifest.title).padStart(2, '0')}`);
     const written = readdirSync(outTree).sort();
 
     expect(written).toEqual(expect.arrayContaining(manifest.expected_files));
@@ -87,13 +85,13 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(parsedTitle.data.title).toBe(1);
     expect(parsedTitle.data.sections).toBe(3);
 
-    const nestedSection = readFileSync(join(outTree, 'section-2-3.md'), 'utf8');
+    const nestedSection = readFileSync(join(outTree, 'section-00002-3.md'), 'utf8');
     const parsedSection = parseFrontmatter(nestedSection);
     expect(parsedSection.data.section).toBe('2/3');
     expect(parsedSection.data.title).toBe(1);
-    expect(nestedSection).toContain(manifest.section_assertions['section-2-3.md'].h1 as string);
+    expect(nestedSection).toContain(manifest.section_assertions['section-00002-3.md'].h1 as string);
 
-    rmSync(outputDir, { recursive: true, force: true });
+    rmSync(sandboxRoot, { recursive: true, force: true });
   });
 
   it('resolves transform input from the selected OLRC vintage cache layout instead of the legacy fixture env path', async () => {
@@ -117,7 +115,7 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(report?.files_written).toBeGreaterThanOrEqual(2);
 
     const outTree = resolve(sandboxRoot, 'out', 'uscode', 'title-01');
-    expect(readdirSync(outTree).sort()).toEqual(expect.arrayContaining(['_title.md', 'section-1.md']));
+    expect(readdirSync(outTree).sort()).toEqual(expect.arrayContaining(['_title.md', 'section-00001.md']));
 
     const titleMarkdown = readFileSync(join(outTree, '_title.md'), 'utf8');
     expect(titleMarkdown).toContain('title: 1');
@@ -152,7 +150,7 @@ describe('CLI integration — Title 1 fixture run', () => {
       const written = readdirSync(outTree).sort();
       expect(written).toContain('_title.md');
       expect(written.filter((name) => /^section-.*\.md$/u.test(name))).toHaveLength(53);
-      expect(written).toContain('section-1.md');
+      expect(written).toContain('section-00001.md');
       expect(written.some((name) => /§|Title-1|Chapter-1|—|\.\.md/u.test(name))).toBe(false);
       expect(existsSync(join(outTree, 'section-§-1..md'))).toBe(false);
 
@@ -209,7 +207,7 @@ describe('CLI integration — Title 1 fixture run', () => {
         const written = readdirSync(outTree).sort();
         expect(written).toContain('_title.md');
         expect(written.filter((name) => /^section-.*\.md$/u.test(name))).toHaveLength(53);
-        expect(written).toContain('section-1.md');
+        expect(written).toContain('section-00001.md');
         expect(written.some((name) => /§|Title-|Chapter-|—|\.\.md/u.test(name))).toBe(false);
       }
     } finally {

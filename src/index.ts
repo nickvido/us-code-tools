@@ -148,6 +148,10 @@ async function runTransformCommand(args: string[]): Promise<number> {
       }
 
       for (const section of result.titleIr.sections) {
+        if (section.isCodifiedSection === false) {
+          continue;
+        }
+
         if (seenSectionNumbers.has(section.sectionNumber)) {
           hasDuplicateSectionCollision = true;
           parseErrors.push({
