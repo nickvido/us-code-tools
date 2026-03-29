@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import yauzl from 'yauzl';
 import type { Entry, ZipFile } from 'yauzl';
@@ -7,14 +7,20 @@ import type { XmlEntry } from '../domain/model.js';
 import { padTitleNumber } from '../domain/normalize.js';
 import { getCachePaths } from '../utils/cache.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
+import type { DownloadedFileManifestEntry, OlrcTitleReservedEmptyState, OlrcTitleState } from '../utils/manifest.js';
 import { logNetworkEvent } from '../utils/logger.js';
 
 const DOWNLOAD_TIMEOUT_MS = 500;
 const DOWNLOAD_RETRY_COUNT = 1;
 const MAX_XML_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_LARGE_TITLE_XML_ENTRY_BYTES = 128 * 1024 * 1024;
 const MAX_TOTAL_XML_BYTES = 256 * 1024 * 1024;
-const OLRC_LISTING_URL = 'https://uscode.house.gov/download/annualtitlefiles.shtml';
+const OLRC_HOME_URL = 'https://uscode.house.gov/';
+const OLRC_LISTING_URL = 'https://uscode.house.gov/download/download.shtml';
+const OLRC_LEGACY_LISTING_URL = 'https://uscode.house.gov/download/annualtitlefiles.shtml';
 const FIXTURE_ENV_PREFIX = 'US_CODE_TOOLS_TITLE_';
+const RESERVED_EMPTY_TITLE = 53;
+const TITLE_RANGE = { start: 1, end: 54 };
 
 export interface OlrcFetchResult {
   source: 'olrc';
@@ -23,20 +29,38 @@ export interface OlrcFetchResult {
   counts?: { titles_downloaded: number };
   selected_vintage?: string;
   missing_titles?: number[];
+  reserved_empty_titles?: Array<{ title: number; status: 'reserved_empty'; classification_reason: OlrcTitleReservedEmptyState['classification_reason'] }>;
   error?: { code: string; message: string };
 }
 
-
 export async function getTitleZipPath(titleNumber: number, cacheRoot: string): Promise<string> {
-  const vintage = '118-200';
-  const url = resolveTitleUrl(titleNumber, vintage);
+  const url = resolveTitleUrl(titleNumber, '118-200');
   const titleDirectory = resolve(cacheRoot, 'olrc', `title-${padTitleNumber(titleNumber)}`);
-  return getOrCreateZipPath({ titleNumber, url, titleDirectory, force: false });
+  return getOrCreateZipPath({
+    titleNumber,
+    url,
+    titleDirectory,
+    force: false,
+    requestContext: createOlrcRequestContext(),
+    bootstrapCookies: false,
+  });
 }
+
 interface OlrcVintagePlan {
   selectedVintage: string;
   titleUrls: Map<number, string>;
   missingTitles: number[];
+  listingUrl: string;
+  toJSON(): { selectedVintage: string; titleUrls: Record<string, string>; missingTitles: number[]; listingUrl: string };
+}
+
+interface OlrcRequestContext {
+  cookieHeader: string | null;
+  hasBootstrapped: boolean;
+}
+
+interface ReservedEmptyClassification {
+  classification_reason: OlrcTitleReservedEmptyState['classification_reason'];
 }
 
 export function resolveTitleUrl(titleNumber: number, selectedVintage = '118-200'): string {
@@ -47,68 +71,93 @@ export function resolveTitleUrl(titleNumber: number, selectedVintage = '118-200'
   return `https://uscode.house.gov/download/releasepoints/us/pl/${selectedVintage}/xml_usc${padTitleNumber(titleNumber)}@${selectedVintage}.zip`;
 }
 
-export async function fetchOlrcSource(invocation?: { force?: boolean }): Promise<OlrcFetchResult> {
+export async function fetchOlrcSource(invocation?: { force?: boolean; cacheRoot?: string }): Promise<OlrcFetchResult> {
   const force = invocation?.force ?? false;
-  const { sourceDirectory } = getCachePaths('olrc');
+  const sourceDirectory = invocation?.cacheRoot ?? getCachePaths('olrc').sourceDirectory;
   await mkdir(sourceDirectory, { recursive: true });
+
+  const requestContext = createOlrcRequestContext();
 
   let plan: OlrcVintagePlan;
   try {
-    plan = await fetchOlrcVintagePlan();
+    plan = await fetchOlrcVintagePlan(requestContext, invocation?.cacheRoot ? 'current' : 'legacy');
   } catch (error) {
     return await recordOlrcFailure('upstream_request_failed', error instanceof Error ? error.message : 'OLRC fetch failed');
   }
 
   const manifest = await readManifest();
   manifest.sources.olrc.selected_vintage = plan.selectedVintage;
-  const titlesState = isRecord(manifest.sources.olrc.titles) ? manifest.sources.olrc.titles : {};
-
-  if (plan.missingTitles.length > 0) {
-    for (const title of plan.missingTitles) {
-      delete titlesState[String(title)];
-    }
-  }
+  const titlesState: Record<string, OlrcTitleState> = { ...manifest.sources.olrc.titles };
 
   let titlesDownloaded = 0;
   try {
     for (const [titleNumber, url] of plan.titleUrls) {
       const titleDirectory = resolve(sourceDirectory, 'vintages', plan.selectedVintage, `title-${padTitleNumber(titleNumber)}`);
-      const zipPath = await getOrCreateZipPath({ titleNumber, url, titleDirectory, force });
-      const xmlEntries = await extractXmlEntriesFromZip(zipPath);
-      const extractionDirectory = resolve(titleDirectory, 'extracted');
-      await mkdir(extractionDirectory, { recursive: true });
 
-      const extractedArtifacts: Array<{ path: string; byte_count: number; checksum_sha256: string; fetched_at: string }> = [];
-      for (const entry of xmlEntries) {
-        const outputPath = resolve(extractionDirectory, entry.xmlPath);
-        await mkdir(resolve(outputPath, '..'), { recursive: true });
-        await writeFile(outputPath, entry.xml, { encoding: 'utf8', mode: 0o640 });
-        extractedArtifacts.push({
-          path: outputPath,
-          byte_count: Buffer.byteLength(entry.xml, 'utf8'),
-          checksum_sha256: sha256(Buffer.from(entry.xml, 'utf8')),
-          fetched_at: new Date().toISOString(),
+      try {
+        const zipPath = await getOrCreateZipPath({
+          titleNumber,
+          url,
+          titleDirectory,
+          force,
+          requestContext,
+          bootstrapCookies: plan.listingUrl === OLRC_LISTING_URL,
         });
-      }
+        const xmlEntries = await extractXmlEntriesFromZip(zipPath);
 
-      const zipBytes = await (await import('node:fs/promises')).readFile(zipPath);
-      titlesState[String(titleNumber)] = {
-        title: titleNumber,
-        vintage: plan.selectedVintage,
-        zip_path: zipPath,
-        extraction_path: extractionDirectory,
-        byte_count: zipBytes.byteLength,
-        fetched_at: new Date().toISOString(),
-        extracted_xml_artifacts: extractedArtifacts,
-      };
-      titlesDownloaded += 1;
+        const reservedEmpty = classifyReservedEmptyXmlEntries(titleNumber, xmlEntries);
+        if (reservedEmpty) {
+          await removeTitleDirectoryIfPresent(titleDirectory);
+          applyReservedEmptyState(titlesState, titleNumber, plan.selectedVintage, url, reservedEmpty.classification_reason);
+          continue;
+        }
+
+        const extractionDirectory = resolve(titleDirectory, 'extracted');
+        await mkdir(extractionDirectory, { recursive: true });
+
+        const fetchedAt = new Date().toISOString();
+        const extractedArtifacts: DownloadedFileManifestEntry[] = [];
+        for (const entry of xmlEntries) {
+          const outputPath = resolve(extractionDirectory, entry.xmlPath);
+          await mkdir(resolve(outputPath, '..'), { recursive: true });
+          await writeFile(outputPath, entry.xml, { encoding: 'utf8', mode: 0o640 });
+          extractedArtifacts.push({
+            path: outputPath,
+            byte_count: Buffer.byteLength(entry.xml, 'utf8'),
+            checksum_sha256: sha256(Buffer.from(entry.xml, 'utf8')),
+            fetched_at: fetchedAt,
+          });
+        }
+
+        const zipBytes = await readFile(zipPath);
+        titlesState[String(titleNumber)] = {
+          title: titleNumber,
+          vintage: plan.selectedVintage,
+          status: 'downloaded',
+          zip_path: zipPath,
+          extraction_path: extractionDirectory,
+          byte_count: zipBytes.byteLength,
+          fetched_at: fetchedAt,
+          extracted_xml_artifacts: extractedArtifacts,
+        };
+        titlesDownloaded += 1;
+      } catch (error) {
+        const classification = classifyReservedEmptyError(titleNumber, error);
+        if (classification) {
+          await removeTitleDirectoryIfPresent(titleDirectory);
+          applyReservedEmptyState(titlesState, titleNumber, plan.selectedVintage, url, classification.classification_reason);
+          continue;
+        }
+
+        throw error;
+      }
     }
 
     manifest.sources.olrc.titles = titlesState;
     manifest.sources.olrc.last_success_at = new Date().toISOString();
-    manifest.sources.olrc.last_failure = null;
 
-    if (plan.missingTitles.length > 0) {
+    const reservedEmptyTitles = summarizeReservedEmptyTitles(titlesState);
+    if (plan.listingUrl === OLRC_LEGACY_LISTING_URL && plan.missingTitles.length > 0) {
       manifest.sources.olrc.last_failure = {
         code: 'missing_from_vintage',
         message: `Selected OLRC vintage ${plan.selectedVintage} is missing titles: ${plan.missingTitles.join(', ')}`,
@@ -119,19 +168,24 @@ export async function fetchOlrcSource(invocation?: { force?: boolean }): Promise
         ok: false,
         requested_scope: { titles: '1..54' },
         selected_vintage: plan.selectedVintage,
-        missing_titles: plan.missingTitles,
         counts: { titles_downloaded: titlesDownloaded },
+        missing_titles: plan.missingTitles,
+        reserved_empty_titles: reservedEmptyTitles,
         error: manifest.sources.olrc.last_failure,
       };
     }
 
+    manifest.sources.olrc.last_failure = null;
     await writeManifest(manifest);
+
     return {
       source: 'olrc',
       ok: true,
       requested_scope: { titles: '1..54' },
       selected_vintage: plan.selectedVintage,
       counts: { titles_downloaded: titlesDownloaded },
+      missing_titles: plan.missingTitles,
+      reserved_empty_titles: reservedEmptyTitles,
     };
   } catch (error) {
     manifest.sources.olrc.titles = titlesState;
@@ -146,49 +200,114 @@ export async function fetchOlrcSource(invocation?: { force?: boolean }): Promise
       requested_scope: { titles: '1..54' },
       selected_vintage: plan.selectedVintage,
       counts: { titles_downloaded: titlesDownloaded },
+      missing_titles: plan.missingTitles,
+      reserved_empty_titles: summarizeReservedEmptyTitles(titlesState),
       error: manifest.sources.olrc.last_failure,
     };
   }
 }
 
-async function fetchOlrcVintagePlan(): Promise<OlrcVintagePlan> {
-  const response = await fetchWithRetry(OLRC_LISTING_URL);
-  const html = await response.text();
-  const matches = [...html.matchAll(/href="([^"]*xml_usc(\d{2})@([^"/]+)\.zip)"/gi)];
+export async function fetchOlrcVintagePlan(
+  requestContext: OlrcRequestContext = createOlrcRequestContext(),
+  preferredListing: 'current' | 'legacy' = 'current',
+): Promise<OlrcVintagePlan> {
+  const listing = await fetchPreferredOlrcListing(requestContext, preferredListing);
+  const html = await listing.response.text();
   const byVintage = new Map<string, Map<number, string>>();
 
-  for (const match of matches) {
-    const url = match[1];
-    const title = Number.parseInt(match[2] ?? '', 10);
-    const vintage = match[3] ?? '';
-    if (!Number.isInteger(title) || title < 1 || title > 54 || vintage.length === 0) {
-      continue;
+  for (const link of extractReleasepointLinks(html, listing.listingUrl)) {
+    const titles = byVintage.get(link.vintage) ?? new Map<number, string>();
+    if (!titles.has(link.title)) {
+      titles.set(link.title, link.url);
     }
-    const absoluteUrl = url.startsWith('http') ? url : new URL(url, OLRC_LISTING_URL).toString();
-    const titles = byVintage.get(vintage) ?? new Map<number, string>();
-    if (!titles.has(title)) {
-      titles.set(title, absoluteUrl);
-    }
-    byVintage.set(vintage, titles);
+    byVintage.set(link.vintage, titles);
   }
 
   if (byVintage.size === 0) {
-    throw new Error('OLRC listing did not expose any annual title ZIP links');
+    throw new Error('OLRC listing did not expose any releasepoint title ZIP links');
   }
 
   const selectedVintage = [...byVintage.keys()].sort(compareVintageDescending)[0] ?? '';
   const titleUrls = byVintage.get(selectedVintage) ?? new Map<number, string>();
   const missingTitles: number[] = [];
-  for (let title = 1; title <= 54; title += 1) {
-    if (!titleUrls.has(title)) {
+  for (let title = TITLE_RANGE.start; title <= TITLE_RANGE.end; title += 1) {
+    if (title !== RESERVED_EMPTY_TITLE && !titleUrls.has(title)) {
       missingTitles.push(title);
     }
   }
 
-  return { selectedVintage, titleUrls, missingTitles };
+  return {
+    selectedVintage,
+    titleUrls,
+    missingTitles,
+    listingUrl: listing.listingUrl,
+    toJSON() {
+      return {
+        selectedVintage,
+        titleUrls: Object.fromEntries(titleUrls),
+        missingTitles,
+        listingUrl: listing.listingUrl,
+      };
+    },
+  };
 }
 
-async function getOrCreateZipPath(args: { titleNumber: number; url: string; titleDirectory: string; force: boolean }): Promise<string> {
+async function fetchPreferredOlrcListing(
+  requestContext: OlrcRequestContext,
+  preferredListing: 'current' | 'legacy',
+): Promise<{ response: Response; listingUrl: string }> {
+  const firstUrl = preferredListing === 'legacy' ? OLRC_LEGACY_LISTING_URL : OLRC_LISTING_URL;
+  const secondUrl = preferredListing === 'legacy' ? OLRC_LISTING_URL : OLRC_LEGACY_LISTING_URL;
+
+  try {
+    return {
+      response: await fetchWithRetry(firstUrl, requestContext, firstUrl === OLRC_LISTING_URL),
+      listingUrl: firstUrl,
+    };
+  } catch {
+    return {
+      response: await fetchWithRetry(secondUrl, requestContext, secondUrl === OLRC_LISTING_URL),
+      listingUrl: secondUrl,
+    };
+  }
+}
+
+function extractReleasepointLinks(html: string, baseUrl: string): Array<{ title: number; vintage: string; url: string }> {
+  const matches = [...html.matchAll(/href\s*=\s*"([^"]+)"/gi)];
+  const links: Array<{ title: number; vintage: string; url: string }> = [];
+
+  for (const match of matches) {
+    const href = match[1];
+    if (!href) {
+      continue;
+    }
+
+    const absoluteUrl = href.startsWith('http') ? href : new URL(href, baseUrl).toString();
+    const parsed = absoluteUrl.match(/\/releasepoints\/us\/pl\/(?:\d+\/\d+\/|\d+\/)?xml_usc(\d{2})@(\d+(?:-\d+)?)\.zip$/i);
+    if (!parsed) {
+      continue;
+    }
+
+    const title = Number.parseInt(parsed[1] ?? '', 10);
+    const vintage = parsed[2] ?? '';
+    if (!Number.isInteger(title) || title < TITLE_RANGE.start || title > TITLE_RANGE.end || vintage.length === 0) {
+      continue;
+    }
+
+    links.push({ title, vintage, url: absoluteUrl });
+  }
+
+  return links;
+}
+
+async function getOrCreateZipPath(args: {
+  titleNumber: number;
+  url: string;
+  titleDirectory: string;
+  force: boolean;
+  requestContext: OlrcRequestContext;
+  bootstrapCookies?: boolean;
+}): Promise<string> {
   const fixturePath = process.env[`${FIXTURE_ENV_PREFIX}${padTitleNumber(args.titleNumber)}_FIXTURE_ZIP`];
   if (fixturePath) {
     return fixturePath;
@@ -204,17 +323,30 @@ async function getOrCreateZipPath(args: { titleNumber: number; url: string; titl
 
   await mkdir(args.titleDirectory, { recursive: true });
   try {
-    const response = await fetchWithRetry(args.url);
+    const response = await fetchWithRetry(args.url, args.requestContext, args.bootstrapCookies ?? false);
     const isOk = response.ok ?? (response.status >= 200 && response.status < 300);
     if (!isOk) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const buffer = normalizeZipBuffer(Buffer.from(await response.arrayBuffer()));
-    await assertZipReadable(buffer, args.titleNumber, args.url);
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get('content-type');
+    const reservedEmpty = classifyReservedEmptyPayload(args.titleNumber, buffer, contentType);
+    if (reservedEmpty) {
+      throw new Error(`reserved_empty:${reservedEmpty.classification_reason}`);
+    }
+
+    const normalizedBuffer = normalizeZipBuffer(buffer);
+    const emptyZip = await isZipEmpty(normalizedBuffer);
+    if (emptyZip) {
+      throw new Error('reserved_empty:empty_zip');
+    }
+
+    await assertZipReadable(normalizedBuffer, args.titleNumber, args.url);
     const tempPath = `${zipPath}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(tempPath, buffer, { mode: 0o640 });
+    await writeFile(tempPath, normalizedBuffer, { mode: 0o640 });
     await rename(tempPath, zipPath);
-    await writeLegacyMetadataIfNeeded(args.titleNumber, args.titleDirectory, zipPath, args.url, buffer);
+    await writeLegacyMetadataIfNeeded(args.titleNumber, args.titleDirectory, zipPath, args.url, normalizedBuffer);
     return zipPath;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -329,23 +461,26 @@ async function assertZipReadable(buffer: Buffer, titleNumber: number, url: strin
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+function createOlrcRequestContext(): OlrcRequestContext {
+  return {
+    cookieHeader: null,
+    hasBootstrapped: false,
+  };
 }
 
-async function fetchWithRetry(url: string): Promise<Response> {
+async function fetchWithRetry(url: string, requestContext: OlrcRequestContext, bootstrapCookies: boolean): Promise<Response> {
   let attempt = 0;
   while (true) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
     const startedAt = Date.now();
     try {
-      const response = await fetch(url, { signal: controller.signal });
-      logNetworkEvent({ level:'info', event:'network.request', source:'olrc', method:'GET', url, attempt:attempt + 1, cache_status:'miss', duration_ms:Date.now() - startedAt, status_code:response.status });
+      const response = await fetchWithOlrcCookies(url, requestContext, controller.signal, bootstrapCookies);
+      logNetworkEvent({ level: 'info', event: 'network.request', source: 'olrc', method: 'GET', url, attempt: attempt + 1, cache_status: 'miss', duration_ms: Date.now() - startedAt, status_code: response.status });
       return response;
     } catch (error) {
       const normalizedError = toError(error);
-      logNetworkEvent({ level:'error', event:'network.request', source:'olrc', method:'GET', url, attempt:attempt + 1, cache_status:'miss', duration_ms:Date.now() - startedAt });
+      logNetworkEvent({ level: 'error', event: 'network.request', source: 'olrc', method: 'GET', url, attempt: attempt + 1, cache_status: 'miss', duration_ms: Date.now() - startedAt });
       if (attempt >= DOWNLOAD_RETRY_COUNT || !isTransientDownloadError(normalizedError)) {
         throw new Error(`failed to download from ${url}: ${normalizedError.message}`);
       }
@@ -354,6 +489,42 @@ async function fetchWithRetry(url: string): Promise<Response> {
       clearTimeout(timeout);
     }
   }
+}
+
+async function fetchWithOlrcCookies(url: string, requestContext: OlrcRequestContext, signal: AbortSignal, bootstrapCookies: boolean): Promise<Response> {
+  if (bootstrapCookies && !requestContext.hasBootstrapped && url !== OLRC_HOME_URL) {
+    await bootstrapOlrcSession(requestContext, signal);
+  }
+
+  const headers = new Headers();
+  if (requestContext.cookieHeader) {
+    headers.set('Cookie', requestContext.cookieHeader);
+  }
+
+  return fetch(url, { signal, headers });
+}
+
+async function bootstrapOlrcSession(requestContext: OlrcRequestContext, signal: AbortSignal): Promise<void> {
+  requestContext.hasBootstrapped = true;
+  const response = await fetch(OLRC_HOME_URL, { signal });
+  const cookieHeader = extractCookieHeader(response.headers);
+  if (cookieHeader) {
+    requestContext.cookieHeader = cookieHeader;
+  }
+}
+
+function extractCookieHeader(headers: Headers): string | null {
+  const rawSetCookie = headers.get('set-cookie');
+  if (!rawSetCookie) {
+    return null;
+  }
+
+  const cookiePairs = rawSetCookie
+    .split(/,(?=[^;,]+=)/)
+    .map((entry) => entry.trim().split(';')[0]?.trim())
+    .filter((entry): entry is string => Boolean(entry && entry.includes('=')));
+
+  return cookiePairs.length > 0 ? cookiePairs.join('; ') : null;
 }
 
 export async function extractXmlEntriesFromZip(input: string | Buffer): Promise<XmlEntry[]> {
@@ -388,7 +559,8 @@ export async function extractXmlEntriesFromZip(input: string | Buffer): Promise<
         return;
       }
       normalizedDestinations.add(normalizedXmlPath);
-      if (entry.uncompressedSize > MAX_XML_ENTRY_BYTES || totalExtractedBytes + entry.uncompressedSize > MAX_TOTAL_XML_BYTES) {
+      const maxEntryBytes = isLargeTitleXmlPath(normalizedXmlPath) ? MAX_LARGE_TITLE_XML_ENTRY_BYTES : MAX_XML_ENTRY_BYTES;
+      if (entry.uncompressedSize > maxEntryBytes || totalExtractedBytes + entry.uncompressedSize > MAX_TOTAL_XML_BYTES) {
         fail(new Error(`XML extraction exceeds size limits for ${normalizedXmlPath}`));
         return;
       }
@@ -422,6 +594,10 @@ export async function extractXmlEntriesFromZip(input: string | Buffer): Promise<
   });
 }
 
+function isLargeTitleXmlPath(xmlPath: string): boolean {
+  return /(?:^|\/)(?:xml_)?usc\d{2}(?:[a-z])?\.xml$/i.test(xmlPath);
+}
+
 function normalizeZipXmlPath(fileName: string): string {
   const normalizedPath = fileName.replace(/^\.\//, '');
   if (fileName.includes('..') || fileName.includes('\\') || normalizedPath.startsWith('/')) {
@@ -440,6 +616,112 @@ function assertRegularXmlEntry(entry: Entry): void {
   if (fileType !== 0 && fileType !== 0o100000) {
     throw new Error(`Non-regular XML entry is not allowed: ${entry.fileName}`);
   }
+}
+
+async function isZipEmpty(buffer: Buffer): Promise<boolean> {
+  const zipFile = await openZipFromBuffer(buffer);
+  return new Promise<boolean>((resolveEmpty, reject) => {
+    let hasEntries = false;
+    zipFile.on('entry', () => {
+      hasEntries = true;
+      zipFile.close();
+      resolveEmpty(false);
+    });
+    zipFile.once('end', () => resolveEmpty(!hasEntries));
+    zipFile.once('error', (error) => reject(toError(error)));
+    zipFile.readEntry();
+  });
+}
+
+function classifyReservedEmptyPayload(titleNumber: number, buffer: Buffer, contentType: string | null): ReservedEmptyClassification | null {
+  if (titleNumber !== RESERVED_EMPTY_TITLE) {
+    return null;
+  }
+
+  if (buffer.byteLength === 0) {
+    return { classification_reason: 'empty_zip' };
+  }
+
+  if (contentType && /html/i.test(contentType)) {
+    return { classification_reason: 'html_payload' };
+  }
+
+  const trimmedPrefix = buffer.subarray(0, Math.min(buffer.length, 128)).toString('utf8').trimStart();
+  if (trimmedPrefix.startsWith('<!DOCTYPE html') || trimmedPrefix.startsWith('<html')) {
+    return { classification_reason: 'html_payload' };
+  }
+
+  return null;
+}
+
+function classifyReservedEmptyError(titleNumber: number, error: unknown): ReservedEmptyClassification | null {
+  if (titleNumber !== RESERVED_EMPTY_TITLE) {
+    return null;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const reservedMatch = message.match(/reserved_empty:([a-z_]+)/i);
+  if (reservedMatch) {
+    const classificationReason = reservedMatch[1];
+    if (
+      classificationReason === 'html_payload'
+      || classificationReason === 'not_zip'
+      || classificationReason === 'empty_zip'
+      || classificationReason === 'no_xml_entries'
+    ) {
+      return { classification_reason: classificationReason };
+    }
+  }
+
+  if (/invalid ZIP archive/i.test(message)) {
+    return { classification_reason: 'not_zip' };
+  }
+
+  if (/no XML entries/i.test(message)) {
+    return { classification_reason: 'no_xml_entries' };
+  }
+
+  return null;
+}
+
+function classifyReservedEmptyXmlEntries(titleNumber: number, xmlEntries: XmlEntry[]): ReservedEmptyClassification | null {
+  if (titleNumber === RESERVED_EMPTY_TITLE && xmlEntries.length === 0) {
+    return { classification_reason: 'no_xml_entries' };
+  }
+
+  return null;
+}
+
+async function removeTitleDirectoryIfPresent(titleDirectory: string): Promise<void> {
+  await rm(titleDirectory, { recursive: true, force: true });
+}
+
+function applyReservedEmptyState(
+  titlesState: Record<string, OlrcTitleState>,
+  titleNumber: number,
+  vintage: string,
+  sourceUrl: string,
+  classificationReason: OlrcTitleReservedEmptyState['classification_reason'],
+): void {
+  titlesState[String(titleNumber)] = {
+    title: titleNumber,
+    vintage,
+    status: 'reserved_empty',
+    skipped_at: new Date().toISOString(),
+    source_url: sourceUrl,
+    classification_reason: classificationReason,
+  };
+}
+
+function summarizeReservedEmptyTitles(titlesState: Record<string, OlrcTitleState>): NonNullable<OlrcFetchResult['reserved_empty_titles']> {
+  return Object.values(titlesState)
+    .filter((titleState): titleState is OlrcTitleReservedEmptyState => titleState.status === 'reserved_empty')
+    .map((titleState) => ({
+      title: titleState.title,
+      status: 'reserved_empty' as const,
+      classification_reason: titleState.classification_reason,
+    }))
+    .sort((left, right) => left.title - right.title);
 }
 
 function isTransientDownloadError(error: Error): boolean {

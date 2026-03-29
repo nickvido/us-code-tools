@@ -12,14 +12,15 @@ const parser = new XMLParser({
   parseAttributeValue: false,
   processEntities: true,
   allowBooleanAttributes: false,
+  removeNSPrefix: true,
 });
 
 export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult {
   const parseErrors: ParseError[] = [];
 
-  let document: { uslm?: { title?: XmlNode } };
+  let document: { uslm?: { title?: XmlNode }; uscDoc?: { main?: { title?: XmlNode } } };
   try {
-    document = parser.parse(stripBom(xml)) as { uslm?: { title?: XmlNode } };
+    document = parser.parse(stripBom(xml)) as { uslm?: { title?: XmlNode }; uscDoc?: { main?: { title?: XmlNode } } };
   } catch (error) {
     return {
       titleIr: emptyTitleIr(),
@@ -31,7 +32,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     };
   }
 
-  const titleNode = document.uslm?.title;
+  const titleNode = document.uscDoc?.main?.title ?? document.uslm?.title;
 
   if (!titleNode) {
     return {
@@ -40,7 +41,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     };
   }
 
-  const titleNumber = Number(readNormalizedText(parseErrors, titleNode.num, xmlPath, 'title number')) || 0;
+  const titleNumber = parseTitleNumber(readNormalizedText(parseErrors, titleNode.num, xmlPath, 'title number'));
   const heading = readNormalizedText(parseErrors, titleNode.heading, xmlPath, 'title heading');
   const titleIr: TitleIR = {
     titleNumber,
@@ -98,6 +99,8 @@ interface XmlNode {
   'last-amended'?: XmlValue;
   'last-amended-by'?: XmlValue;
   text?: XmlValue;
+  p?: XmlValue;
+  content?: XmlNode;
   xref?: XmlValue;
   type?: XmlValue;
   chapter?: XmlNode | XmlNode[];
@@ -153,15 +156,22 @@ function parseContent(
   xmlPath: string | undefined,
   sectionHint: string,
 ): ContentNode[] {
+  const contentRoot = node.content ?? node;
   const content: ContentNode[] = [];
-  content.push(...asArray(node.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
-  content.push(...asArray(node.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
+  content.push(...asArray(contentRoot.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
+  content.push(...asArray(contentRoot.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
   content.push(
-    ...asArray(node['cross-reference']).map((child) => ({
+    ...asArray(contentRoot['cross-reference']).map((child) => ({
       type: 'text',
       text: readNodeText(parseErrors, child, xmlPath, sectionHint, 'cross-reference'),
     } as const)),
   );
+  if (content.length === 0) {
+    const text = optionalText(parseErrors, contentRoot.p ?? contentRoot.text, xmlPath, 'section text', sectionHint);
+    if (text) {
+      content.push({ type: 'text', text });
+    }
+  }
   return content.filter((entry) => !(entry.type === 'text' && !entry.text));
 }
 
@@ -248,7 +258,7 @@ function readRawText(value: XmlValue | undefined): string {
   }
 
   const node = value;
-  const pieces = [node.text, node.xref, node.heading, node.num].map((entry) => readRawText(entry)).filter(Boolean);
+  const pieces = [node.text, node.p, node.xref, node.heading, node.num, node.content].map((entry) => readRawText(entry)).filter(Boolean);
 
   return pieces.join(' ');
 }
@@ -312,6 +322,16 @@ function normalizeNoteKind(value: string): NoteIR['kind'] {
 
 function defaultSectionSource(titleNumber: number, sectionNumber: string): string {
   return `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section${sectionNumber}`;
+}
+
+function parseTitleNumber(value: string): number {
+  const direct = Number(value);
+  if (Number.isInteger(direct) && direct > 0) {
+    return direct;
+  }
+
+  const match = value.match(/(\d+)/);
+  return match ? Number.parseInt(match[1] ?? '0', 10) : 0;
 }
 
 function emptyTitleIr(): TitleIR {

@@ -104,6 +104,33 @@ export interface DownloadedFileManifestEntry {
   fetched_at: string;
 }
 
+export interface OlrcTitleSuccessState {
+  title: number;
+  vintage: string;
+  status: 'downloaded';
+  zip_path: string;
+  extraction_path: string;
+  byte_count: number;
+  fetched_at: string;
+  extracted_xml_artifacts: DownloadedFileManifestEntry[];
+}
+
+export interface OlrcTitleReservedEmptyState {
+  title: number;
+  vintage: string;
+  status: 'reserved_empty';
+  skipped_at: string;
+  source_url: string;
+  classification_reason: 'html_payload' | 'not_zip' | 'empty_zip' | 'no_xml_entries';
+}
+
+export type OlrcTitleState = OlrcTitleSuccessState | OlrcTitleReservedEmptyState;
+
+export interface OlrcManifestState extends SourceStatusSummary {
+  selected_vintage: string | null;
+  titles: Record<string, OlrcTitleState>;
+}
+
 export interface LegislatorsManifestState extends SourceStatusSummary {
   files: Record<string, DownloadedFileManifestEntry>;
   cross_reference: LegislatorsCrossReferenceState;
@@ -113,7 +140,7 @@ export interface FetchManifest {
   version: 1;
   updated_at: string;
   sources: {
-    olrc: SourceStatusSummary & { selected_vintage?: string | null; titles?: Record<string, unknown> };
+    olrc: OlrcManifestState;
     congress: CongressManifestState;
     govinfo: GovInfoManifestState;
     voteview: SourceStatusSummary & { files?: Record<string, unknown>; indexes?: unknown[] };
@@ -241,16 +268,16 @@ function normalizeManifest(parsed: Partial<FetchManifest>): FetchManifest {
   };
 }
 
-function normalizeOlrcState(value: unknown): FetchManifest['sources']['olrc'] {
+function normalizeOlrcState(value: unknown): OlrcManifestState {
   const base = normalizeSourceStatus(value);
   const candidate = isObject(value) ? value : null;
 
   return {
     ...base,
     selected_vintage: typeof candidate?.selected_vintage === 'string' || candidate?.selected_vintage === null
-      ? (candidate.selected_vintage as string | null)
+      ? candidate.selected_vintage
       : null,
-    titles: isObject(candidate?.titles) ? candidate.titles : {},
+    titles: normalizeOlrcTitles(candidate?.titles),
   };
 }
 
@@ -447,13 +474,77 @@ function normalizeGovInfoCheckpoints(value: unknown): Record<string, GovInfoChec
   return normalized;
 }
 
-function normalizeDownloadedFiles(value: unknown): Record<string, DownloadedFileManifestEntry> {
+function normalizeOlrcTitles(value: unknown): Record<string, OlrcTitleState> {
   if (!isObject(value)) {
     return {};
   }
 
-  const normalized: Record<string, DownloadedFileManifestEntry> = {};
+  const normalized: Record<string, OlrcTitleState> = {};
   for (const [key, entry] of Object.entries(value)) {
+    if (!isObject(entry)) {
+      continue;
+    }
+
+    const title = toPositiveInteger(entry.title) ?? (Number.parseInt(key, 10) || null);
+    const vintage = typeof entry.vintage === 'string' ? entry.vintage : null;
+    if (title === null || vintage === null) {
+      continue;
+    }
+
+    if (entry.status === 'reserved_empty') {
+      const skippedAt = typeof entry.skipped_at === 'string' ? entry.skipped_at : null;
+      const sourceUrl = typeof entry.source_url === 'string' ? entry.source_url : null;
+      const classificationReason =
+        entry.classification_reason === 'html_payload'
+        || entry.classification_reason === 'not_zip'
+        || entry.classification_reason === 'empty_zip'
+        || entry.classification_reason === 'no_xml_entries'
+          ? entry.classification_reason
+          : null;
+      if (skippedAt === null || sourceUrl === null || classificationReason === null) {
+        continue;
+      }
+
+      normalized[key] = {
+        title,
+        vintage,
+        status: 'reserved_empty',
+        skipped_at: skippedAt,
+        source_url: sourceUrl,
+        classification_reason: classificationReason,
+      };
+      continue;
+    }
+
+    const zipPath = typeof entry.zip_path === 'string' ? entry.zip_path : null;
+    const extractionPath = typeof entry.extraction_path === 'string' ? entry.extraction_path : null;
+    const fetchedAt = typeof entry.fetched_at === 'string' ? entry.fetched_at : null;
+    if (zipPath === null || extractionPath === null || fetchedAt === null) {
+      continue;
+    }
+
+    normalized[key] = {
+      title,
+      vintage,
+      status: 'downloaded',
+      zip_path: zipPath,
+      extraction_path: extractionPath,
+      byte_count: toNonNegativeInteger(entry.byte_count),
+      fetched_at: fetchedAt,
+      extracted_xml_artifacts: normalizeDownloadedFileList(entry.extracted_xml_artifacts),
+    };
+  }
+
+  return normalized;
+}
+
+function normalizeDownloadedFileList(value: unknown): DownloadedFileManifestEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: DownloadedFileManifestEntry[] = [];
+  for (const entry of value) {
     if (!isObject(entry)) {
       continue;
     }
@@ -465,12 +556,30 @@ function normalizeDownloadedFiles(value: unknown): Record<string, DownloadedFile
       continue;
     }
 
-    normalized[key] = {
+    normalized.push({
       path,
       byte_count: toNonNegativeInteger(entry.byte_count),
       checksum_sha256: checksum,
       fetched_at: fetchedAt,
-    };
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeDownloadedFiles(value: unknown): Record<string, DownloadedFileManifestEntry> {
+  if (!isObject(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, DownloadedFileManifestEntry> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const [normalizedEntry] = normalizeDownloadedFileList([entry]);
+    if (!normalizedEntry) {
+      continue;
+    }
+
+    normalized[key] = normalizedEntry;
   }
 
   return normalized;
