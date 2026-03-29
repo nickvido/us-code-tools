@@ -1,12 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { extractXmlEntriesFromZip, resolveCachedOlrcTitleZipPath, resolveTitleUrl } from './sources/olrc.js';
 import type { ParseError, TitleIR, TransformGroupBy } from './domain/model.js';
-import { parseUslmToIr } from './transforms/uslm-to-ir.js';
-import { writeTitleOutput } from './transforms/write-output.js';
-import { runConstitutionBackfill } from './backfill/orchestrator.js';
-import { runFetchCommand } from './commands/fetch.js';
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const [command, ...args] = argv;
@@ -20,7 +15,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   if (command === 'fetch') {
+    const { runFetchCommand } = await import('./commands/fetch.js');
     return runFetchCommand(args);
+  }
+
+  if (command === 'milestones') {
+    const { runMilestonesCommand } = await import('./commands/milestones.js');
+    return runMilestonesCommand(args);
   }
 
   usage('Unknown command');
@@ -35,6 +36,7 @@ async function runBackfillCommand(args: string[]): Promise<number> {
   }
 
   try {
+    const { runConstitutionBackfill } = await import('./backfill/orchestrator.js');
     const summary = await runConstitutionBackfill(parsed.value.target);
     process.stdout.write(`${JSON.stringify(summary)}\n`);
     return 0;
@@ -125,6 +127,9 @@ async function runTransformCommand(args: string[]): Promise<number> {
   }
 
   try {
+    const { extractXmlEntriesFromZip, resolveCachedOlrcTitleZipPath, resolveTitleUrl } = await import('./sources/olrc.js');
+    const { parseUslmToIr } = await import('./transforms/uslm-to-ir.js');
+    const { writeTitleOutput } = await import('./transforms/write-output.js');
     const zipPath = await resolveCachedOlrcTitleZipPath(titleNumber);
     const xmlEntries = await extractXmlEntriesFromZip(zipPath);
     if (xmlEntries.length === 0) {
@@ -312,7 +317,7 @@ async function validateOutputDirectory(outputDir: string): Promise<string | null
 }
 
 function usage(error: string): void {
-  process.stderr.write(`Usage: transform --title <number> --output <dir> [--group-by chapter]\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nError: ${error}\n`);
+  process.stderr.write(`Usage: transform --title <number> --output <dir> [--group-by chapter]\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nUsage: milestones plan --target <repo> --metadata <file>\nUsage: milestones apply --target <repo> --metadata <file>\nUsage: milestones release --target <repo> --metadata <file>\nError: ${error}\n`);
 }
 
 function transformUsage(error: string): void {
