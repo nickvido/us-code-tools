@@ -18,12 +18,27 @@ const parser = new XMLParser({
   removeNSPrefix: true,
 });
 
+const preserveOrderParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  trimValues: false,
+  parseTagValue: false,
+  parseAttributeValue: false,
+  processEntities: true,
+  allowBooleanAttributes: false,
+  removeNSPrefix: true,
+  preserveOrder: true,
+});
+
 export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult {
   const parseErrors: ParseError[] = [];
+  const strippedXml = stripBom(xml);
 
   let document: { uslm?: { title?: XmlNode }; uscDoc?: { meta?: XmlNode; main?: { title?: XmlNode } } };
+  let orderedDocument: OrderedEntry[];
   try {
-    document = parser.parse(stripBom(xml)) as { uslm?: { title?: XmlNode }; uscDoc?: { meta?: XmlNode; main?: { title?: XmlNode } } };
+    document = parser.parse(strippedXml) as { uslm?: { title?: XmlNode }; uscDoc?: { meta?: XmlNode; main?: { title?: XmlNode } } };
+    orderedDocument = preserveOrderParser.parse(strippedXml) as OrderedEntry[];
   } catch (error) {
     return {
       titleIr: emptyTitleIr(),
@@ -36,7 +51,8 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
   }
 
   const titleNode = document.uscDoc?.main?.title ?? document.uslm?.title;
-  if (!titleNode) {
+  const orderedTitleNode = findOrderedTitleNode(orderedDocument);
+  if (!titleNode || !orderedTitleNode) {
     return {
       titleIr: emptyTitleIr(),
       parseErrors: [{ code: 'INVALID_XML', message: 'Missing <title> root element', xmlPath }],
@@ -57,14 +73,24 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
   };
 
   let uncodifiedSectionIndex = 0;
+  const orderedSections = collectOrderedSectionNodes(orderedTitleNode);
 
-  for (const { node: sectionNode, hierarchy } of collectSectionNodes(titleNode)) {
+  for (const [sectionIndex, { node: sectionNode, hierarchy }] of collectSectionNodes(titleNode).entries()) {
+     const orderedSectionNode = orderedSections[sectionIndex];
     const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number');
     const sectionHint = readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading');
     const fallbackSectionNumber = sectionNumber || `uncodified-${++uncodifiedSectionIndex}`;
 
     const sectionParseErrors: ParseError[] = [];
-    const parsedSection = parseSection(titleNumber, sectionNode, hierarchy, sectionParseErrors, xmlPath, fallbackSectionNumber);
+    const parsedSection = parseSection(
+      titleNumber,
+      sectionNode,
+      orderedSectionNode?.children,
+      hierarchy,
+      sectionParseErrors,
+      xmlPath,
+      fallbackSectionNumber,
+    );
     if (sectionParseErrors.length > 0) {
       for (const error of sectionParseErrors) {
         parseErrors.push({
@@ -130,6 +156,13 @@ interface XmlNode {
 
 type XmlValue = string | number | boolean | XmlNode | Array<string | number | boolean | XmlNode>;
 
+type OrderedEntryValue = string | number | boolean | OrderedEntry[];
+
+type OrderedEntry = {
+  ':@'?: Record<string, string>;
+  [key: string]: OrderedEntryValue | Record<string, string> | undefined;
+};
+
 function collectChapterMetadata(titleNode: XmlNode, parseErrors: ParseError[], xmlPath?: string): TitleIR['chapters'] {
   const chapters: TitleIR['chapters'] = [];
 
@@ -151,6 +184,31 @@ function collectChapterMetadata(titleNode: XmlNode, parseErrors: ParseError[], x
 function collectSectionNodes(titleNode: XmlNode): Array<{ node: XmlNode; hierarchy: HierarchyIR }> {
   const sections: Array<{ node: XmlNode; hierarchy: HierarchyIR }> = [];
   collectSectionNodesRecursive(titleNode, {}, sections);
+  return sections;
+}
+
+function findOrderedTitleNode(document: OrderedEntry[]): OrderedEntry[] | undefined {
+  return findOrderedPath(document, ['uscDoc', 'main', 'title']) ?? findOrderedPath(document, ['uslm', 'title']);
+}
+
+function findOrderedPath(nodes: OrderedEntry[] | undefined, path: string[]): OrderedEntry[] | undefined {
+  let current = nodes;
+
+  for (const segment of path) {
+    const entry = current?.find((node) => orderedEntryTag(node) === segment);
+    const value = entry?.[segment];
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    current = value;
+  }
+
+  return current;
+}
+
+function collectOrderedSectionNodes(titleNode: OrderedEntry[]): Array<{ children: OrderedEntry[]; hierarchy: HierarchyIR }> {
+  const sections: Array<{ children: OrderedEntry[]; hierarchy: HierarchyIR }> = [];
+  collectOrderedSectionNodesRecursive(titleNode, {}, sections);
   return sections;
 }
 
@@ -197,9 +255,43 @@ function collectSectionNodesRecursive(
   }
 }
 
+function collectOrderedSectionNodesRecursive(
+  nodes: OrderedEntry[],
+  hierarchy: HierarchyIR,
+  sections: Array<{ children: OrderedEntry[]; hierarchy: HierarchyIR }>,
+): void {
+  for (const entry of nodes) {
+    const tag = orderedEntryTag(entry);
+    if (!tag) {
+      continue;
+    }
+
+    const value = entry[tag];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    if (HIERARCHY_TAGS.includes(tag as HierarchyTag)) {
+      const number = readOrderedCanonicalNumEntry(orderedFindFirst(value, 'num'));
+      const nextHierarchy = number ? { ...hierarchy, [tag]: cleanDecoratedNumText(number) } : { ...hierarchy };
+      collectOrderedSectionNodesRecursive(value, nextHierarchy, sections);
+      continue;
+    }
+
+    if (tag === 'section') {
+      sections.push({ children: value, hierarchy });
+      collectOrderedSectionNodesRecursive(value, hierarchy, sections);
+      continue;
+    }
+
+    collectOrderedSectionNodesRecursive(value, hierarchy, sections);
+  }
+}
+
 function parseSection(
   titleNumber: number,
   sectionNode: XmlNode,
+  orderedSectionNode: OrderedEntry[] | undefined,
   hierarchy: HierarchyIR,
   parseErrors: ParseError[],
   xmlPath: string | undefined,
@@ -207,7 +299,7 @@ function parseSection(
 ): SectionIR {
   const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number') || fallbackSectionNumber || '';
   const source = optionalText(parseErrors, sectionNode.source, xmlPath, 'section source') ?? defaultSectionSource(titleNumber, sectionNumber);
-  const parsedNotes = parseNotes(sectionNode, parseErrors, xmlPath, sectionNumber);
+  const parsedNotes = parseNotes(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber);
 
   const identifier = normalizeWhitespace(sectionNode['@_identifier']);
   const isCodifiedSection = identifier.startsWith(`/us/usc/t${titleNumber}/s`)
@@ -234,11 +326,21 @@ function parseSection(
     hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : undefined,
     statutoryNotes: parsedNotes.statutoryNotes,
     editorialNotes: parsedNotes.editorialNotes,
-    content: parseContent(sectionNode, parseErrors, xmlPath, sectionNumber),
+    content: parseContent(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber),
   };
 }
 
-function parseContent(node: XmlNode, parseErrors: ParseError[], xmlPath: string | undefined, sectionHint: string): ContentNode[] {
+function parseContent(
+  node: XmlNode,
+  orderedNode: OrderedEntry[] | undefined,
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): ContentNode[] {
+  if (orderedNode) {
+    return parseContentOrdered(orderedNode, parseErrors, xmlPath, sectionHint);
+  }
+
   const contentRoot = node.content ?? node;
   const content: ContentNode[] = [];
 
@@ -255,6 +357,58 @@ function parseContent(node: XmlNode, parseErrors: ParseError[], xmlPath: string 
     if (text) {
       content.push({ type: 'text', text });
     }
+  }
+
+  return content.filter((entry) => !(entry.type === 'text' && !entry.text));
+}
+
+function parseContentOrdered(
+  orderedNode: OrderedEntry[],
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): ContentNode[] {
+  const contentEntry = orderedFindFirst(orderedNode, 'content');
+  const contentRoot = contentEntry ? orderedChildArray(contentEntry, 'content') : orderedNode;
+
+  return parseOrderedContentChildren(contentRoot, parseErrors, xmlPath, sectionHint);
+}
+
+function parseOrderedContentChildren(
+  children: OrderedEntry[],
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): ContentNode[] {
+  const content: ContentNode[] = [];
+  let inlineText: string | undefined;
+
+  for (const entry of children) {
+    const tag = orderedEntryTag(entry);
+    if (!tag) {
+      continue;
+    }
+
+    if (tag === 'chapeau' || tag === 'continuation') {
+      const text = readOrderedNodeText(parseErrors, orderedChildArray(entry, tag), xmlPath, sectionHint, 'section text');
+      if (text) {
+        content.push({ type: 'text', text });
+      }
+      continue;
+    }
+
+    if (tag === 'subsection' || tag === 'paragraph') {
+      content.push(parseLabeledNodeOrdered(tag, entry, parseErrors, xmlPath, sectionHint));
+      continue;
+    }
+
+    if (!inlineText && (tag === 'p' || tag === 'text' || tag === 'content')) {
+      inlineText = readOrderedNodeText(parseErrors, orderedChildArray(entry, tag), xmlPath, sectionHint, 'section text');
+    }
+  }
+
+  if (content.length === 0 && inlineText) {
+    content.push({ type: 'text', text: inlineText });
   }
 
   return content.filter((entry) => !(entry.type === 'text' && !entry.text));
@@ -292,12 +446,61 @@ function parseLabeledNode(
   };
 }
 
+function parseLabeledNodeOrdered(
+  type: 'subsection' | 'paragraph' | 'subparagraph' | 'clause' | 'item',
+  entry: OrderedEntry,
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): ContentNode {
+  const children: ContentNode[] = [];
+  const nodeChildren = orderedChildArray(entry, type);
+  let inlineText: string | undefined;
+
+  for (const child of nodeChildren) {
+    const tag = orderedEntryTag(child);
+    if (!tag) {
+      continue;
+    }
+
+    if (tag === 'chapeau' || tag === 'continuation') {
+      const text = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+      if (text) {
+        children.push({ type: 'text', text });
+      }
+      continue;
+    }
+
+    if (tag === 'subsection' || tag === 'paragraph' || tag === 'subparagraph' || tag === 'clause' || tag === 'subclause' || tag === 'item') {
+      children.push(parseLabeledNodeOrdered(tag === 'subclause' ? 'item' : tag, child, parseErrors, xmlPath, sectionHint));
+      continue;
+    }
+
+    if (!inlineText && (tag === 'content' || tag === 'text' || tag === 'p')) {
+      inlineText = readOrderedNodeText(parseErrors, orderedChildArray(child, tag), xmlPath, sectionHint, `${type} text`);
+    }
+  }
+
+  return {
+    type,
+    label: readOrderedCanonicalNumEntry(orderedFindFirst(nodeChildren, 'num')),
+    heading: readOrderedOptionalText(parseErrors, orderedChildArrayFromChildren(nodeChildren, 'heading'), xmlPath, `${type} heading`, sectionHint),
+    text: inlineText,
+    children: children.filter((child) => !(child.type === 'text' && !child.text)),
+  };
+}
+
 function parseNotes(
   sectionNode: XmlNode,
+  orderedSectionNode: OrderedEntry[] | undefined,
   parseErrors: ParseError[],
   xmlPath: string | undefined,
   sectionHint: string,
 ): { sourceCredit?: string; statutoryNotes: StatutoryNoteIR[]; editorialNotes: NoteIR[] } {
+  if (orderedSectionNode) {
+    return parseNotesOrdered(orderedSectionNode, parseErrors, xmlPath, sectionHint);
+  }
+
   let sourceCredit = optionalText(parseErrors, sectionNode.sourceCredit, xmlPath, 'section source credit', sectionHint);
   const statutoryNotes: StatutoryNoteIR[] = [];
   const editorialNotes: NoteIR[] = [];
@@ -334,6 +537,198 @@ function parseNotes(
   }
 
   return { sourceCredit, statutoryNotes, editorialNotes };
+}
+
+function parseNotesOrdered(
+  orderedSectionNode: OrderedEntry[],
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): { sourceCredit?: string; statutoryNotes: StatutoryNoteIR[]; editorialNotes: NoteIR[] } {
+  let sourceCredit = readOrderedSourceText(
+    parseErrors,
+    orderedChildArrayFromChildren(orderedSectionNode, 'sourceCredit'),
+    xmlPath,
+    'section source credit',
+    sectionHint,
+  );
+  const statutoryNotes: StatutoryNoteIR[] = [];
+  const editorialNotes: NoteIR[] = [];
+
+  for (const noteEntry of orderedFindAll(orderedSectionNode, 'note')) {
+    const text = readOrderedNodeText(parseErrors, orderedChildArray(noteEntry, 'note'), xmlPath, sectionHint, 'section note');
+    if (!text) {
+      continue;
+    }
+
+    const kind = normalizeOrderedWhitespace(readOrderedRawText(orderedChildArrayFromChildren(orderedChildArray(noteEntry, 'note'), 'type')));
+    if (kind === 'source-credit') {
+      sourceCredit ??= text;
+      continue;
+    }
+
+    editorialNotes.push({
+      kind: kind === 'editorial' || kind === 'cross-reference' ? kind : 'misc',
+      text,
+    });
+  }
+
+  for (const notesEntry of orderedFindAll(orderedSectionNode, 'notes')) {
+    const noteType = normalizeOrderedWhitespace(orderedAttributes(notesEntry)?.['@_type']) || undefined;
+    const notesChildren = orderedChildArray(notesEntry, 'notes');
+
+    for (const noteEntry of orderedFindAll(notesChildren, 'note')) {
+      const noteChildren = orderedChildArray(noteEntry, 'note');
+      const bodyChildren = noteChildren.filter((child) => orderedEntryTag(child) !== 'heading');
+      const text = readOrderedNodeText(parseErrors, bodyChildren, xmlPath, sectionHint, 'statutory note');
+      if (!text) {
+        continue;
+      }
+
+      statutoryNotes.push({
+        heading: readOrderedOptionalText(parseErrors, orderedChildArrayFromChildren(noteChildren, 'heading'), xmlPath, 'statutory note heading', sectionHint),
+        noteType,
+        topic: normalizeOrderedWhitespace(orderedAttributes(noteEntry)?.['@_topic'] ?? readOrderedRawText(orderedChildArrayFromChildren(noteChildren, 'type'))) || undefined,
+        text,
+      });
+    }
+  }
+
+  return { sourceCredit, statutoryNotes, editorialNotes };
+}
+
+function orderedEntryTag(entry: OrderedEntry): string | undefined {
+  return Object.keys(entry).find((key) => key !== ':@');
+}
+
+function orderedAttributes(entry: OrderedEntry): Record<string, string> | undefined {
+  return entry[':@'];
+}
+
+function orderedChildArray(entry: OrderedEntry, tag: string): OrderedEntry[] {
+  const value = entry[tag];
+  return Array.isArray(value) ? value : [];
+}
+
+function orderedFindFirst(children: OrderedEntry[], tag: string): OrderedEntry | undefined {
+  return children.find((entry) => orderedEntryTag(entry) === tag);
+}
+
+function orderedFindAll(children: OrderedEntry[], tag: string): OrderedEntry[] {
+  return children.filter((entry) => orderedEntryTag(entry) === tag);
+}
+
+function orderedChildArrayFromChildren(children: OrderedEntry[], tag: string): OrderedEntry[] | undefined {
+  const entry = orderedFindFirst(children, tag);
+  return entry ? orderedChildArray(entry, tag) : undefined;
+}
+
+function normalizeOrderedWhitespace(value: string | undefined): string {
+  return (value ?? '').replace(/[\t\n\r\f\v ]+/gu, ' ').trim();
+}
+
+function readOrderedCanonicalNumEntry(entry: OrderedEntry | undefined): string {
+  if (!entry) {
+    return '';
+  }
+
+  const tag = orderedEntryTag(entry);
+  if (!tag) {
+    return '';
+  }
+
+  const valueAttribute = normalizeOrderedWhitespace(orderedAttributes(entry)?.['@_value']);
+  if (valueAttribute) {
+    return valueAttribute;
+  }
+
+  return cleanDecoratedNumText(normalizeOrderedWhitespace(readOrderedRawText(orderedChildArray(entry, tag))));
+}
+
+function readOrderedOptionalText(
+  parseErrors: ParseError[],
+  children: OrderedEntry[] | undefined,
+  xmlPath: string | undefined,
+  fieldName: string,
+  sectionHint?: string,
+): string | undefined {
+  if (!children) {
+    return undefined;
+  }
+
+  const text = readOrderedNodeText(parseErrors, children, xmlPath, sectionHint, fieldName);
+  return text || undefined;
+}
+
+function readOrderedSourceText(
+  parseErrors: ParseError[],
+  children: OrderedEntry[] | undefined,
+  xmlPath: string | undefined,
+  fieldName: string,
+  sectionHint?: string,
+): string | undefined {
+  if (!children) {
+    return undefined;
+  }
+
+  const text = enforceNormalizedFieldLimit(
+    parseErrors,
+    normalizeOrderedWhitespace(readOrderedRawText(children)).replace(/(?<!§)§ /gu, '§ '),
+    xmlPath,
+    fieldName,
+    sectionHint,
+  );
+  return text || undefined;
+}
+
+function readOrderedNodeText(
+  parseErrors: ParseError[],
+  children: OrderedEntry[] | undefined,
+  xmlPath: string | undefined,
+  sectionHint: string | undefined,
+  fieldName: string,
+): string {
+  return enforceNormalizedFieldLimit(parseErrors, normalizeWhitespace(readOrderedRawText(children)), xmlPath, fieldName, sectionHint);
+}
+
+function readOrderedRawText(children: OrderedEntry[] | undefined): string {
+  if (!children) {
+    return '';
+  }
+
+  const parts: string[] = [];
+
+  for (const entry of children) {
+    const tag = orderedEntryTag(entry);
+    if (!tag) {
+      continue;
+    }
+
+    const value = entry[tag];
+    if (tag === '#text') {
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        parts.push(String(value));
+      }
+      continue;
+    }
+
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    const href = normalizeOrderedWhitespace(orderedAttributes(entry)?.['@_href']);
+    const text = readOrderedRawText(value);
+    if (!href) {
+      parts.push(text);
+      continue;
+    }
+
+    const label = normalizeOrderedWhitespace(text) || href;
+    const markdownHref = hrefToMarkdownLink(href);
+    parts.push(markdownHref ? `[${label}](${markdownHref})` : label);
+  }
+
+  return parts.join('');
 }
 
 function readRawText(value: XmlValue | undefined): string {
