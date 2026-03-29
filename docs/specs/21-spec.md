@@ -1,141 +1,104 @@
-## [spec-writer] — Initial spec drafted
-See `docs/specs/21-spec.md` for the canonical spec.
-
 # Historical OLRC release-point fetch
 
 ## Summary
-Extend the existing `fetch --source=olrc` flow so operators can discover, select, and download historical OLRC annual release points in addition to the current latest release point. The feature must preserve today’s latest-only behavior by default while adding a mechanically testable CLI contract for listing vintages, fetching one named vintage, and fetching all discovered vintages into per-vintage cache directories with manifest metadata suitable for historical backfill workflows.
+Add historical OLRC release-point support to the existing `fetch --source=olrc` flow so operators can discover available annual vintages, fetch a specific vintage, or backfill all vintages from the OLRC releasepoints listing. The contract must preserve the current latest-only behavior for plain `--source=olrc` while making vintage selection, cache layout, and manifest updates mechanically testable.
 
 ## Context
-- `src/commands/fetch.ts` currently supports `--status`, `--all`, `--source=<name>`, `--force`, and `--congress=<n>`, but has no OLRC-specific selectors for historical vintages.
-- `src/sources/olrc.ts` already discovers releasepoint links from `https://uscode.house.gov/download/download.shtml`, selects one latest vintage with `fetchOlrcVintagePlan()`, downloads title ZIPs into `data/cache/olrc/vintages/{selected_vintage}/title-{NN}/`, and records per-title state plus one top-level `selected_vintage` in the manifest.
-- Issue #8 already established OLRC cookie bootstrap behavior via the in-memory request context in `src/sources/olrc.ts`; historical fetch modes must use the same cookie-aware request path rather than introduce a second OLRC transport implementation.
-- Historical backfill needs stable access to annual point-in-time OLRC corpora from roughly 2013 onward, with each corpus identified by the public-law vintage string used in the releasepoint URLs (for example `113-1`).
-- Full historical acquisition is large (~650 ZIPs / 5–6 GB XML), so the spec must define resumable-safe artifact layout, deterministic listing output, and manifest semantics that let later stages identify which vintages were fetched successfully.
+- `src/commands/fetch.ts` currently supports generic selectors like `--status`, `--all`, `--source=<name>`, `--force`, and `--congress=<integer>`, but no OLRC-specific historical selectors.
+- `src/sources/olrc.ts` already discovers OLRC releasepoint links, selects the newest vintage, downloads title ZIPs, and stores artifacts under `data/cache/olrc/vintages/{selected_vintage}/...`.
+- `src/utils/manifest.ts` currently stores OLRC state as top-level `selected_vintage` plus per-title state in `sources.olrc.titles`.
+- Historical backfill needs a stable contract for vintage discovery, parser validation, per-vintage cache isolation, and manifest state that can represent multiple vintages without breaking existing latest-mode consumers.
+- Cookie-bootstrap behavior from issue #8 remains a non-negotiable constraint for every OLRC network path introduced by this feature.
 
 ## Acceptance Criteria
 
-### 1. Fetch CLI surface for historical OLRC selection
-- [ ] `parseFetchArgs()` in `src/commands/fetch.ts` accepts these additional OLRC-only selectors: `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages`.
-  <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
-- [ ] `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages` are valid only when `--source=olrc` is also present; each invalid combination exits `2`, writes a single JSON usage error to stderr with `error.code="invalid_arguments"`, and writes no cache or manifest changes.
-  <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
-- [ ] `--list-vintages` cannot be combined with `--all`, `--status`, `--force`, `--congress=<n>`, `--vintage=<pl-number>`, or `--all-vintages`; `--vintage=<pl-number>` cannot be combined with `--all-vintages`; `--all-vintages` cannot be combined with `--all`, `--status`, or `--congress=<n>`.
-  <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
-- [ ] `--vintage=<pl-number>` values must match `/^\d+-\d+$/`; malformed values (including empty values, missing right-hand segments like `113-`, missing delimiters like `113`, and extra delimiters like `113--1`) are rejected before OLRC discovery with exit `2`, stderr JSON `error.code="invalid_arguments"`, and no cache or manifest changes.
-  <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
-- [ ] Existing valid invocations remain valid and unchanged: `fetch --source=olrc` still means “fetch the single latest OLRC vintage,” and non-OLRC sources do not accept any of the new vintage selectors.
-  <!-- Touches: src/commands/fetch.ts, tests/cli/fetch.test.ts -->
+### 1. CLI selectors and validation
+- [ ] `src/commands/fetch.ts` adds OLRC-only selectors `--list-vintages`, `--vintage=<pl-number>`, and `--all-vintages`. Passing any of these selectors without `--source=olrc` exits `2` and writes stderr JSON with `error.code="invalid_arguments"`.
+- [ ] `--list-vintages` is mutually exclusive with `--vintage=<pl-number>`, `--all-vintages`, `--all`, `--status`, `--congress=<integer>`, and `--force`. Any invalid combination exits `2`, writes stderr JSON with `error.code="invalid_arguments"`, and creates or mutates no cache or manifest files.
+- [ ] `--all-vintages` is mutually exclusive with `--vintage=<pl-number>`, `--all`, `--status`, and `--congress=<integer>`. Any invalid combination exits `2`, writes stderr JSON with `error.code="invalid_arguments"`, and creates or mutates no cache or manifest files.
+- [ ] `--vintage=<pl-number>` must match `/^\d+-\d+$/`. Malformed values, including empty `--vintage=`, `--vintage=113`, `--vintage=113-`, and `--vintage=113--1`, are rejected before OLRC discovery begins, exit `2`, write stderr JSON with `error.code="invalid_arguments"`, and create or mutate no cache or manifest files.
+- [ ] Repeating `--vintage=<pl-number>` more than once in the same invocation is invalid, even when every value is well-formed or identical. The command exits `2`, writes stderr JSON with `error.code="invalid_arguments"`, performs no OLRC discovery, and creates or mutates no cache or manifest files.
 
-### 2. Vintage discovery and deterministic listing output
-- [ ] A new or extended OLRC discovery path in `src/sources/olrc.ts` enumerates every vintage exposed by `https://uscode.house.gov/download/download.shtml` releasepoint links, deduplicates them by vintage string, and sorts them using the same descending vintage ordering used for latest-vintage selection.
-  <!-- Touches: src/sources/olrc.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] `fetch --source=olrc --list-vintages` performs discovery only, writes no ZIP or extracted XML artifacts, writes no success manifest mutation, exits `0`, and prints one JSON object containing `source:"olrc"`, `ok:true`, `available_vintages:[...]`, and `latest_vintage:"<value>"`.
-  <!-- Touches: src/commands/fetch.ts, src/sources/olrc.ts, tests/cli/fetch.test.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] The `available_vintages` array contains each discovered vintage exactly once, in descending order, and includes only vintages that expose at least one numeric title ZIP matching the OLRC releasepoint URL pattern already recognized by `extractReleasepointLinks()`.
-  <!-- Touches: src/sources/olrc.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] If OLRC listing discovery fails, `fetch --source=olrc --list-vintages` exits `1`, writes no success manifest mutation, and returns a JSON result with `source:"olrc"`, `ok:false`, and `error.code="upstream_request_failed"`.
-  <!-- Touches: src/commands/fetch.ts, src/sources/olrc.ts, tests/cli/fetch.test.ts -->
+### 2. Vintage discovery and listing
+- [ ] `fetch --source=olrc --list-vintages` performs exactly one OLRC releasepoint-listing discovery pass, derives a unique descending `available_vintages` array using the same vintage ordering logic as `src/sources/olrc.ts`, and prints JSON containing `source: "olrc"`, `ok: true`, `available_vintages`, and `latest_vintage`.
+- [ ] `available_vintages[0]` equals `latest_vintage`, and every entry in `available_vintages` matches `/^\d+-\d+$/`.
+- [ ] `fetch --source=olrc --list-vintages` downloads no title ZIPs, extracts no XML, and records no success/failure state in `data/manifest.json`.
+- [ ] If OLRC listing discovery fails for `--list-vintages`, the command exits `1`, prints JSON with `source: "olrc"`, `ok: false`, and `error.code="upstream_request_failed"`, and still writes no cache or manifest state.
 
 ### 3. Single-vintage historical fetch
-- [ ] `fetch --source=olrc --vintage=<pl-number>` fetches exactly one named vintage and does not silently substitute the latest or any other vintage when the requested value is present in the discovered listing.
-  <!-- Touches: src/commands/fetch.ts, src/sources/olrc.ts, tests/cli/fetch.test.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] When the requested vintage exists, OLRC downloads for that run are stored only under `data/cache/olrc/vintages/<pl-number>/title-{NN}/`, preserving the current per-title subdirectory layout inside the selected vintage directory.
-  <!-- Touches: src/sources/olrc.ts, tests/unit/sources/olrc.test.ts, tests/repo/data-acquisition-layout.test.ts -->
-- [ ] When the requested vintage does not exist in the discovered listing, the command exits `1`, downloads no title artifacts, and returns a JSON result with `error.code="unknown_vintage"` and the rejected `requested_vintage` value.
-  <!-- Touches: src/commands/fetch.ts, src/sources/olrc.ts, tests/cli/fetch.test.ts -->
-- [ ] Cookie bootstrap/session handling for a requested historical vintage uses the same in-memory OLRC request context as the latest-vintage fetch path; no cookie values are written to the manifest, cache metadata, or CLI output.
-  <!-- Touches: src/sources/olrc.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] Title-level success/failure semantics for a requested historical vintage match the existing latest-vintage OLRC contract: successful numeric titles remain cached, Title 53 reserved-empty handling remains machine-readable, and a non-Title-53 unrecoverable title failure makes the source result `ok:false` without deleting already completed title artifacts.
-  <!-- Touches: src/sources/olrc.ts, src/utils/manifest.ts, tests/unit/sources/olrc.test.ts -->
+- [ ] `fetch --source=olrc --vintage=<pl-number>` first discovers available vintages from the OLRC releasepoint listing, then fetches exactly the requested vintage when that vintage is present.
+- [ ] For a successful `--vintage=<pl-number>` run, every downloaded artifact for that invocation is stored under `data/cache/olrc/vintages/<pl-number>/...`, and the command writes no title ZIPs or extracted XML outside that requested vintage directory.
+- [ ] If the requested vintage is absent from discovery results, `fetch --source=olrc --vintage=<pl-number>` exits `1`, prints JSON with `source: "olrc"`, `ok: false`, `selected_vintage: "<pl-number>"`, and `error.code="unknown_vintage"`, and writes no cache or manifest state for that vintage.
+- [ ] A successful `--vintage=<pl-number>` run updates the manifest with machine-readable metadata for that vintage, including the selected vintage identifier and per-title download or reserved-empty state for that vintage.
 
-### 4. All-vintages historical fetch
-- [ ] `fetch --source=olrc --all-vintages` discovers the full vintage list and attempts each vintage in descending order, emitting one aggregate JSON result for `source:"olrc"` that includes `requested_scope.vintages:"all"`, `available_vintages:[...]`, `completed_vintages:[...]`, and `failed_vintages:[...]`.
-  <!-- Touches: src/commands/fetch.ts, src/sources/olrc.ts, tests/cli/fetch.test.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] `--all-vintages` is fail-open at the vintage level: if one vintage fails after some earlier vintages completed, the command still attempts later vintages, preserves already completed vintages’ artifacts and manifest entries, and exits `1` iff one or more vintages failed.
-  <!-- Touches: src/sources/olrc.ts, src/utils/manifest.ts, tests/unit/sources/olrc.test.ts, tests/cli/fetch.test.ts -->
-- [ ] A completed historical run never stores artifacts for different vintages in the same directory; every downloaded ZIP and extracted XML artifact remains rooted beneath exactly one `data/cache/olrc/vintages/<pl-number>/` directory.
-  <!-- Touches: src/sources/olrc.ts, tests/unit/sources/olrc.test.ts, tests/repo/data-acquisition-layout.test.ts -->
-- [ ] A later non-`--force` `--all-vintages` run may reuse already valid cached ZIPs/artifacts for previously fetched vintages using the same cache validation rules as the current OLRC fetch path; a `--force` run re-downloads the requested vintages.
-  <!-- Touches: src/sources/olrc.ts, tests/unit/sources/olrc.test.ts -->
+### 4. Multi-vintage historical fetch
+- [ ] `fetch --source=olrc --all-vintages` discovers the full available vintage list once, then attempts every discovered vintage in descending order.
+- [ ] Under `--all-vintages`, a failure in one vintage does not skip discovery or fetch attempts for later vintages in the same run. Vintages completed before the failure remain on disk and remain represented in the manifest after the run.
+- [ ] `fetch --source=olrc --all-vintages` exits `0` only when every discovered vintage succeeds; it exits `1` when one or more discovered vintages fail.
+- [ ] The JSON result for `--all-vintages` includes per-vintage outcome records so tests can assert which vintages succeeded, failed, or were skipped by validation before download.
 
-### 5. Manifest model for multiple OLRC vintages
-- [ ] `src/utils/manifest.ts` extends `OlrcManifestState` so the manifest can represent more than one fetched vintage at once, without losing the existing top-level `selected_vintage` field used by the latest-vintage path.
-  <!-- Touches: src/utils/manifest.ts, tests/utils/manifest.test.ts -->
-- [ ] The manifest records per-vintage metadata under a machine-readable OLRC structure that includes, at minimum, the vintage identifier, completion timestamp or last-attempt timestamp, per-title states for that vintage, and the final status for that vintage (`complete` or `failed`).
-  <!-- Touches: src/utils/manifest.ts, tests/utils/manifest.test.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] After `fetch --source=olrc` with no historical selector, `manifest.sources.olrc.selected_vintage` still points to the latest fetched vintage exactly as it does today.
-  <!-- Touches: src/sources/olrc.ts, src/utils/manifest.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] After `fetch --source=olrc --vintage=<pl-number>`, the manifest records that vintage under the new per-vintage structure and sets `selected_vintage` to `<pl-number>` for that invocation’s result state.
-  <!-- Touches: src/sources/olrc.ts, src/utils/manifest.ts, tests/unit/sources/olrc.test.ts -->
-- [ ] After `fetch --source=olrc --all-vintages`, the manifest retains all completed/failed vintage entries and sets `selected_vintage` to the newest successfully fetched vintage from that run, or leaves the prior successful value unchanged if no vintage completed successfully.
-  <!-- Touches: src/sources/olrc.ts, src/utils/manifest.ts, tests/unit/sources/olrc.test.ts -->
+### 5. Manifest compatibility
+- [ ] `src/utils/manifest.ts` is extended so `sources.olrc` can represent multiple vintages in machine-readable form, keyed by vintage identifier, while preserving the existing top-level `selected_vintage` field for compatibility with plain latest-mode OLRC fetches and existing consumers.
+- [ ] After a successful plain `fetch --source=olrc`, `sources.olrc.selected_vintage` continues to equal the newest discovered vintage exactly as before this feature.
+- [ ] Reading a manifest created before this feature does not throw or require manual migration; missing historical-vintage structures normalize to empty state during manifest load.
 
-### 6. Regression coverage and execution constraints
-- [ ] The default `npm test` suite includes fixture-backed or mocked coverage for: vintage discovery ordering, `--list-vintages` CLI output, invalid argument combinations, requested-vintage success, requested-vintage unknown-value failure, `--all-vintages` fail-open behavior, and manifest normalization for the new OLRC per-vintage state, with no live outbound dependency on `uscode.house.gov`.
-  <!-- Touches: tests/cli/fetch.test.ts, tests/unit/sources/olrc.test.ts, tests/utils/manifest.test.ts, tests/fixtures/** -->
+### 6. Unchanged latest-mode behavior
+- [ ] Plain `fetch --source=olrc` continues to fetch only the newest discovered vintage, using the same success and failure semantics already implemented in `src/sources/olrc.ts`.
+- [ ] Plain `fetch --source=olrc` does not implicitly list or backfill older vintages, and its JSON output remains compatible with the current `OlrcFetchResult` fields plus any additive backward-compatible fields introduced by this feature.
 
 ### Non-Functional
-- [ ] Performance: `fetch --source=olrc --list-vintages` completes using a single OLRC listing discovery pass and performs no title ZIP downloads.
-- [ ] Security: OLRC bootstrap cookies remain in-memory only for the active fetch operation and are not serialized into `data/manifest.json`, any cache-side manifest, or stdout/stderr JSON output.
+- [ ] Performance: `--list-vintages` performs no title ZIP downloads and no XML extraction work.
+- [ ] Security: OLRC bootstrap cookies remain in-memory only and are never serialized into manifest JSON, cache metadata, or CLI JSON output for latest, single-vintage, listing, or all-vintages modes.
 
 ## Out of Scope
-- Transforming or diffing multiple vintages into git commits in the downstream `us-code` repository
-- Appendix-title support (`5a`, `11a`, `18a`, `28a`, `50a`)
-- Compression, pruning, or garbage-collection policies for the multi-gigabyte historical cache
-- Adding new non-OLRC source selectors or changing Congress/GovInfo/VoteView/legislators fetch semantics
-- Inventing a hardcoded vintage list when the OLRC listing is reachable; fixture-only hardcoded lists for tests are fine
+- Generating historical commits in the downstream `us-code` repository
+- Cache-pruning or deletion policies for historical OLRC vintages
+- Appendix-title support beyond current OLRC behavior
+- Changes to non-OLRC fetch sources
 
 ## Dependencies
-- `https://uscode.house.gov/`
-- `https://uscode.house.gov/download/download.shtml`
-- Existing OLRC cookie bootstrap/fetch implementation from issue #8
-- Existing `src/commands/fetch.ts`, `src/sources/olrc.ts`, and `src/utils/manifest.ts` modules
-- Vitest fixture/mocking support for offline CLI and source tests
+- `https://uscode.house.gov/download/releasepoints/` and the currently used OLRC listing pages in `src/sources/olrc.ts`
+- Existing OLRC cookie-bootstrap implementation from issue #8
+- Existing fetch command, OLRC source module, and manifest module
 
 ## Acceptance Tests (human-readable)
-1. Run `npx us-code-tools fetch --source=olrc --list-vintages` against a fixture listing containing multiple releasepoint vintages. Verify stdout JSON includes one descending `available_vintages` array, one `latest_vintage` value, no ZIP downloads, and no manifest write.
-2. Run `npx us-code-tools fetch --source=olrc --list-vintages --force`. Verify exit code `2`, stderr JSON contains `error.code="invalid_arguments"`, and no cache or manifest is created.
-3. Run `npx us-code-tools fetch --source=olrc --vintage=113-1` against fixtures for that vintage. Verify all title artifacts are written only under `data/cache/olrc/vintages/113-1/`, the JSON result reports `selected_vintage:"113-1"`, and the manifest stores a per-vintage entry for `113-1`.
-4. Run `npx us-code-tools fetch --source=olrc --vintage=999-999` against a listing that does not expose that value. Verify exit code `1`, no title downloads occur, and stdout JSON reports `error.code="unknown_vintage"` and `requested_vintage:"999-999"`.
-5. Run `npx us-code-tools fetch --source=olrc --all-vintages` against fixtures where the first vintage succeeds, the second fails on one non-Title-53 title, and a later third vintage succeeds. Verify artifacts exist for the successful vintages, the failed vintage is listed in `failed_vintages`, later vintages were still attempted, and the command exits `1`.
-6. Re-run the same `--all-vintages` scenario without `--force` using already valid cached artifacts for one vintage. Verify the client reuses that cached vintage’s ZIPs and does not issue redundant network requests for those titles.
-7. Run plain `npx us-code-tools fetch --source=olrc` after historical vintages already exist. Verify the command still behaves as latest-only, updates `selected_vintage` to the newest listing value, and does not require `--vintage` or `--all-vintages`.
-8. Read `data/manifest.json` after fetching one named historical vintage and verify OLRC metadata includes both `selected_vintage` and a machine-readable per-vintage record containing per-title states for that vintage.
+1. Run `npx us-code-tools fetch --source=olrc --list-vintages` against a fixture listing containing at least three vintages. Verify exit `0`, stdout JSON contains descending unique `available_vintages`, `latest_vintage`, no title ZIP downloads occur, and `data/manifest.json` is absent or unchanged.
+2. Run `npx us-code-tools fetch --source=olrc --list-vintages --force`. Verify exit `2`, stderr JSON contains `error.code="invalid_arguments"`, and no cache or manifest file is created.
+3. Run `npx us-code-tools fetch --source=olrc --vintage=113-1` against fixtures that include that vintage. Verify exit `0`, all downloaded files land under `data/cache/olrc/vintages/113-1/`, and manifest state records that vintage.
+4. Run `npx us-code-tools fetch --source=olrc --vintage=999-999` against fixtures where that vintage is absent. Verify exit `1`, stdout JSON contains `error.code="unknown_vintage"`, and no `data/cache/olrc/vintages/999-999/` directory or manifest entry is created.
+5. Run `npx us-code-tools fetch --source=olrc --vintage=113 --force` and `npx us-code-tools fetch --source=olrc --vintage=113--1`. Verify each exits `2` before OLRC discovery, writes stderr JSON with `error.code="invalid_arguments"`, and leaves cache and manifest unchanged.
+6. Run `npx us-code-tools fetch --source=olrc --vintage=113-1 --vintage=113-1`. Verify exit `2`, stderr JSON contains `error.code="invalid_arguments"`, OLRC discovery is not invoked, and cache/manifest remain unchanged.
+7. Run `npx us-code-tools fetch --source=olrc --all-vintages` against fixtures where one middle vintage fails during download. Verify later vintages still run, successful vintages remain on disk and in the manifest, stdout JSON contains per-vintage outcomes, and the process exits `1`.
+8. Run plain `npx us-code-tools fetch --source=olrc` against the same fixture listing. Verify only the newest vintage is fetched and `sources.olrc.selected_vintage` equals that newest vintage.
 
 ## Edge Case Catalog
-- **Argument validation:** missing `--source=olrc`, duplicate `--vintage`, empty `--vintage=`, malformed `--vintage=113`, malformed `--vintage=113-`, extra delimiters like `113--1`, and combinations with `--all`, `--status`, or `--congress`.
-- **Discovery parsing:** duplicate links for the same title/vintage, relative and absolute hrefs, appendix-title ZIPs adjacent to numeric titles, malformed releasepoint hrefs, sparse vintages that expose only some numeric titles, and listing pages containing both current and historical vintages.
-- **Vintage semantics:** requested vintage present but missing one or more numeric titles, requested vintage present with Title 53 reserved-empty response, and newest discovered vintage failing while an older requested vintage succeeds.
-- **Failure and recovery:** one vintage fails after some titles completed, later vintages still proceed under `--all-vintages`, rerun after partial prior historical fetch, and `--force` overriding previously valid cache entries.
-- **Payload issues:** HTML returned with `200 OK`, unreadable ZIP, zero-byte ZIP, no XML entries, truncated ZIP, and invalid UTF-8/BOM edge cases inside extracted XML.
-- **Manifest safety:** old manifest files lacking the new per-vintage field, partial failure while updating one historical vintage, and preserving prior successful OLRC metadata when a later historical run fails.
-- **Security/privacy:** multiple `Set-Cookie` headers, bootstrap response with no cookie, cookie refresh after retry, and ensuring no cookie material appears in logs or persisted JSON.
+- **Argument validation:** missing `--source=olrc`; repeated `--vintage`; empty `--vintage=`; malformed delimiters like `113`, `113-`, and `113--1`; and invalid combinations with `--all`, `--all-vintages`, `--status`, `--congress`, or `--force`.
+- **Discovery anomalies:** duplicate listing links, mixed current/legacy listing URLs, sparse vintages, malformed releasepoint links, and vintages with missing title ZIP links.
+- **Encoding issues:** BOM markers, invalid UTF-8, or HTML payload changes in the OLRC listing page.
+- **Partial failure:** one or more vintages fail during `--all-vintages` after earlier vintages already succeeded.
+- **Fallback behavior:** cookie bootstrap succeeds but a later ZIP request fails, or the preferred listing fails and OLRC fallback listing behavior is engaged.
+- **Recovery:** a later retry after a failed `--all-vintages` run should preserve already completed vintages and resume using the persisted cache/manifest state defined by implementation.
+- **Manifest compatibility:** manifests written before the historical-vintages schema exists, plus manifests that contain only latest-mode OLRC state.
+- **Concurrency:** concurrent OLRC runs targeting the same vintage directory or the same manifest file.
 
 ## Verification Strategy
-- **Pure core:** vintage-link extraction, vintage deduplication/sorting, selector validation, requested-vintage lookup, and aggregate result reduction for `--all-vintages` should be pure helpers with fixture-driven tests.
-- **Properties:**
-  - Each persisted artifact path belongs to exactly one vintage directory.
-  - `available_vintages` contains unique values sorted descending.
-  - `selected_vintage` for plain `fetch --source=olrc` equals the newest discoverable vintage.
-  - Cookie values never appear in manifest JSON, log output, or CLI JSON output.
-- **Purity boundary:** HTTP requests, cookie bootstrap, ZIP downloads, filesystem writes, and manifest persistence are the effectful shell; discovery parsing and result classification should remain unit-testable without I/O.
+- **Pure core:** selector validation, repeated-flag detection, vintage-format validation, vintage extraction from listing links, dedupe/sort ordering, requested-vintage lookup, and `--all-vintages` aggregate exit-code reduction.
+- **Properties:** discovered vintage lists are unique and descending; every fetched artifact path belongs to exactly one `data/cache/olrc/vintages/<pl-number>/` subtree; malformed or repeated `--vintage` input fails before discovery; plain latest-mode still selects the newest vintage; cookies never persist.
+- **Purity boundary:** OLRC HTTP requests, cookie bootstrap, ZIP download, XML extraction, filesystem writes, and manifest persistence.
 
 ## Infrastructure Requirements
 - **Database:** None.
 - **API endpoints:** None.
-- **Infrastructure:** Existing local filesystem cache and manifest only; no new services, queues, or buckets.
-- **Environment variables / secrets:** No new environment variables or secrets. Existing OLRC cookie bootstrap remains dynamic and in-memory.
+- **Infrastructure:** Existing local filesystem cache and manifest; additional per-vintage OLRC storage under `data/cache/olrc/vintages/`.
+- **Environment variables / secrets:** No new environment variables or secrets.
 
 ## Complexity Estimate
 L
 
-Reason: the change spans CLI parsing, OLRC source orchestration, cache layout guarantees, manifest schema evolution, and offline regression coverage for multi-vintage flows.
-
 ## Required Skills
 - TypeScript
 - Node.js CLI design
+- Filesystem/cache layout
 - HTTP/cookie handling
-- ZIP/cache management
 - Manifest schema design
 - Vitest
