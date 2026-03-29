@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
 
@@ -313,6 +313,13 @@ process.exit(1);
     return { binDir, logPath, statePath };
   }
 
+  function createGitOnlyBin(sandbox: string) {
+    const binDir = resolve(sandbox, 'git-only-bin');
+    mkdirSync(binDir, { recursive: true });
+    symlinkSync(execSync('command -v git', { encoding: 'utf8', shell: '/bin/bash' }).trim(), resolve(binDir, 'git'));
+    return binDir;
+  }
+
   it('apply creates the annual, pl, congress, and president tags plus a byte-stable manifest', () => {
     const { sandbox, targetRepo, sha2013, sha2015 } = createTargetRepo();
     const metadataPath = writeMetadataFile(sandbox, sha2013, sha2015);
@@ -568,6 +575,80 @@ process.exit(1);
       expect(`${result.stdout}\n${result.stderr}`).toMatch(/manifest_stale|pl\/114-255|fresh/i);
       expect(existsSync(fakeGh.statePath)).toBe(false);
       expect(existsSync(fakeGh.logPath)).toBe(false);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed with git_cli_unavailable before apply mutates tags or writes the manifest', () => {
+    const { sandbox, targetRepo, sha2013, sha2015 } = createTargetRepo();
+    const metadataPath = writeMetadataFile(sandbox, sha2013, sha2015);
+
+    try {
+      const result = runCli(
+        ['milestones', 'apply', '--target', targetRepo, '--metadata', metadataPath],
+        root,
+        { env: { PATH: resolve(sandbox, 'missing-git-bin') } },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/git_cli_unavailable|git.*unavailable/i);
+      expect(execSync('git tag --list', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe('');
+      expect(existsSync(resolve(targetRepo, '.us-code-tools', 'milestones.json'))).toBe(false);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed with github_cli_unavailable before release writes when gh cannot be resolved', () => {
+    const { sandbox, targetRepo, sha2013, sha2015, sha2017 } = createReleaseTargetRepo();
+    const metadataPath = writeReleaseMetadataFile(sandbox, sha2013, sha2015, sha2017);
+    const gitOnlyBin = createGitOnlyBin(sandbox);
+
+    try {
+      const apply = runCli(['milestones', 'apply', '--target', targetRepo, '--metadata', metadataPath]);
+      expect(apply.status).toBe(0);
+
+      const result = runCli(
+        ['milestones', 'release', '--target', targetRepo, '--metadata', metadataPath],
+        root,
+        { env: { PATH: gitOnlyBin } },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/github_cli_unavailable|gh.*unavailable/i);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces the repo-local lock payload and leaves the lock untouched on conflict', () => {
+    const { sandbox, targetRepo, sha2013, sha2015 } = createTargetRepo();
+    const metadataPath = writeMetadataFile(sandbox, sha2013, sha2015);
+    const lockDir = resolve(targetRepo, '.us-code-tools');
+    const lockPath = resolve(lockDir, 'milestones.lock');
+    const existingLock = {
+      pid: 4242,
+      hostname: hostname(),
+      command: 'milestones apply --target fixture --metadata fixture.json',
+      timestamp: '2026-03-29T20:00:00.000Z',
+    };
+
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(lockPath, `${JSON.stringify(existingLock, null, 2)}\n`);
+
+    try {
+      const result = runCli(['milestones', 'apply', '--target', targetRepo, '--metadata', metadataPath]);
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toMatch(/lock_conflict/i);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(String(existingLock.pid));
+      expect(`${result.stdout}\n${result.stderr}`).toContain(existingLock.hostname);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(existingLock.command);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(existingLock.timestamp);
+      expect(readFileSync(lockPath, 'utf8')).toBe(`${JSON.stringify(existingLock, null, 2)}\n`);
+      expect(execSync('git tag --list', { cwd: targetRepo, encoding: 'utf8' }).trim()).toBe('');
+      expect(existsSync(resolve(targetRepo, '.us-code-tools', 'milestones.json'))).toBe(false);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
