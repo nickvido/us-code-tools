@@ -3,6 +3,12 @@
 ## Status
 Approved spec input: `docs/specs/14-spec.md`
 
+## Revision Context
+This revision incorporates the latest review state after adversary escalation:
+- `[security-architect]` remains approved with no blocking security changes required.
+- `[adversary-review]` identified a **code-stage** gap in `src/transforms/uslm-to-ir.ts` and `src/transforms/markdown.ts`; this is not a docs-only follow-up.
+- The architecture therefore continues to require concrete `src/` repairs plus source-backed verification, especially for ordered inline body extraction, subsection heading-block rendering, deep indentation stability, and continuation alignment.
+
 ## Inputs Reviewed
 - `docs/specs/14-spec.md`
 - GitHub issue #14 and current review context
@@ -23,7 +29,8 @@ Approved spec input: `docs/specs/14-spec.md`
 - The defect is a transform correctness gap, not an acquisition, storage, or interface problem. The implementation must stay additive to the existing `parseUslmToIr()` → `renderSectionMarkdown()` pipeline.
 - Tests must remain fixture-backed and deterministic. No live OLRC access, no runtime schema validation, and no non-fixture network access are allowed.
 - The XML parser contract remains in force: `fast-xml-parser` with namespace stripping, attributes preserved, and preserve-order parsing used where source-order fidelity matters.
-- The latest reviewer context includes `[spec-review] — APPROVED` with no blocking `[security-architect]` or `[arch-reviewer]` findings yet. There is therefore no returned-review remediation to fold in for this first architecture revision.
+- Latest review state: `[security-architect]` is approved, and `[adversary-review]` has routed the issue back as `SPEC_GAP` because current branch-head behavior still drops deep inline body text and still diverges from the approved subsection-heading / continuation-indentation contract.
+- Therefore this architecture revision explicitly treats issue #14 as an unresolved `src/` transform problem until focused parser + markdown regressions and the full Vitest suite pass against the current branch head.
 
 ---
 
@@ -217,12 +224,13 @@ renderSectionMarkdown(section: SectionIR): string
 Required observable behavior:
 - the document heading remains `# § {sectionNumber}. {heading}`
 - section-level chapeau text renders as normal body text immediately after the heading
-- each labeled node renders a leading line composed in this order when present:
+- subsection nodes render as heading blocks, not plain body lines. Canonical shape: `## ({label}) {heading} {inline body text}` when heading and inline text are present.
+- each non-subsection labeled node renders a leading line composed in this order when present:
   1. label
   2. heading
   3. inline body text
 - nested descendants render in source order with deterministic indentation by node type
-- continuation text renders after the descendant block belonging to the same parent
+- continuation text renders after the descendant block belonging to the same parent and aligns with the parent block rather than falling back to flush-left output
 - statutory notes, editorial notes, and existing frontmatter behavior remain backward-compatible
 
 ### 2.3 Rendered indentation contract
@@ -543,11 +551,13 @@ Not applicable. This issue does not expose an HTTP service.
 |---|---|
 | Preserve `<chapeau>` before first labeled child | Preserve free-text nodes in ordered container content before child rendering |
 | Preserve inline body text for every labeled level | Shared inline-body extraction from `<content>`, `<text>`, and `<p>` across all node types |
+| Preserve ordered inline body text even when later children and continuation exist | Preserve-order traversal that emits parent inline text before nested descendants and does not overwrite/drop parent body fields during child parsing |
 | Preserve `<continuation>` after nested labeled children | Ordered container rendering with explicit trailing-text phase |
+| Subsections must remain `##` heading blocks | Dedicated subsection renderer path, not the generic indented-line path |
 | Support all levels from `subsection` through `subitem` | First-class `ContentNode` types plus canonical hierarchy mapping |
 | Deterministic indentation and source order | Single renderer indentation table and preserve-order parser traversal |
 | Title 42 § 10307 regression coverage | Real XML fixture asserting chapeau + all ten paragraph texts |
-| Deep nesting regression coverage | Real fixture asserting subsection body text, nested descendants, and continuation ordering |
+| Deep Title 26 regression coverage | Real fixture asserting subsection body text, nested descendants, continuation ordering, and retention of paragraph `(b)(1)` inline body text |
 | Existing tests continue to pass | Additive transform-only changes with full-suite validation |
 
 ## Components Affected
