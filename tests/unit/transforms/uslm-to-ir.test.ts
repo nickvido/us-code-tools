@@ -126,18 +126,16 @@ describe('uslm-to-ir parser', () => {
     expect(paragraph.children).toBeInstanceOf(Array);
   });
 
-  it('preserves section identifiers and reports missing-section parse errors', async () => {
+  it('preserves codified section identifiers and synthesizes stable ids for uncodified nested sections', async () => {
     const result = await parseXmlFixture(readFixture('02-more.xml'));
     const titleIr = result.titleIr;
     const parseErrors = result.parseErrors;
 
     expect(titleIr.titleNumber).toBe(1);
-    const missing = titleIr.sections.find((section: any) => section.sectionNumber === undefined || section.sectionNumber === null || section.sectionNumber === '');
-    expect(missing).toBeUndefined();
-    expect(titleIr.sections.length).toBe(1);
-    expect(titleIr.sections[0].sectionNumber).toBe('2/3');
+    expect(titleIr.sections.some((section: any) => section.sectionNumber === '2/3')).toBe(true);
+    expect(titleIr.sections.some((section: any) => String(section.sectionNumber).startsWith('uncodified-'))).toBe(true);
     expect(Array.isArray(parseErrors)).toBe(true);
-    expect(parseErrors.some((error: any) => String(error.code ?? '').includes('MISSING_SECTION_NUMBER'))).toBe(true);
+    expect(parseErrors).toEqual([]);
   });
 
   it('uses non-empty <num @value> as the canonical number for title, chapter, and section nodes', async () => {

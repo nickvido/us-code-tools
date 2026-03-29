@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import type { ParseError, SectionIR, TitleIR } from '../domain/model.js';
-import { padTitleNumber, sectionFileSafeId } from '../domain/normalize.js';
+import { padTitleNumber, sectionFileSafeId, sortSections } from '../domain/normalize.js';
 import { atomicWriteFile, assertSafeOutputPath } from '../utils/fs.js';
 import { renderSectionMarkdown, renderTitleMarkdown } from './markdown.js';
 
@@ -11,8 +11,9 @@ export function sectionFilePath(titleNumber: number, sectionId: string): string 
 export async function writeTitleOutput(outputRoot: string, titleIr: TitleIR): Promise<{ filesWritten: number; parseErrors: ParseError[] }> {
   const parseErrors: ParseError[] = [];
   let filesWritten = 0;
+  const sortedSections = sortSections(titleIr.sections);
 
-  for (const section of titleIr.sections) {
+  for (const section of sortedSections) {
     try {
       filesWritten += await writeSection(outputRoot, section);
     } catch (error) {
@@ -28,7 +29,7 @@ export async function writeTitleOutput(outputRoot: string, titleIr: TitleIR): Pr
 
   try {
     await assertSafeOutputPath(outputRoot, titlePath);
-    await atomicWriteFile(titlePath, renderTitleMarkdown(titleIr));
+    await atomicWriteFile(titlePath, renderTitleMarkdown({ ...titleIr, sections: sortedSections }));
     filesWritten += 1;
   } catch (error) {
     parseErrors.push({

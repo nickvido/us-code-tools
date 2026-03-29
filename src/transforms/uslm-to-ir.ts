@@ -1,8 +1,11 @@
 import { XMLParser } from 'fast-xml-parser';
-import type { ContentNode, NoteIR, ParseError, ParsedTitleResult, SectionIR, TitleIR } from '../domain/model.js';
+import type { ContentNode, HierarchyIR, NoteIR, ParseError, ParsedTitleResult, SectionIR, StatutoryNoteIR, TitleIR } from '../domain/model.js';
 import { asArray, normalizeWhitespace } from '../domain/normalize.js';
 
 const MAX_NORMALIZED_FIELD_LENGTH = 1_048_576;
+const HIERARCHY_TAGS = ['subtitle', 'part', 'subpart', 'chapter', 'subchapter'] as const;
+
+type HierarchyTag = typeof HIERARCHY_TAGS[number];
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -18,9 +21,9 @@ const parser = new XMLParser({
 export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult {
   const parseErrors: ParseError[] = [];
 
-  let document: { uslm?: { title?: XmlNode }; uscDoc?: { main?: { title?: XmlNode } } };
+  let document: { uslm?: { title?: XmlNode }; uscDoc?: { meta?: XmlNode; main?: { title?: XmlNode } } };
   try {
-    document = parser.parse(stripBom(xml)) as { uslm?: { title?: XmlNode }; uscDoc?: { main?: { title?: XmlNode } } };
+    document = parser.parse(stripBom(xml)) as { uslm?: { title?: XmlNode }; uscDoc?: { meta?: XmlNode; main?: { title?: XmlNode } } };
   } catch (error) {
     return {
       titleIr: emptyTitleIr(),
@@ -33,7 +36,6 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
   }
 
   const titleNode = document.uscDoc?.main?.title ?? document.uslm?.title;
-
   if (!titleNode) {
     return {
       titleIr: emptyTitleIr(),
@@ -43,35 +45,26 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
 
   const titleNumber = parseTitleNumber(readCanonicalNumText(parseErrors, titleNode.num, xmlPath, 'title number'));
   const heading = readNormalizedText(parseErrors, titleNode.heading, xmlPath, 'title heading');
+  const positiveLaw = readPositiveLaw(document.uscDoc?.meta);
+
   const titleIr: TitleIR = {
     titleNumber,
     heading,
-    positiveLaw: null,
-    chapters: asArray(titleNode.chapter).map((chapter) => ({
-      number: readCanonicalNumText(parseErrors, chapter.num, xmlPath, 'chapter number'),
-      heading: readNormalizedText(parseErrors, chapter.heading, xmlPath, 'chapter heading'),
-    })),
+    positiveLaw,
+    chapters: collectChapterMetadata(titleNode, parseErrors, xmlPath),
     sections: [],
     sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section{section}`,
   };
 
-  for (const sectionNode of collectSectionNodes(titleNode)) {
+  let uncodifiedSectionIndex = 0;
+
+  for (const { node: sectionNode, hierarchy } of collectSectionNodes(titleNode)) {
     const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number');
     const sectionHint = readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading');
-
-    if (!sectionNumber) {
-      parseErrors.push({
-        code: 'MISSING_SECTION_NUMBER',
-        message: 'Section omitted because identifier is missing',
-        xmlPath,
-        sectionHint,
-      });
-      continue;
-    }
+    const fallbackSectionNumber = sectionNumber || `uncodified-${++uncodifiedSectionIndex}`;
 
     const sectionParseErrors: ParseError[] = [];
-    const parsedSection = parseSection(titleNumber, sectionNode, sectionParseErrors, xmlPath);
-
+    const parsedSection = parseSection(titleNumber, sectionNode, hierarchy, sectionParseErrors, xmlPath, fallbackSectionNumber);
     if (sectionParseErrors.length > 0) {
       for (const error of sectionParseErrors) {
         parseErrors.push({
@@ -91,6 +84,11 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
 
 interface XmlNode {
   '@_value'?: string;
+  '@_href'?: string;
+  '@_identifier'?: string;
+  '@_role'?: string;
+  '@_topic'?: string;
+  '@_type'?: string;
   '#text'?: string;
   num?: XmlValue;
   heading?: XmlValue;
@@ -105,7 +103,12 @@ interface XmlNode {
   content?: XmlNode;
   xref?: XmlValue;
   type?: XmlValue;
+  property?: XmlNode | XmlNode[];
+  subtitle?: XmlNode | XmlNode[];
+  part?: XmlNode | XmlNode[];
+  subpart?: XmlNode | XmlNode[];
   chapter?: XmlNode | XmlNode[];
+  subchapter?: XmlNode | XmlNode[];
   section?: XmlNode | XmlNode[];
   subsection?: XmlNode | XmlNode[];
   paragraph?: XmlNode | XmlNode[];
@@ -113,28 +116,106 @@ interface XmlNode {
   clause?: XmlNode | XmlNode[];
   item?: XmlNode | XmlNode[];
   note?: XmlNode | XmlNode[];
+  notes?: XmlNode | XmlNode[];
+  sourceCredit?: XmlValue;
+  ref?: XmlNode | XmlNode[];
+  date?: XmlNode | XmlNode[];
+  quotedContent?: XmlNode | XmlNode[];
+  inline?: XmlNode | XmlNode[];
+  continuation?: XmlNode | XmlNode[];
+  chapeau?: XmlNode | XmlNode[];
+  subclause?: XmlNode | XmlNode[];
   'cross-reference'?: XmlNode | XmlNode[];
 }
 
 type XmlValue = string | number | boolean | XmlNode | Array<string | number | boolean | XmlNode>;
 
-function collectSectionNodes(titleNode: XmlNode): XmlNode[] {
-  return [
-    ...asArray(titleNode.section),
-    ...asArray(titleNode.chapter).flatMap((chapter) => asArray(chapter.section)),
-  ];
+function collectChapterMetadata(titleNode: XmlNode, parseErrors: ParseError[], xmlPath?: string): TitleIR['chapters'] {
+  const chapters: TitleIR['chapters'] = [];
+
+  walkHierarchy(titleNode, {}, (node) => {
+    if (node.chapter) {
+      for (const chapter of asArray(node.chapter)) {
+        const number = readCanonicalNumText(parseErrors, chapter.num, xmlPath, 'chapter number');
+        const heading = readNormalizedText(parseErrors, chapter.heading, xmlPath, 'chapter heading');
+        if (number && !chapters.some((entry) => entry.number === number && entry.heading === heading)) {
+          chapters.push({ number, heading });
+        }
+      }
+    }
+  });
+
+  return chapters;
+}
+
+function collectSectionNodes(titleNode: XmlNode): Array<{ node: XmlNode; hierarchy: HierarchyIR }> {
+  const sections: Array<{ node: XmlNode; hierarchy: HierarchyIR }> = [];
+  collectSectionNodesRecursive(titleNode, {}, sections);
+  return sections;
+}
+
+function walkHierarchy(node: XmlNode, hierarchy: HierarchyIR, visit: (node: XmlNode, hierarchy: HierarchyIR) => void): void {
+  visit(node, hierarchy);
+
+  for (const tag of HIERARCHY_TAGS) {
+    for (const child of asArray(node[tag])) {
+      const number = normalizeWhitespace(readRawText(child.num));
+      const nextHierarchy = number ? { ...hierarchy, [tag]: cleanDecoratedNumText(number) } : { ...hierarchy };
+      walkHierarchy(child, nextHierarchy, visit);
+    }
+  }
+}
+
+function collectSectionNodesRecursive(
+  node: XmlNode,
+  hierarchy: HierarchyIR,
+  sections: Array<{ node: XmlNode; hierarchy: HierarchyIR }>,
+): void {
+  for (const tag of HIERARCHY_TAGS) {
+    for (const child of asArray(node[tag])) {
+      const number = normalizeWhitespace(readRawText(child.num));
+      const nextHierarchy = number ? { ...hierarchy, [tag]: cleanDecoratedNumText(number) } : { ...hierarchy };
+      collectSectionNodesRecursive(child, nextHierarchy, sections);
+    }
+  }
+
+  for (const section of asArray(node.section)) {
+    sections.push({ node: section, hierarchy });
+    collectSectionNodesRecursive(section, hierarchy, sections);
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith('@_') || key === 'section' || HIERARCHY_TAGS.includes(key as HierarchyTag)) {
+      continue;
+    }
+
+    for (const child of asArray(value as XmlNode | XmlNode[] | undefined)) {
+      if (typeof child === 'object' && child !== null) {
+        collectSectionNodesRecursive(child as XmlNode, hierarchy, sections);
+      }
+    }
+  }
 }
 
 function parseSection(
   titleNumber: number,
   sectionNode: XmlNode,
+  hierarchy: HierarchyIR,
   parseErrors: ParseError[],
-  xmlPath?: string,
+  xmlPath: string | undefined,
+  fallbackSectionNumber?: string,
 ): SectionIR {
-  const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number');
-  const source = optionalText(parseErrors, sectionNode.source, xmlPath, 'section source')
-    ?? defaultSectionSource(titleNumber, sectionNumber);
+  const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number') || fallbackSectionNumber || '';
+  const source = optionalText(parseErrors, sectionNode.source, xmlPath, 'section source') ?? defaultSectionSource(titleNumber, sectionNumber);
   const parsedNotes = parseNotes(sectionNode, parseErrors, xmlPath, sectionNumber);
+
+  const identifier = normalizeWhitespace(sectionNode['@_identifier']);
+  const isCodifiedSection = identifier.startsWith(`/us/usc/t${titleNumber}/s`)
+    || sectionNode.source !== undefined
+    || sectionNode.enacted !== undefined
+    || sectionNode['public-law'] !== undefined
+    || sectionNode['last-amended'] !== undefined
+    || sectionNode['last-amended-by'] !== undefined;
 
   return {
     titleNumber,
@@ -142,38 +223,40 @@ function parseSection(
     heading: readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading'),
     status: normalizeStatus(readRawText(sectionNode.status)),
     source,
+    identifier,
+    isCodifiedSection,
     enacted: optionalText(parseErrors, sectionNode.enacted, xmlPath, 'section enacted'),
     publicLaw: optionalText(parseErrors, sectionNode['public-law'], xmlPath, 'section public law'),
     lastAmended: optionalText(parseErrors, sectionNode['last-amended'], xmlPath, 'section last amended'),
     lastAmendedBy: optionalText(parseErrors, sectionNode['last-amended-by'], xmlPath, 'section last amended by'),
-    sourceCredits: parsedNotes.sourceCredits,
+    sourceCredit: parsedNotes.sourceCredit,
+    sourceCredits: parsedNotes.sourceCredit ? [parsedNotes.sourceCredit] : [],
+    hierarchy: Object.keys(hierarchy).length > 0 ? hierarchy : undefined,
+    statutoryNotes: parsedNotes.statutoryNotes,
     editorialNotes: parsedNotes.editorialNotes,
     content: parseContent(sectionNode, parseErrors, xmlPath, sectionNumber),
   };
 }
 
-function parseContent(
-  node: XmlNode,
-  parseErrors: ParseError[],
-  xmlPath: string | undefined,
-  sectionHint: string,
-): ContentNode[] {
+function parseContent(node: XmlNode, parseErrors: ParseError[], xmlPath: string | undefined, sectionHint: string): ContentNode[] {
   const contentRoot = node.content ?? node;
   const content: ContentNode[] = [];
+
+  for (const textNode of [...asArray(contentRoot.chapeau), ...asArray(contentRoot.continuation)]) {
+    const text = readNodeText(parseErrors, textNode, xmlPath, sectionHint, 'section text');
+    if (text) content.push({ type: 'text', text });
+  }
+
   content.push(...asArray(contentRoot.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
   content.push(...asArray(contentRoot.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
-  content.push(
-    ...asArray(contentRoot['cross-reference']).map((child) => ({
-      type: 'text',
-      text: readNodeText(parseErrors, child, xmlPath, sectionHint, 'cross-reference'),
-    } as const)),
-  );
+
   if (content.length === 0) {
-    const text = optionalText(parseErrors, contentRoot.p ?? contentRoot.text, xmlPath, 'section text', sectionHint);
+    const text = optionalText(parseErrors, contentRoot.p ?? contentRoot.text ?? contentRoot, xmlPath, 'section text', sectionHint);
     if (text) {
       content.push({ type: 'text', text });
     }
   }
+
   return content.filter((entry) => !(entry.type === 'text' && !entry.text));
 }
 
@@ -185,29 +268,26 @@ function parseLabeledNode(
   sectionHint: string,
 ): ContentNode {
   const children: ContentNode[] = [];
+
+  for (const textNode of [...asArray(node.chapeau), ...asArray(node.continuation)]) {
+    const text = readNodeText(parseErrors, textNode, xmlPath, sectionHint, `${type} text`);
+    if (text) children.push({ type: 'text', text });
+  }
+
   children.push(...asArray(node.subsection).map((child) => parseLabeledNode('subsection', child, parseErrors, xmlPath, sectionHint)));
   children.push(...asArray(node.paragraph).map((child) => parseLabeledNode('paragraph', child, parseErrors, xmlPath, sectionHint)));
   children.push(...asArray(node.subparagraph).map((child) => parseLabeledNode('subparagraph', child, parseErrors, xmlPath, sectionHint)));
   children.push(...asArray(node.clause).map((child) => parseLabeledNode('clause', child, parseErrors, xmlPath, sectionHint)));
+  children.push(...asArray(node.subclause).map((child) => parseLabeledNode('item', child, parseErrors, xmlPath, sectionHint)));
   children.push(...asArray(node.item).map((child) => parseLabeledNode('item', child, parseErrors, xmlPath, sectionHint)));
-  children.push(
-    ...asArray(node.note).map((child) => ({
-      type: 'text',
-      text: optionalText(parseErrors, child.text, xmlPath, `${type} note`, sectionHint) ?? '',
-    } as const)),
-  );
-  children.push(
-    ...asArray(node['cross-reference']).map((child) => ({
-      type: 'text',
-      text: readNodeText(parseErrors, child, xmlPath, sectionHint, `${type} cross-reference`),
-    } as const)),
-  );
+
+  const inlineText = optionalText(parseErrors, node.content ?? node.text ?? node.p, xmlPath, `${type} text`, sectionHint);
 
   return {
     type,
-    label: readNormalizedText(parseErrors, node.num, xmlPath, `${type} label`, sectionHint),
+    label: readCanonicalNumText(parseErrors, node.num, xmlPath, `${type} label`, sectionHint),
     heading: optionalText(parseErrors, node.heading, xmlPath, `${type} heading`, sectionHint),
-    text: optionalText(parseErrors, node.text, xmlPath, `${type} text`, sectionHint),
+    text: inlineText,
     children: children.filter((entry) => !(entry.type === 'text' && !entry.text)),
   };
 }
@@ -217,37 +297,44 @@ function parseNotes(
   parseErrors: ParseError[],
   xmlPath: string | undefined,
   sectionHint: string,
-): { sourceCredits: string[]; editorialNotes: NoteIR[] } {
-  const sourceCredits: string[] = [];
+): { sourceCredit?: string; statutoryNotes: StatutoryNoteIR[]; editorialNotes: NoteIR[] } {
+  let sourceCredit = optionalText(parseErrors, sectionNode.sourceCredit, xmlPath, 'section source credit', sectionHint);
+  const statutoryNotes: StatutoryNoteIR[] = [];
   const editorialNotes: NoteIR[] = [];
 
   for (const noteNode of asArray(sectionNode.note)) {
-    const text = optionalText(parseErrors, noteNode.text, xmlPath, 'section note', sectionHint);
-    if (!text) {
-      continue;
-    }
+    const text = optionalText(parseErrors, noteNode.text ?? noteNode, xmlPath, 'section note', sectionHint);
+    if (!text) continue;
 
-    const kind = normalizeNoteKind(readRawText(noteNode.type));
+    const kind = normalizeWhitespace(readRawText(noteNode.type));
     if (kind === 'source-credit') {
-      sourceCredits.push(text);
+      sourceCredit ??= text;
       continue;
     }
 
-    editorialNotes.push({ kind, text });
+    editorialNotes.push({
+      kind: kind === 'editorial' || kind === 'cross-reference' ? kind : 'misc',
+      text,
+    });
   }
 
-  for (const crossReference of asArray(sectionNode['cross-reference'])) {
-    const text = readNodeText(parseErrors, crossReference, xmlPath, sectionHint, 'section cross-reference');
-    if (text) {
-      editorialNotes.push({ kind: 'cross-reference', text });
+  for (const notesNode of asArray(sectionNode.notes)) {
+    for (const noteNode of asArray(notesNode.note)) {
+      const text = readNodeText(parseErrors, noteNode, xmlPath, sectionHint, 'statutory note');
+      if (!text) continue;
+      statutoryNotes.push({
+        heading: optionalText(parseErrors, noteNode.heading, xmlPath, 'statutory note heading', sectionHint),
+        topic: normalizeWhitespace(readRawText(noteNode['@_topic'] ?? noteNode.type)) || undefined,
+        text,
+      });
     }
   }
 
-  return { sourceCredits, editorialNotes };
+  return { sourceCredit, statutoryNotes, editorialNotes };
 }
 
 function readRawText(value: XmlValue | undefined): string {
-  if (value === undefined) {
+  if (value === undefined || value === null) {
     return '';
   }
 
@@ -260,20 +347,46 @@ function readRawText(value: XmlValue | undefined): string {
   }
 
   const node = value;
-  const pieces = [node['#text'], node.text, node.p, node.xref, node.heading, node.num, node.content]
+  const href = normalizeWhitespace(node['@_href']);
+  const ownText = [node['#text'], node.text, node.p, node.content, node.heading, node.num, node.chapeau, node.continuation, node.quotedContent, node.inline]
     .map((entry) => readRawText(entry))
-    .filter(Boolean);
+    .filter(Boolean)
+    .join(' ');
 
-  return pieces.join(' ');
+  const childText = Object.entries(node)
+    .filter(([key]) => !key.startsWith('@_') && !['#text', 'text', 'p', 'content', 'heading', 'num', 'chapeau', 'continuation', 'quotedContent', 'inline'].includes(key))
+    .map(([, entry]) => readRawText(entry as XmlValue))
+    .filter(Boolean)
+    .join(' ');
+
+  const combined = normalizeWhitespace([ownText, childText].filter(Boolean).join(' '));
+  if (!href) {
+    return combined;
+  }
+
+  const label = combined || href;
+  return `[${label}](${hrefToMarkdownLink(href)})`;
 }
 
-function readCanonicalNumText(
-  parseErrors: ParseError[],
-  value: XmlValue | undefined,
-  xmlPath: string | undefined,
-  fieldName: string,
-  sectionHint?: string,
-): string {
+function hrefToMarkdownLink(href: string): string {
+  const uscMatch = href.match(/^\/us\/usc\/t(\d+)\/s([^/]+)$/u);
+  if (uscMatch) {
+    const title = String(Number.parseInt(uscMatch[1] ?? '0', 10)).padStart(2, '0');
+    const section = uscMatch[2] ?? '';
+    return `../../title-${title}/section-${sectionToFileId(section)}.md`;
+  }
+
+  return href;
+}
+
+function sectionToFileId(sectionNumber: string): string {
+  const sanitized = sectionNumber.replaceAll('/', '-');
+  const match = sanitized.match(/^(\d+)(.*)$/u);
+  if (!match) return sanitized;
+  return `${String(Number.parseInt(match[1] ?? '0', 10)).padStart(5, '0')}${match[2] ?? ''}`;
+}
+
+function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
   if (!value || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || Array.isArray(value)) {
     return cleanDecoratedNumText(readNormalizedText(parseErrors, value, xmlPath, fieldName, sectionHint));
   }
@@ -290,34 +403,20 @@ function cleanDecoratedNumText(value: string): string {
   return normalizeWhitespace(value)
     .replace(/^§\s*/u, '')
     .replace(/^Title\s+/iu, '')
+    .replace(/^Subtitle\s+/iu, '')
+    .replace(/^Subchapter\s+/iu, '')
+    .replace(/^Subpart\s+/iu, '')
+    .replace(/^Part\s+/iu, '')
     .replace(/^Chapter\s+/iu, '')
     .replace(/[.—]+$/u, '')
     .trim();
 }
 
-function readNormalizedText(
-  parseErrors: ParseError[],
-  value: XmlValue | undefined,
-  xmlPath: string | undefined,
-  fieldName: string,
-  sectionHint?: string,
-): string {
-  return enforceNormalizedFieldLimit(
-    parseErrors,
-    normalizeWhitespace(readRawText(value)),
-    xmlPath,
-    fieldName,
-    sectionHint,
-  );
+function readNormalizedText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
+  return enforceNormalizedFieldLimit(parseErrors, normalizeWhitespace(readRawText(value)), xmlPath, fieldName, sectionHint);
 }
 
-function enforceNormalizedFieldLimit(
-  parseErrors: ParseError[],
-  text: string,
-  xmlPath: string | undefined,
-  fieldName: string,
-  sectionHint?: string,
-): string {
+function enforceNormalizedFieldLimit(parseErrors: ParseError[], text: string, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
   if (text.length > MAX_NORMALIZED_FIELD_LENGTH) {
     parseErrors.push({
       code: 'UNSUPPORTED_STRUCTURE',
@@ -331,23 +430,11 @@ function enforceNormalizedFieldLimit(
   return text;
 }
 
-function readNodeText(
-  parseErrors: ParseError[],
-  node: XmlNode,
-  xmlPath: string | undefined,
-  sectionHint: string,
-  fieldName: string,
-): string {
-  return readNormalizedText(parseErrors, node.text ?? node, xmlPath, fieldName, sectionHint);
+function readNodeText(parseErrors: ParseError[], node: XmlNode, xmlPath: string | undefined, sectionHint: string, fieldName: string): string {
+  return readNormalizedText(parseErrors, node, xmlPath, fieldName, sectionHint);
 }
 
-function optionalText(
-  parseErrors: ParseError[],
-  value: XmlValue | undefined,
-  xmlPath: string | undefined,
-  fieldName: string,
-  sectionHint?: string,
-): string | undefined {
+function optionalText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string | undefined {
   const text = readNormalizedText(parseErrors, value, xmlPath, fieldName, sectionHint);
   return text || undefined;
 }
@@ -358,14 +445,6 @@ function normalizeStatus(value: string): SectionIR['status'] {
     return normalized;
   }
   return 'in-force';
-}
-
-function normalizeNoteKind(value: string): NoteIR['kind'] {
-  const normalized = normalizeWhitespace(value);
-  if (normalized === 'editorial' || normalized === 'cross-reference' || normalized === 'source-credit') {
-    return normalized;
-  }
-  return 'misc';
 }
 
 function defaultSectionSource(titleNumber: number, sectionNumber: string): string {
@@ -380,6 +459,18 @@ function parseTitleNumber(value: string): number {
 
   const match = value.match(/(\d+)/);
   return match ? Number.parseInt(match[1] ?? '0', 10) : 0;
+}
+
+function readPositiveLaw(metaNode: XmlNode | undefined): boolean | null {
+  for (const property of asArray(metaNode?.property)) {
+    const role = normalizeWhitespace(readRawText((property as XmlNode)['@_role']));
+    if (role === 'is-positive-law') {
+      const text = normalizeWhitespace(readRawText(property));
+      if (text === 'yes') return true;
+      if (text === 'no') return false;
+    }
+  }
+  return null;
 }
 
 function emptyTitleIr(): TitleIR {
