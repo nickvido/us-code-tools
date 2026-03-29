@@ -33,6 +33,9 @@ function runTransform(outputDir: string, fixtureZip: string) {
 }
 
 describe('CLI integration — Title 1 fixture run', () => {
+  beforeAll(() => {
+    execSync('npm run build', { cwd: process.cwd(), stdio: 'ignore' });
+  });
   const manifest = JSON.parse(
     readFileSync(resolve(process.cwd(), 'tests', 'fixtures', 'title-01', 'manifest.json'), 'utf8'),
   ) as {
@@ -89,6 +92,22 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(result.stderr).toContain('1 through 54');
 
     const outTree = resolve(outputDir, 'uscode', 'title-99');
+    expect(readdirSync(outputDir).length).toBe(0);
+    rmSync(outputDir, { recursive: true, force: true });
+  });
+
+  it('keeps the integer-only title contract for appendix identifiers like 5a', async () => {
+    const outputDir = mkdtempSync(join(tmpdir(), 'us-code-tools-it-appendix-'));
+
+    const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+    const result = spawnSync(process.execPath, [distEntry, 'transform', '--title', '5a', '--output', outputDir], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/1 through 54|integer|number/i);
     expect(readdirSync(outputDir).length).toBe(0);
     rmSync(outputDir, { recursive: true, force: true });
   });

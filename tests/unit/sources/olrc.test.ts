@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { dirname, resolve, join } from 'node:path';
-import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -264,6 +264,202 @@ describe('OLRC source and cache behavior', () => {
       rmSync(cacheRoot, { recursive: true, force: true });
     }
   }, 45000);
+
+  it('bootstraps homepage cookies before requesting download.shtml and releasepoint ZIPs', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+
+    // NOTE: Use the EXISTING fetchOlrcSource signature — do NOT add a new overload for this test.
+    const fetchOlrcSource = pickCallable(mod, [
+      'fetchOlrcSource',
+      'fetchOlrc',
+      'runOlrcFetch',
+      'fetchSourceOlrc',
+    ]);
+
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-olrc-cookie-'));
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const title01Zip = readFileSync(resolve(process.cwd(), 'tests/fixtures/title-01/title-01.zip'));
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      requests.push({ url, headers });
+
+      if (url === 'https://uscode.house.gov/') {
+        return new Response('<html>home</html>', {
+          status: 200,
+          headers: {
+            'Set-Cookie': 'JSESSIONID=test-session; Path=/; Secure; HttpOnly',
+            'Content-Type': 'text/html; charset=utf-8',
+          },
+        });
+      }
+
+      if (url === 'https://uscode.house.gov/download/download.shtml') {
+        return new Response(`
+          <html><body>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">Title 1</a>
+          </body></html>
+        `, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      if (url.endsWith('xml_usc01@119-73.zip')) {
+        return new Response(title01Zip, { status: 200, headers: { 'Content-Type': 'application/zip' } });
+      }
+
+      return new Response('not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchOlrcSource({ force: false, cacheRoot });
+      expect((result as any)?.ok).toBe(true);
+
+      const listing = requests.find((request) => request.url === 'https://uscode.house.gov/download/download.shtml');
+      const zip = requests.find((request) => request.url.endsWith('xml_usc01@119-73.zip'));
+
+      expect(requests[0]?.url).toBe('https://uscode.house.gov/');
+      expect(listing?.headers.get('cookie') ?? listing?.headers.get('Cookie')).toContain('JSESSIONID=test-session');
+      expect(zip?.headers.get('cookie') ?? zip?.headers.get('Cookie')).toContain('JSESSIONID=test-session');
+    } finally {
+      globalThis.fetch = originalFetch;
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('parses download.shtml releasepoint listings by newest numeric vintage and ignores appendix links', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+
+    const fetchPlan = pickCallable(mod, [
+      'fetchOlrcVintagePlan',
+      'getOlrcVintagePlan',
+      'discoverOlrcVintagePlan',
+      'discoverOlrcReleasePlan',
+    ]);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://uscode.house.gov/') {
+        return new Response('ok', { status: 200, headers: { 'Set-Cookie': 'JSESSIONID=listing-session; Path=/; HttpOnly' } });
+      }
+
+      if (url === 'https://uscode.house.gov/download/download.shtml') {
+        return new Response(`
+          <html><body>
+            <a href="/download/releasepoints/us/pl/118/200/xml_usc01@118-200.zip">older title 1</a>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">newer title 1</a>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc05a@119-73.zip">appendix 5a</a>
+            <a href="https://uscode.house.gov/download/releasepoints/us/pl/119/73/xml_usc02@119-73.zip">newer title 2</a>
+          </body></html>
+        `, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const plan = await fetchPlan();
+      const anyPlan = plan as any;
+      const urls = JSON.stringify(anyPlan);
+      expect(urls).toContain('119-73');
+      expect(urls).toContain('xml_usc01@119-73.zip');
+      expect(urls).toContain('xml_usc02@119-73.zip');
+      expect(urls).not.toContain('xml_usc05a@119-73.zip');
+      expect(urls).not.toContain('xml_usc01@118-200.zip');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('accepts a bounded large XML entry fixture for current Title 42 sized extraction', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+
+    const selectXmlEntries = pickCallable(mod, [
+      'extractXmlEntriesFromZip',
+      'listXmlEntriesFromZip',
+      'collectXmlEntries',
+      'getXmlEntriesFromZip',
+      'parseZipEntries',
+    ]);
+
+    const zipPath = buildFixtureZip([
+      { name: 'usc42.xml', bytes: 80 * 1024 * 1024 },
+    ]);
+
+    try {
+      const entries = await selectXmlEntries(readFileSync(zipPath));
+      expect(Array.isArray(entries)).toBe(true);
+      expect(entries).toHaveLength(1);
+      expect((entries[0] as any).xmlPath ?? (entries[0] as any).path ?? (entries[0] as any).name).toContain('usc42.xml');
+    } finally {
+      rmSync(dirname(zipPath), { recursive: true, force: true });
+    }
+  }, 45000);
+
+  it('classifies Title 53 HTML payloads as reserved_empty and avoids caching unreadable artifacts', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+
+    // NOTE: Use the EXISTING fetchOlrcSource signature — do NOT add a new overload for this test.
+    const fetchOlrcSource = pickCallable(mod, [
+      'fetchOlrcSource',
+      'fetchOlrc',
+      'runOlrcFetch',
+      'fetchSourceOlrc',
+    ]);
+
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-olrc-53-'));
+    const originalFetch = globalThis.fetch;
+    const title01Zip = readFileSync(resolve(process.cwd(), 'tests/fixtures/title-01/title-01.zip'));
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://uscode.house.gov/') {
+        return new Response('ok', { status: 200, headers: { 'Set-Cookie': 'JSESSIONID=reserved-empty; Path=/; HttpOnly' } });
+      }
+
+      if (url === 'https://uscode.house.gov/download/download.shtml') {
+        return new Response(`
+          <html><body>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">Title 1</a>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc53@119-73.zip">Title 53</a>
+          </body></html>
+        `, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      if (url.endsWith('xml_usc01@119-73.zip')) {
+        return new Response(title01Zip, { status: 200, headers: { 'Content-Type': 'application/zip' } });
+      }
+
+      if (url.endsWith('xml_usc53@119-73.zip')) {
+        return new Response('<html><body>Reserved</body></html>', { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchOlrcSource({ force: false, cacheRoot });
+      const encoded = JSON.stringify(result);
+      expect((result as any)?.ok).toBe(true);
+      expect(encoded).toContain('reserved_empty');
+      expect(encoded).toContain('53');
+      expect(encoded).toContain('119-73');
+      expect(existsSync(resolve(cacheRoot, 'title-53'))).toBe(false);
+      expect(existsSync(resolve(cacheRoot, 'vintages', '119-73', 'title-53'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function buildFixtureZip(entries: Array<{ name: string; content?: string; symlinkTo?: string; bytes?: number }>): string {
