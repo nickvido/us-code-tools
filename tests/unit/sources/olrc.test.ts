@@ -408,6 +408,79 @@ describe('OLRC source and cache behavior', () => {
     }
   });
 
+  it('retries homepage bootstrap after a transient bootstrap failure before touching download.shtml', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+
+    // NOTE: Use the EXISTING fetchOlrcSource signature — do NOT add a new overload for this test.
+    const fetchOlrcSource = pickCallable(mod, [
+      'fetchOlrcSource',
+      'fetchOlrc',
+      'runOlrcFetch',
+      'fetchSourceOlrc',
+    ]);
+
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-olrc-cookie-retry-'));
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const title01Zip = readFileSync(resolve(process.cwd(), 'tests/fixtures/title-01/title-01.zip'));
+    let bootstrapAttempts = 0;
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      requests.push({ url, headers });
+
+      if (url === 'https://uscode.house.gov/') {
+        bootstrapAttempts += 1;
+        if (bootstrapAttempts === 1) {
+          const error = new Error('bootstrap timed out') as NodeJS.ErrnoException;
+          error.code = 'ETIMEDOUT';
+          throw error;
+        }
+
+        return new Response('<html>home</html>', {
+          status: 200,
+          headers: {
+            'Set-Cookie': 'JSESSIONID=recovered-session; Path=/; Secure; HttpOnly',
+            'Content-Type': 'text/html; charset=utf-8',
+          },
+        });
+      }
+
+      if (url === 'https://uscode.house.gov/download/download.shtml') {
+        expect(headers.get('cookie') ?? headers.get('Cookie')).toContain('JSESSIONID=recovered-session');
+        return new Response(`
+          <html><body>
+            <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">Title 1</a>
+          </body></html>
+        `, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      if (url.endsWith('xml_usc01@119-73.zip')) {
+        expect(headers.get('cookie') ?? headers.get('Cookie')).toContain('JSESSIONID=recovered-session');
+        return new Response(title01Zip, { status: 200, headers: { 'Content-Type': 'application/zip' } });
+      }
+
+      return new Response('not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchOlrcSource({ force: false, cacheRoot });
+      expect((result as any)?.ok).toBe(true);
+      expect(bootstrapAttempts).toBe(2);
+      expect(requests.slice(0, 2).map((request) => request.url)).toEqual([
+        'https://uscode.house.gov/',
+        'https://uscode.house.gov/',
+      ]);
+      expect(requests[2]?.url).toBe('https://uscode.house.gov/download/download.shtml');
+    } finally {
+      globalThis.fetch = originalFetch;
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
   it('parses download.shtml releasepoint listings by newest numeric vintage and ignores appendix links', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
     const mod = await safeImport(modulePath);

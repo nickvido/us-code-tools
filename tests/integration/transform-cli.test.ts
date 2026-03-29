@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, mkdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
@@ -14,6 +14,24 @@ function buildFixtureZip(outputDir: string): string {
   writeFileSync(resolve(fixtureDir, 'usc01.xml'), readFileSync(resolve(process.cwd(), 'tests/fixtures/xml/title-01/01-base.xml')));
   writeFileSync(resolve(fixtureDir, 'nested/usc01-extra.xml'), readFileSync(resolve(process.cwd(), 'tests/fixtures/xml/title-01/02-more.xml')));
 
+  const command = `cd ${JSON.stringify(fixtureDir)} && zip -qr ${JSON.stringify(zipPath)} .`;
+  execSync(command, { cwd: outputDir, shell: '/bin/bash' });
+  return zipPath;
+}
+
+function buildCurrentFormatFixtureZip(outputDir: string, title: number): string {
+  const fixtureDir = resolve(outputDir, `title-${String(title).padStart(2, '0')}-xml`);
+  const zipPath = resolve(outputDir, `title-${String(title).padStart(2, '0')}.zip`);
+  mkdirSync(fixtureDir, { recursive: true });
+
+  const xml = readFileSync(resolve(process.cwd(), 'tests/fixtures/xml/title-01/04-current-uscdoc.xml'), 'utf8')
+    .replace(/<docNumber>1<\/docNumber>/g, `<docNumber>${title}</docNumber>`)
+    .replace(/identifier="\/us\/usc\/t1"/g, `identifier="/us/usc/t${title}"`)
+    .replace(/<num>Title 1<\/num>/g, `<num>Title ${title}</num>`)
+    .replace(/USC-prelim-title1-section/g, `USC-prelim-title${title}-section`)
+    .replace(/\/us\/usc\/t1\//g, `/us/usc/t${title}/`);
+
+  writeFileSync(resolve(fixtureDir, `usc${String(title).padStart(2, '0')}.xml`), xml);
   const command = `cd ${JSON.stringify(fixtureDir)} && zip -qr ${JSON.stringify(zipPath)} .`;
   execSync(command, { cwd: outputDir, shell: '/bin/bash' });
   return zipPath;
@@ -109,6 +127,55 @@ describe('CLI integration — Title 1 fixture run', () => {
     rmSync(sandboxRoot, { recursive: true, force: true });
   });
 
+  it('transforms numeric titles 1..52 and 54 from selected-vintage cache fixtures while surfacing a reserved-empty diagnostic for title 53', async () => {
+    const sandboxRoot = mkdtempSync(join(tmpdir(), 'us-code-tools-it-title-matrix-'));
+    const vintage = '119-73';
+    const fixtureZipByTitle = new Map<number, string>();
+
+    for (let title = 1; title <= 54; title += 1) {
+      if (title === 53) {
+        continue;
+      }
+
+      fixtureZipByTitle.set(title, buildCurrentFormatFixtureZip(sandboxRoot, title));
+    }
+
+    seedSelectedVintageOlrcCacheMatrix(sandboxRoot, vintage, fixtureZipByTitle);
+
+    const distEntry = resolve(process.cwd(), 'dist', 'index.js');
+
+    try {
+      for (let title = 1; title <= 54; title += 1) {
+        const outputDir = resolve(sandboxRoot, `out-${String(title).padStart(2, '0')}`);
+        const result = spawnSync(process.execPath, [distEntry, 'transform', '--title', String(title), '--output', outputDir], {
+          cwd: sandboxRoot,
+          encoding: 'utf8',
+          timeout: 60_000,
+          env: process.env,
+        });
+
+        if (title === 53) {
+          expect(result.status).not.toBe(0);
+          expect(`${result.stdout}\n${result.stderr}`).toMatch(/reserved|empty|no xml entries|not a zip|zip/i);
+          expect(existsSync(resolve(outputDir, 'uscode', 'title-53'))).toBe(false);
+          continue;
+        }
+
+        expect(result.status).toBe(0);
+        const report = parseReportFromStdout(result.stdout);
+        expect(report?.sections_found).toBeGreaterThan(0);
+        expect(report?.files_written).toBeGreaterThanOrEqual(2);
+
+        const outTree = resolve(outputDir, 'uscode', `title-${String(title).padStart(2, '0')}`);
+        const written = readdirSync(outTree);
+        expect(written).toContain('_title.md');
+        expect(written.some((name) => name.startsWith('section-'))).toBe(true);
+      }
+    } finally {
+      rmSync(sandboxRoot, { recursive: true, force: true });
+    }
+  }, 180000);
+
   it('returns non-zero and writes no files on invalid title input', async () => {
     const outputDir = mkdtempSync(join(tmpdir(), 'us-code-tools-it-fail-'));
 
@@ -156,6 +223,69 @@ function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vint
   const zipPath = resolve(titleDir, zipName);
   copyFileSync(fixtureZip, zipPath);
 
+  writeManifest(repoRoot, vintage, {
+    [String(title)]: {
+      title,
+      vintage,
+      status: 'downloaded',
+      zip_path: `data/cache/olrc/vintages/${vintage}/title-${String(title).padStart(2, '0')}/${zipName}`,
+      extraction_path: `data/cache/olrc/vintages/${vintage}/title-${String(title).padStart(2, '0')}/extracted`,
+      byte_count: readFileSync(fixtureZip).byteLength,
+      fetched_at: '2026-03-28T22:31:00.000Z',
+      extracted_xml_artifacts: [],
+    },
+  });
+
+  return zipPath;
+}
+
+function seedSelectedVintageOlrcCacheMatrix(repoRoot: string, vintage: string, fixtureZipByTitle: Map<number, string>) {
+  const titles: Record<string, unknown> = {};
+
+  for (let title = 1; title <= 54; title += 1) {
+    const titleKey = String(title);
+    const paddedTitle = String(title).padStart(2, '0');
+
+    if (title === 53) {
+      titles[titleKey] = {
+        title,
+        vintage,
+        status: 'reserved_empty',
+        skipped_at: '2026-03-28T22:31:00.000Z',
+        source_url: `https://uscode.house.gov/download/releasepoints/us/pl/${vintage.replace('-', '/')}/xml_usc${paddedTitle}@${vintage}.zip`,
+        classification_reason: 'no_xml_entries',
+      };
+      continue;
+    }
+
+    const fixtureZip = fixtureZipByTitle.get(title);
+    if (!fixtureZip) {
+      throw new Error(`Missing fixture zip for title ${title}`);
+    }
+
+    const titleDir = resolve(repoRoot, 'data', 'cache', 'olrc', 'vintages', vintage, `title-${paddedTitle}`);
+    mkdirSync(titleDir, { recursive: true });
+
+    const zipName = `xml_usc${paddedTitle}@${vintage}.zip`;
+    const zipPath = resolve(titleDir, zipName);
+    copyFileSync(fixtureZip, zipPath);
+
+    titles[titleKey] = {
+      title,
+      vintage,
+      status: 'downloaded',
+      zip_path: `data/cache/olrc/vintages/${vintage}/title-${paddedTitle}/${zipName}`,
+      extraction_path: `data/cache/olrc/vintages/${vintage}/title-${paddedTitle}/extracted`,
+      byte_count: readFileSync(fixtureZip).byteLength,
+      fetched_at: '2026-03-28T22:31:00.000Z',
+      extracted_xml_artifacts: [],
+    };
+  }
+
+  writeManifest(repoRoot, vintage, titles);
+}
+
+function writeManifest(repoRoot: string, vintage: string, titles: Record<string, unknown>) {
   writeFileSync(
     resolve(repoRoot, 'data', 'manifest.json'),
     JSON.stringify(
@@ -167,18 +297,7 @@ function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vint
             selected_vintage: vintage,
             last_success_at: '2026-03-28T22:31:00.000Z',
             last_failure: null,
-            titles: {
-              [String(title)]: {
-                title,
-                vintage,
-                status: 'downloaded',
-                zip_path: `data/cache/olrc/vintages/${vintage}/title-${String(title).padStart(2, '0')}/${zipName}`,
-                extraction_path: `data/cache/olrc/vintages/${vintage}/title-${String(title).padStart(2, '0')}/extracted`,
-                byte_count: readFileSync(fixtureZip).byteLength,
-                fetched_at: '2026-03-28T22:31:00.000Z',
-                extracted_xml_artifacts: [],
-              },
-            },
+            titles,
           },
           congress: {
             last_success_at: null,
@@ -230,8 +349,6 @@ function seedSelectedVintageOlrcCache(repoRoot: string, fixtureZip: string, vint
       2,
     ),
   );
-
-  return zipPath;
 }
 
 function parseReportFromStdout(stdout: string): any {
