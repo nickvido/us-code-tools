@@ -96,7 +96,7 @@ async function writeChapterOutput(
 
   const orderedChapters = [...chapterBuckets.keys()].sort(compareChapterIdentifiers);
   const chapterFilenames = new Map<string, string>();
-  const sectionTargetsByNumber = new Map<string, string>();
+  const sectionTargetsByRef = new Map<string, string>();
 
   for (const chapter of orderedChapters) {
     const heading = titleIr.chapters.find((entry) => entry.number === chapter)?.heading ?? `Chapter ${chapter}`;
@@ -113,12 +113,12 @@ async function writeChapterOutput(
 
     chapterFilenames.set(outputFilename, chapter);
     for (const section of chapterBuckets.get(chapter) ?? []) {
-      sectionTargetsByNumber.set(section.sectionNumber, `./${outputFilename}#${embeddedSectionAnchor(section.sectionNumber)}`);
+      sectionTargetsByRef.set(buildSectionTargetKey(titleIr.titleNumber, section.sectionNumber), `./${outputFilename}#${embeddedSectionAnchor(section.sectionNumber)}`);
     }
   }
 
   for (const section of uncategorizedSections) {
-    sectionTargetsByNumber.set(section.sectionNumber, `./_uncategorized.md#${embeddedSectionAnchor(section.sectionNumber)}`);
+    sectionTargetsByRef.set(buildSectionTargetKey(titleIr.titleNumber, section.sectionNumber), `./_uncategorized.md#${embeddedSectionAnchor(section.sectionNumber)}`);
   }
 
   for (const chapter of orderedChapters) {
@@ -129,7 +129,7 @@ async function writeChapterOutput(
 
     try {
       await assertSafeOutputPath(outputRoot, absolutePath);
-      await atomicWriteFile(absolutePath, renderChapterMarkdown(titleIr, chapter, sections, { sectionTargetsByNumber }));
+      await atomicWriteFile(absolutePath, renderChapterMarkdown(titleIr, chapter, sections, { sectionTargetsByRef }));
       filesWritten += 1;
     } catch (error) {
       parseErrors.push({
@@ -144,7 +144,7 @@ async function writeChapterOutput(
     const absolutePath = resolve(titleDirectoryPath, '_uncategorized.md');
     try {
       await assertSafeOutputPath(outputRoot, absolutePath);
-      await atomicWriteFile(absolutePath, renderUncategorizedMarkdown(titleIr, uncategorizedSections, { sectionTargetsByNumber }));
+      await atomicWriteFile(absolutePath, renderUncategorizedMarkdown(titleIr, uncategorizedSections, { sectionTargetsByRef }));
       filesWritten += 1;
     } catch (error) {
       parseErrors.push({
@@ -156,6 +156,10 @@ async function writeChapterOutput(
   }
 
   return { filesWritten, parseErrors, warnings };
+}
+
+function buildSectionTargetKey(titleNumber: number, sectionNumber: string): string {
+  return `${titleNumber}:${sectionNumber}`;
 }
 
 async function writeSection(outputRoot: string, section: SectionIR, titleHeading?: string | null, normalizedTarget?: NormalizedTitleTarget): Promise<number> {

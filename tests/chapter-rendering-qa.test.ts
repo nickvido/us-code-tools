@@ -208,7 +208,7 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
     };
 
     const sectionTargetMap = new Map([
-      ['411', `../${title3Directory}/chapter-004-officers-and-employees.md#section-411`],
+      ['3:411', `../${title3Directory}/chapter-004-officers-and-employees.md#section-411`],
     ]);
 
     // NOTE: Use the EXISTING renderChapterMarkdown signature. Do not add a test-only overload.
@@ -217,7 +217,7 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
       title as never,
       '4' as never,
       [section] as never,
-      { sectionTargetsByNumber: sectionTargetMap } as never,
+      { sectionTargetsByRef: sectionTargetMap } as never,
     );
 
     expect(markdown).toContain(`../${title3Directory}/chapter-004-officers-and-employees.md#section-411`);
@@ -254,7 +254,7 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
       title as never,
       '4' as never,
       [section] as never,
-      { sectionTargetsByNumber: new Map() } as never,
+      { sectionTargetsByRef: new Map() } as never,
     );
 
     expect(markdown).toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title3-section411');
@@ -291,8 +291,8 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
       '4' as never,
       parsed.titleIr.sections as never,
       {
-        sectionTargetsByNumber: new Map([
-          ['411', `../${title3Directory}/chapter-004-officers-and-employees.md#section-411`],
+        sectionTargetsByRef: new Map([
+          ['3:411', `../${title3Directory}/chapter-004-officers-and-employees.md#section-411`],
         ]),
       } as never,
     );
@@ -337,8 +337,8 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
       {
         // NOTE: Use the EXISTING renderChapterMarkdown signature. Do not add a test-only overload.
         // This map intentionally contains only the current title's local section-411 target.
-        sectionTargetsByNumber: new Map([
-          ['411', './chapter-004-officers-and-employees.md#section-411'],
+        sectionTargetsByRef: new Map([
+          ['5:411', './chapter-004-officers-and-employees.md#section-411'],
         ]),
       } as never,
     );

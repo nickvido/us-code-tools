@@ -51,7 +51,7 @@ export function renderChapterMarkdown(
   titleIr: TitleIR,
   chapter: string,
   sections: SectionIR[],
-  options: { sectionTargetsByNumber?: ReadonlyMap<string, string> } = {},
+  options: { sectionTargetsByRef?: ReadonlyMap<string, string> } = {},
 ): string {
   const heading = titleIr.chapters.find((entry) => entry.number === chapter)?.heading ?? `Chapter ${chapter}`;
   const frontmatter = {
@@ -62,13 +62,13 @@ export function renderChapterMarkdown(
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByNumber), frontmatter);
+  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByRef), frontmatter);
 }
 
 export function renderUncategorizedMarkdown(
   titleIr: TitleIR,
   sections: SectionIR[],
-  options: { sectionTargetsByNumber?: ReadonlyMap<string, string> } = {},
+  options: { sectionTargetsByRef?: ReadonlyMap<string, string> } = {},
 ): string {
   const frontmatter = {
     title: titleIr.titleNumber,
@@ -77,7 +77,7 @@ export function renderUncategorizedMarkdown(
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByNumber), frontmatter);
+  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByRef), frontmatter);
 }
 
 export function renderTitleMarkdown(titleIr: TitleIR): string {
@@ -107,7 +107,7 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
 function renderEmbeddedSections(
   titleIr: TitleIR,
   sections: SectionIR[],
-  sectionTargetsByNumber?: ReadonlyMap<string, string>,
+  sectionTargetsByRef?: ReadonlyMap<string, string>,
 ): string {
   const bodies = sections.map((section) => {
     const anchor = embeddedSectionAnchor(section.sectionNumber);
@@ -119,7 +119,7 @@ function renderEmbeddedSections(
       anchor,
     });
 
-    return rewriteChapterModeLinks(body, titleIr, sectionTargetsByNumber);
+    return rewriteChapterModeLinks(body, titleIr, sectionTargetsByRef);
   });
 
   return `${bodies.join('\n\n').trimEnd()}\n`;
@@ -173,18 +173,22 @@ function renderSectionHeading(section: SectionIR, level: number): string {
 function rewriteChapterModeLinks(
   markdown: string,
   titleIr: TitleIR,
-  sectionTargetsByNumber?: ReadonlyMap<string, string>,
+  sectionTargetsByRef?: ReadonlyMap<string, string>,
 ): string {
   return markdown.replace(/\[([^\]]+)\]\(((?:\.\.\/title-[^/]+\/|\.\/)?section-([^)]+?)\.md)\)/gu, (_match, linkText: string, href: string, safeId: string) => {
     const sectionNumber = readSectionNumberFromSafeId(safeId);
-    const target = sectionTargetsByNumber?.get(sectionNumber);
+    const referencedTitleNumber = readReferencedTitleNumberFromHref(href) ?? readReferencedTitleNumberFromLinkText(linkText) ?? titleIr.titleNumber;
+    const target = sectionTargetsByRef?.get(buildSectionTargetKey(referencedTitleNumber, sectionNumber));
     if (target) {
       return `[${linkText}](${target})`;
     }
 
-    const referencedTitleNumber = readReferencedTitleNumberFromHref(href) ?? readReferencedTitleNumberFromLinkText(linkText) ?? titleIr.titleNumber;
     return `[${linkText}](${buildCanonicalSectionUrl(referencedTitleNumber, sectionNumber)})`;
   });
+}
+
+function buildSectionTargetKey(titleNumber: number, sectionNumber: string): string {
+  return `${titleNumber}:${sectionNumber}`;
 }
 
 function readReferencedTitleNumberFromHref(href: string): number | undefined {
