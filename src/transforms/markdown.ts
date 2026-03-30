@@ -1,7 +1,12 @@
 import matter from 'gray-matter';
 import { relative } from 'node:path';
 import type { ContentNode, NoteIR, SectionIR, StatutoryNoteIR, TitleIR } from '../domain/model.js';
-import { sectionFileSafeId, sortSections, titleDirectoryName } from '../domain/normalize.js';
+import {
+  buildCanonicalSectionUrl,
+  embeddedSectionAnchor,
+  sectionFileSafeId,
+  titleDirectoryName,
+} from '../domain/normalize.js';
 
 export function sectionRelativeMarkdownLink(
   from: { titleNumber: number; heading?: string | null },
@@ -32,32 +37,14 @@ export function renderSectionMarkdown(section: SectionIR): string {
   if (section.lastAmendedBy) frontmatter.last_amended_by = section.lastAmendedBy;
   if (section.sourceCredit) frontmatter.source_credit = section.sourceCredit;
 
-  const lines = [`# § ${section.sectionNumber}. ${section.heading}`.trim()];
+  const body = renderSectionBody(section, {
+    sectionHeadingLevel: 1,
+    statutoryNotesLevel: 2,
+    statutoryNoteItemLevel: 3,
+    editorialNotesLevel: 2,
+  });
 
-  const duplicateTextTracker = buildDuplicateTextTracker(section.content);
-
-  for (const node of section.content) {
-    const rendered = renderContentNode(node, 0, duplicateTextTracker);
-    if (rendered) {
-      lines.push(rendered);
-    }
-  }
-
-  if (section.statutoryNotes && section.statutoryNotes.length > 0) {
-    lines.push('', '## Statutory Notes');
-    for (const note of section.statutoryNotes) {
-      lines.push(renderStatutoryNote(note));
-    }
-  }
-
-  if (section.editorialNotes && section.editorialNotes.length > 0) {
-    lines.push('', '## Notes');
-    for (const note of section.editorialNotes) {
-      lines.push(`- ${renderNote(note)}`);
-    }
-  }
-
-  return matter.stringify(compactLines(lines), frontmatter);
+  return matter.stringify(body, frontmatter);
 }
 
 export function renderChapterMarkdown(
@@ -75,7 +62,7 @@ export function renderChapterMarkdown(
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(sections, options.sectionTargetsByNumber), frontmatter);
+  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByNumber), frontmatter);
 }
 
 export function renderUncategorizedMarkdown(
@@ -90,7 +77,7 @@ export function renderUncategorizedMarkdown(
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(sections, options.sectionTargetsByNumber), frontmatter);
+  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByNumber), frontmatter);
 }
 
 export function renderTitleMarkdown(titleIr: TitleIR): string {
@@ -114,86 +101,189 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
     }
   }
 
-  lines.push('', '## Sections');
-  for (const section of sortSections(titleIr.sections)) {
-    lines.push(`- § ${section.sectionNumber}. ${section.heading}`);
-  }
-
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-function renderEmbeddedSections(sections: SectionIR[], sectionTargetsByNumber?: ReadonlyMap<string, string>): string {
+function renderEmbeddedSections(
+  titleIr: TitleIR,
+  sections: SectionIR[],
+  sectionTargetsByNumber?: ReadonlyMap<string, string>,
+): string {
   const bodies = sections.map((section) => {
-    const body = matter(renderSectionMarkdown(section)).content.trim();
-    return rewriteChapterModeLinks(body, sectionTargetsByNumber);
+    const anchor = embeddedSectionAnchor(section.sectionNumber);
+    const body = renderSectionBody(section, {
+      sectionHeadingLevel: 2,
+      statutoryNotesLevel: 3,
+      statutoryNoteItemLevel: 4,
+      editorialNotesLevel: 3,
+      anchor,
+    });
+
+    return rewriteChapterModeLinks(body, titleIr, sectionTargetsByNumber);
   });
+
   return `${bodies.join('\n\n').trimEnd()}\n`;
 }
 
-function rewriteChapterModeLinks(markdown: string, sectionTargetsByNumber?: ReadonlyMap<string, string>): string {
-  if (!sectionTargetsByNumber || sectionTargetsByNumber.size === 0) {
-    return markdown;
+function renderSectionBody(
+  section: SectionIR,
+  options: {
+    sectionHeadingLevel: number;
+    statutoryNotesLevel: number;
+    statutoryNoteItemLevel: number;
+    editorialNotesLevel: number;
+    anchor?: string;
+  },
+): string {
+  const lines: string[] = [];
+
+  if (options.anchor) {
+    lines.push(`<a id="${options.anchor}"></a>`);
   }
 
+  lines.push(renderSectionHeading(section, options.sectionHeadingLevel));
+
+  const contentLines = renderContentNodes(section.content);
+  if (contentLines.length > 0) {
+    lines.push('', ...contentLines);
+  }
+
+  if (section.statutoryNotes && section.statutoryNotes.length > 0) {
+    lines.push('', `${'#'.repeat(options.statutoryNotesLevel)} Statutory Notes`);
+    for (const note of section.statutoryNotes) {
+      lines.push('', ...renderStatutoryNote(note, options.statutoryNoteItemLevel));
+    }
+  }
+
+  if (section.editorialNotes && section.editorialNotes.length > 0) {
+    lines.push('', `${'#'.repeat(options.editorialNotesLevel)} Notes`);
+    for (const note of section.editorialNotes) {
+      lines.push(`- ${renderNote(note)}`);
+    }
+  }
+
+  return compactLines(lines);
+}
+
+function renderSectionHeading(section: SectionIR, level: number): string {
+  const prefix = '#'.repeat(level);
+  return section.heading ? `${prefix} § ${section.sectionNumber}. ${section.heading}` : `${prefix} § ${section.sectionNumber}.`;
+}
+
+function rewriteChapterModeLinks(
+  markdown: string,
+  titleIr: TitleIR,
+  sectionTargetsByNumber?: ReadonlyMap<string, string>,
+): string {
   return markdown.replace(/\]\((?:\.\/)?section-([^)]+?)\.md\)/gu, (_match, safeId: string) => {
     const sectionNumber = readSectionNumberFromSafeId(safeId);
-    const target = sectionTargetsByNumber.get(sectionNumber);
-    if (!target) {
-      return `](./section-${safeId}.md)`;
+    const target = sectionTargetsByNumber?.get(sectionNumber);
+    if (target) {
+      return `](${target})`;
     }
 
-    return `](./${target})`;
+    return `](${buildCanonicalSectionUrl(readReferencedTitleNumber(markdown, sectionNumber) ?? titleIr.titleNumber, sectionNumber)})`;
   });
+}
+
+function readReferencedTitleNumber(markdown: string, sectionNumber: string): number | undefined {
+  const pattern = new RegExp(`\\[([^\\]]*section\\s+${escapeForRegExp(sectionNumber)}\\s+of\\s+title\\s+(\\d+)[^\\]]*)\\]\\((?:\\.\\/)?section-${escapeForRegExp(sectionFileSafeId(sectionNumber))}\\.md\\)`, 'iu');
+  const match = markdown.match(pattern);
+  if (!match) {
+    return undefined;
+  }
+
+  const titleNumber = Number.parseInt(match[2] ?? '', 10);
+  return Number.isFinite(titleNumber) ? titleNumber : undefined;
+}
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
 function readSectionNumberFromSafeId(safeId: string): string {
   return safeId.replace(/^0+(?=\d)/u, '');
 }
 
-function renderContentNode(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string {
+function renderContentNodes(nodes: ContentNode[]): string[] {
+  const lines: string[] = [];
+  const duplicateTextTracker = buildDuplicateTextTracker(nodes);
+
+  for (const node of nodes) {
+    const renderedLines = renderContentNodeLines(node, 0, duplicateTextTracker);
+    if (renderedLines.length === 0) {
+      continue;
+    }
+
+    if (lines.length > 0 && shouldSeparateWithBlankLine(lines, renderedLines)) {
+      lines.push('');
+    }
+
+    lines.push(...renderedLines);
+  }
+
+  return lines;
+}
+
+function shouldSeparateWithBlankLine(existingLines: string[], nextLines: string[]): boolean {
+  const lastNonBlank = [...existingLines].reverse().find((line) => line !== '');
+  const firstNonBlank = nextLines.find((line) => line !== '');
+  if (!lastNonBlank || !firstNonBlank) {
+    return false;
+  }
+
+  return !isLabeledLine(lastNonBlank) && isLabeledLine(firstNonBlank);
+}
+
+function isLabeledLine(line: string): boolean {
+  return /^\s*\([^)]+\)/u.test(line);
+}
+
+function renderContentNodeLines(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string[] {
   const runtimeNode = readRuntimeNode(node);
   const nodeType = runtimeNode.type ?? runtimeNode.kind;
   const children = runtimeNode.children ?? [];
-  const text = runtimeNode.text ?? '';
+  const text = (runtimeNode.text ?? '').trim();
   const label = runtimeNode.label ?? '';
-  const heading = runtimeNode.heading;
+  const heading = (runtimeNode.heading ?? '').trim();
 
   if (nodeType === 'text') {
-    const key = text.trim();
+    const key = text;
     const remaining = duplicateTextTracker.get(key) ?? 0;
     if (remaining > 1) {
       duplicateTextTracker.set(key, remaining - 1);
-      return '';
+      return [];
     }
 
     if (remaining === 1) {
       duplicateTextTracker.delete(key);
     }
 
-    return `${' '.repeat(indent)}${text.trimEnd()}`.trimEnd();
+    return key ? [`${' '.repeat(indent)}${key}`] : [];
   }
 
-  if (nodeType === 'subsection') {
-    const headingLine = ['##', formatLabel(label), heading, text].filter(Boolean).join(' ');
-    const lines = [headingLine.trimEnd()];
-    for (const child of children) {
-      const rendered = renderContentNode(child, 0, duplicateTextTracker);
-      if (rendered) {
-        lines.push(rendered);
-      }
-    }
-    return lines.join('\n');
+  const lines: string[] = [];
+  const line = renderLabeledLine(label, heading, text, indent);
+  if (line) {
+    lines.push(line);
   }
 
-  const labelLine = [formatLabel(label), heading, text].filter(Boolean).join(' ').trim();
-  const lines = [labelLine ? `${' '.repeat(indent)}${labelLine}`.trimEnd() : `${' '.repeat(indent)}${text.trimEnd()}`.trimEnd()].filter(Boolean);
   for (const child of children) {
-    const rendered = renderContentNode(child, indent + 2, duplicateTextTracker);
-    if (rendered) {
-      lines.push(rendered);
-    }
+    lines.push(...renderContentNodeLines(child, indent + 2, duplicateTextTracker));
   }
-  return lines.join('\n');
+
+  return lines;
+}
+
+function renderLabeledLine(label: string, heading: string, text: string, indent: number): string {
+  const formattedLabel = formatLabel(label);
+  const headingText = heading ? (text ? `${formatHeading(heading, indent)} — ${text}` : formatHeading(heading, indent)) : text;
+  const parts = [formattedLabel, headingText].filter(Boolean);
+  return parts.length > 0 ? `${' '.repeat(indent)}${parts.join(' ')}`.trimEnd() : '';
+}
+
+function formatHeading(heading: string, indent: number): string {
+  return indent === 0 ? `**${heading}**` : `*${heading}*`;
 }
 
 function buildDuplicateTextTracker(nodes: ContentNode[]): Map<string, number> {
@@ -255,11 +345,15 @@ function formatLabel(label: string): string {
   return trimmed.startsWith('(') ? trimmed : `(${trimmed})`;
 }
 
-function renderStatutoryNote(note: StatutoryNoteIR): string {
-  const parts = [] as string[];
-  if (note.heading) parts.push(`### ${note.heading}`);
-  parts.push(note.text);
-  return parts.join('\n');
+function renderStatutoryNote(note: StatutoryNoteIR, headingLevel: number): string[] {
+  const lines: string[] = [];
+  if (note.heading) {
+    lines.push(`${'#'.repeat(headingLevel)} ${note.heading}`);
+  }
+  if (note.text) {
+    lines.push(note.text);
+  }
+  return lines;
 }
 
 function renderNote(note: NoteIR): string {

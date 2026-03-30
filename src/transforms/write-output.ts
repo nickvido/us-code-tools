@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import type { ParseError, SectionIR, TitleIR, TransformGroupBy, TransformWarning } from '../domain/model.js';
 import type { NormalizedTitleTarget } from '../domain/normalize.js';
-import { chapterOutputFilename, compareChapterIdentifiers, sectionFileSafeId, sortSections, titleDirectoryName } from '../domain/normalize.js';
+import { chapterOutputFilename, compareChapterIdentifiers, embeddedSectionAnchor, sectionFileSafeId, sortSections, titleDirectoryName } from '../domain/normalize.js';
 import { atomicWriteFile, assertSafeOutputPath } from '../utils/fs.js';
 import { renderChapterMarkdown, renderSectionMarkdown, renderTitleMarkdown, renderUncategorizedMarkdown } from './markdown.js';
 
@@ -113,12 +113,12 @@ async function writeChapterOutput(
 
     chapterFilenames.set(outputFilename, chapter);
     for (const section of chapterBuckets.get(chapter) ?? []) {
-      sectionTargetsByNumber.set(section.sectionNumber, outputFilename);
+      sectionTargetsByNumber.set(section.sectionNumber, `./${outputFilename}#${embeddedSectionAnchor(section.sectionNumber)}`);
     }
   }
 
   for (const section of uncategorizedSections) {
-    sectionTargetsByNumber.set(section.sectionNumber, '_uncategorized.md');
+    sectionTargetsByNumber.set(section.sectionNumber, `./_uncategorized.md#${embeddedSectionAnchor(section.sectionNumber)}`);
   }
 
   for (const chapter of orderedChapters) {

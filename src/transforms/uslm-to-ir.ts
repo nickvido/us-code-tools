@@ -71,7 +71,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     positiveLaw,
     chapters: collectChapterMetadata(titleNode, parseErrors, xmlPath),
     sections: [],
-    sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section{section}`,
+    sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}`,
   };
 
   let uncodifiedSectionIndex = 0;
