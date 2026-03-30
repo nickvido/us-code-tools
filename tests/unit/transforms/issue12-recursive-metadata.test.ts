@@ -178,16 +178,16 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
     });
     expect(parsed10.data.subchapter).toBeUndefined();
     expect(parsed10.content).toContain('## Statutory Notes');
-    expect(parsed10.content).toMatch(/\[[^\]]*125\(d\)[^\]]*\]\(\.\.\/title-10-armed-forces\/section-00125d\.md\)/u);
-    expect(parsed10.content).not.toMatch(/\[[^\]]+\]\(\.\.\.\/title-10\/section-00125d\.md\)/u);
+    expect(parsed10.content).toMatch(/\[[^\]]*125\(d\)[^\]]*\]\(\.\.\/title-10-armed-forces\/section-00125d\.md(?:#ref=[^)]+)?\)/u);
+    expect(parsed10.content).not.toMatch(/\[[^\]]+\]\(\.\.\.\/title-10\/section-00125d\.md(?:#ref=[^)]+)?\)/u);
     expect(parsed10.content).toContain(
-      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department',
+      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md#ref=10%3A191) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md#ref=10%3A125%2Fd) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department',
     );
     expect(parsed10.content).toContain(
-      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department; and',
+      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md#ref=10%3A191) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md#ref=10%3A125%2Fd) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department; and',
     );
     expect(parsed10.content).toContain(
-      '[Section 125(d) of this title](../title-10-armed-forces/section-00125d.md), referred to in subsec. (a)(12)(A), was repealed by Pub. L. 99–433, title III, § 301(b)(1), Oct. 1, 1986, 100 Stat. 1022.',
+      '[Section 125(d) of this title](../title-10-armed-forces/section-00125d.md#ref=10%3A125%2Fd), referred to in subsec. (a)(12)(A), was repealed by Pub. L. 99–433, title III, § 301(b)(1), Oct. 1, 1986, 100 Stat. 1022.',
     );
     expect(String(parsed10.data.source_credit)).toContain('(Aug. 10, 1956, ch. 1041, 70A Stat. 3;');
     expect(String(parsed10.data.source_credit)).toContain('Pub. L. 85–861, §§ 1(1), 33(a)(1), Sept. 2, 1958, 72 Stat. 1437, 1564;');
@@ -211,7 +211,7 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
     expect(parsed26.content).toMatch(/\[[^\]]+\]\((?:\.\.\/)+title-\d{2}(?:-[a-z0-9-]+)?\/section-\d{5}[A-Za-z0-9-]*\.md\)/u);
   });
 
-  it('renders _title.md sections in canonical numeric-plus-suffix order instead of discovery order', async () => {
+  it('omits the duplicate per-section list from _title.md while keeping chapter navigation', async () => {
     const { renderTitleMarkdown } = await loadMarkdownRenderers();
 
     const markdown = renderTitleMarkdown({
@@ -229,17 +229,15 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
       ],
     });
 
-    const positions = [
-      'Heading alpha 1',
-      'Heading beta 2',
-      'Heading gamma 10',
-      'Heading delta 106a',
-      'Heading epsilon 106b',
-      'Heading zeta 114',
-    ].map((needle) => markdown.indexOf(needle));
-
-    expect(positions.every((position) => position >= 0)).toBe(true);
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(markdown).toContain('# Title 1. Ordering test');
+    expect(markdown).toContain('## Chapters');
+    expect(markdown).toContain('- I — Ordering');
+    expect(markdown).not.toContain('Heading alpha 1');
+    expect(markdown).not.toContain('Heading beta 2');
+    expect(markdown).not.toContain('Heading gamma 10');
+    expect(markdown).not.toContain('Heading delta 106a');
+    expect(markdown).not.toContain('Heading epsilon 106b');
+    expect(markdown).not.toContain('Heading zeta 114');
   });
 
   it('keeps mixed-case suffix ordering deterministic for 106, 106A, 106a, and 106b', async () => {
@@ -271,15 +269,12 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
       ],
     });
 
-    const positions = [
-      'Heading alpha 106',
-      'Heading beta 106A',
-      'Heading gamma 106a',
-      'Heading delta 106b',
-    ].map((needle) => markdown.indexOf(needle));
-
-    expect(positions.every((position) => position >= 0)).toBe(true);
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(markdown).toContain('## Chapters');
+    expect(markdown).toContain('- I — Ordering');
+    expect(markdown).not.toContain('Heading alpha 106');
+    expect(markdown).not.toContain('Heading beta 106A');
+    expect(markdown).not.toContain('Heading gamma 106a');
+    expect(markdown).not.toContain('Heading delta 106b');
   });
 
   it('derives zero-padded section filenames from the write-output path helper for canonical examples', async () => {

@@ -532,6 +532,10 @@ function parseLabeledNodeOrdered(
       continue;
     }
 
+    if (tag === 'num' || tag === 'heading') {
+      continue;
+    }
+
     const text = readOrderedNodeText(parseErrors, [child], xmlPath, sectionHint, `${type} text`);
     if (text) {
       inlineParts.push(text);
