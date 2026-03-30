@@ -367,8 +367,14 @@ function renderStructuredLine(
 
 function renderSubsectionHeading(label: string, heading: string, text: string): string {
   const formattedLabel = formatLabel(label);
-  const inlineText = [formattedLabel, heading, text].filter(Boolean).join(' ');
-  return inlineText ? `## ${inlineText}` : '';
+  const headingPart = [formattedLabel, heading].filter(Boolean).join(' ');
+  if (headingPart && text) {
+    return `**${headingPart}** ${text}`;
+  }
+  if (headingPart) {
+    return `**${headingPart}**`;
+  }
+  return text || '';
 }
 
 function renderLabeledLine(
