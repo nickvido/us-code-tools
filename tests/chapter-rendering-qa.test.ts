@@ -433,6 +433,149 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
     expect(markdown).not.toContain('./section-00125-d.md');
   });
 
+  it('rewrites real parse-output slash-bearing markdown links to mapped chapter anchors even when the link text omits the title number', () => {
+    const title = {
+      titleNumber: 5,
+      heading: 'Government Organization and Employees',
+      positiveLaw: true,
+      chapters: [{ number: '4', heading: 'Officers and Employees' }],
+      sections: [],
+      sourceUrlTemplate: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5',
+    };
+
+    const section = {
+      titleNumber: 5,
+      sectionNumber: '4101',
+      heading: 'Training',
+      source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section4101',
+      hierarchy: { chapter: '4' },
+      content: [
+        {
+          type: 'text',
+          text: '[section 125/d](../title-05-government-organization-and-employees/section-00125d.md)',
+        },
+      ],
+      statutoryNotes: [],
+      editorialNotes: [],
+    };
+
+    const markdown = renderChapterMarkdown(
+      title as never,
+      '4' as never,
+      [section] as never,
+      {
+        sectionTargetsByRef: new Map([
+          ['5:125/d', './chapter-004-officers-and-employees.md#section-125-d'],
+        ]),
+      } as never,
+    );
+
+    expect(markdown).toContain('[section 125/d]');
+    expect(markdown).toContain('./chapter-004-officers-and-employees.md#section-125-d');
+    expect(markdown).not.toContain('../title-05-government-organization-and-employees/section-00125d.md');
+    expect(markdown).not.toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125d');
+  });
+
+  it('falls back from real parse-output slash-bearing markdown links to the exact canonical slash-bearing URL when no chapter target exists', () => {
+    const title = {
+      titleNumber: 5,
+      heading: 'Government Organization and Employees',
+      positiveLaw: true,
+      chapters: [{ number: '4', heading: 'Officers and Employees' }],
+      sections: [],
+      sourceUrlTemplate: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5',
+    };
+
+    const section = {
+      titleNumber: 5,
+      sectionNumber: '4101',
+      heading: 'Training',
+      source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section4101',
+      hierarchy: { chapter: '4' },
+      content: [
+        {
+          type: 'text',
+          text: '[section 125/d](../title-05-government-organization-and-employees/section-00125d.md)',
+        },
+      ],
+      statutoryNotes: [],
+      editorialNotes: [],
+    };
+
+    const markdown = renderChapterMarkdown(
+      title as never,
+      '4' as never,
+      [section] as never,
+      { sectionTargetsByRef: new Map() } as never,
+    );
+
+    expect(markdown).toContain('[section 125/d]');
+    expect(markdown).toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125/d');
+    expect(markdown).not.toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125d');
+    expect(markdown).not.toContain('../title-05-government-organization-and-employees/section-00125d.md');
+  });
+
+  it('renders deterministic embedded section anchors for numeric, alphanumeric, hyphenated, and slash-bearing identifiers', () => {
+    const title = {
+      titleNumber: 5,
+      heading: 'Government Organization and Employees',
+      positiveLaw: true,
+      chapters: [{ number: '4', heading: 'Officers and Employees' }],
+      sections: [],
+      sourceUrlTemplate: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5',
+    };
+
+    const sections = [
+      {
+        titleNumber: 5,
+        sectionNumber: '411',
+        heading: 'Numeric',
+        source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section411',
+        hierarchy: { chapter: '4' },
+        content: [],
+        statutoryNotes: [],
+        editorialNotes: [],
+      },
+      {
+        titleNumber: 5,
+        sectionNumber: '125d',
+        heading: 'Alphanumeric',
+        source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125d',
+        hierarchy: { chapter: '4' },
+        content: [],
+        statutoryNotes: [],
+        editorialNotes: [],
+      },
+      {
+        titleNumber: 5,
+        sectionNumber: '301-1',
+        heading: 'Hyphenated',
+        source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section301-1',
+        hierarchy: { chapter: '4' },
+        content: [],
+        statutoryNotes: [],
+        editorialNotes: [],
+      },
+      {
+        titleNumber: 5,
+        sectionNumber: '125/d',
+        heading: 'Slash bearing',
+        source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125/d',
+        hierarchy: { chapter: '4' },
+        content: [],
+        statutoryNotes: [],
+        editorialNotes: [],
+      },
+    ];
+
+    const markdown = renderChapterMarkdown(title as never, '4' as never, sections as never);
+
+    expect(markdown).toContain('{#section-411}');
+    expect(markdown).toContain('{#section-125d}');
+    expect(markdown).toContain('{#section-301-1}');
+    expect(markdown).toContain('{#section-125-d}');
+  });
+
   it('preserves section headings across equivalent ordered and non-ordered parse paths and returns empty string when heading is absent', () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <uslm>
