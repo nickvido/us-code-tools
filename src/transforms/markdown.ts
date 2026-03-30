@@ -176,7 +176,7 @@ function rewriteChapterModeLinks(
   sectionTargetsByRef?: ReadonlyMap<string, string>,
 ): string {
   return markdown.replace(/\[([^\]]+)\]\(((?:\.\.\/title-[^/]+\/|\.\/)?section-([^)]+?)\.md)\)/gu, (_match, linkText: string, href: string, safeId: string) => {
-    const sectionNumber = readSectionNumberFromSafeId(safeId);
+    const sectionNumber = readReferencedSectionNumber(linkText, safeId);
     const referencedTitleNumber = readReferencedTitleNumberFromHref(href) ?? readReferencedTitleNumberFromLinkText(linkText) ?? titleIr.titleNumber;
     const target = sectionTargetsByRef?.get(buildSectionTargetKey(referencedTitleNumber, sectionNumber));
     if (target) {
@@ -209,6 +209,20 @@ function readReferencedTitleNumberFromLinkText(linkText: string): number | undef
 
   const titleNumber = Number.parseInt(match[1] ?? '', 10);
   return Number.isFinite(titleNumber) ? titleNumber : undefined;
+}
+
+function readReferencedSectionNumber(linkText: string, safeId: string): string {
+  return readReferencedSectionNumberFromLinkText(linkText) ?? readSectionNumberFromSafeId(safeId);
+}
+
+function readReferencedSectionNumberFromLinkText(linkText: string): string | undefined {
+  const match = linkText.match(/\bsection\s+(.+?)\s+of\s+title\s+\d+\b/iu);
+  if (!match) {
+    return undefined;
+  }
+
+  const sectionNumber = (match[1] ?? '').trim();
+  return sectionNumber || undefined;
 }
 
 function readSectionNumberFromSafeId(safeId: string): string {
