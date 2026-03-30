@@ -86,7 +86,7 @@
 - Latest issue #16 branch state at head `3c6f834`: the earlier collision-overwrite path and the final partial-chapter-write exit-code path are both covered in `tests/integration/issue16-transform-cli.test.ts` and currently passing.
 - Latest issue #20 branch state at head `787674b`: the adversary parser-path link regression is covered in `tests/unit/transforms/markdown.test.ts`, slug normalization lives in `tests/unit/domain/normalize-title-directory.test.ts`, and issue #12 legacy expectations were updated to the slugged-directory contract.
 - Latest issue #21 branch state at head `051ce97`: the original historical-mode contract tests plus the sparse-vintage adversary regression in `tests/cli/issue21-historical-olrc.test.ts` all pass; `tests/utils/issue21-manifest-historical.test.ts` covers additive manifest normalization for old OLRC manifests.
-- Latest issue #29 branch state at head `67d7f86`: `tests/chapter-rendering-qa.test.ts` covers the adversary-identified ordered-xref regressions, `tests/unit/issue16-chapter-mode.test.ts` was updated to assert H2 embedded headings/anchors, and the targeted slash-bearing mapped/fallback cases now pass.
+- Latest issue #29 implementation state at head `76bfe71`: `tests/chapter-rendering-qa.test.ts` covers the adversary-identified ordered-xref regressions plus the late standalone regressions, `tests/unit/issue16-chapter-mode.test.ts` asserts H2 embedded headings/anchors while standalone subsection labels remain body content, `tests/unit/transforms/markdown.test.ts`, `tests/unit/transforms/issue12-recursive-metadata.test.ts`, and `tests/integration/issue12-transform-cli.test.ts` lock in that standalone relative USC links expose no visible `#ref=` fragments, and the full Vitest / `tsc --noEmit` / build rerun passed after that fix.
 - Fastest focused verification for issue #12 now is:
   - `rtk test npx vitest run tests/unit/transforms/issue12-recursive-metadata.test.ts tests/integration/issue12-transform-cli.test.ts tests/unit/transforms/write-output.test.ts`
   - expected result at current head: all tests pass, including the Title 10 assertions that require `Aug. 10, 1956, ch. 1041` and `70A Stat. 3` to survive around inline refs.
@@ -97,8 +97,8 @@
   - `rtk test npx vitest run tests/unit/issue16-chapter-mode.test.ts tests/integration/issue16-transform-cli.test.ts`
   - expected result at current head: all tests pass, including the normalized filename collision regression and the partial chapter write non-zero exit regression.
 - Fastest focused verification for issue #29 now is:
-  - `rtk test npx vitest run tests/chapter-rendering-qa.test.ts tests/unit/issue16-chapter-mode.test.ts`
-  - expected result at current head: all tests pass, including ordered xref-only paragraph preservation and slash-bearing `125/d` mapped/fallback chapter-mode rewrites.
+  - `rtk test npx vitest run tests/chapter-rendering-qa.test.ts tests/unit/issue16-chapter-mode.test.ts tests/unit/transforms/markdown.test.ts -t "keeps standalone subsection lines as body content and preserves deep nested indentation" tests/unit/transforms/issue12-recursive-metadata.test.ts -t "renders hierarchy frontmatter, source_credit, statutory notes, and USC ref links from parsed sections" tests/integration/issue12-transform-cli.test.ts -t "renders slash-separated USC refs as relative markdown links in written section output"`
+  - expected result at current head: all tests pass, including ordered xref-only paragraph preservation, slash-bearing `125/d` mapped/fallback chapter-mode rewrites, standalone subsection labels staying in body flow, and standalone relative USC links exposing no visible `#ref=` metadata.
 
 ## Known Test Behaviors
 - `tests/integration/backfill-constitution.test.ts` sets explicit author/committer env vars for reproducible local commits while the historical author lines still come from the planned events.
