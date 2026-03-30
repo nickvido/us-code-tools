@@ -172,9 +172,13 @@ function rewriteChapterModeLinks(
   titleIr: TitleIR,
   sectionTargetsByRef?: ReadonlyMap<string, string>,
 ): string {
-  return markdown.replace(/\[([^\]]+)\]\(((?:\.\.\/title-[^/]+\/|\.\/)?section-([^)]+?)\.md)\)/gu, (_match, linkText: string, href: string, safeId: string) => {
-    const sectionNumber = readReferencedSectionNumber(linkText, safeId);
-    const referencedTitleNumber = readReferencedTitleNumberFromHref(href) ?? readReferencedTitleNumberFromLinkText(linkText) ?? titleIr.titleNumber;
+  return markdown.replace(/\[([^\]]+)\]\(((?:\.\.\/title-[^/]+\/|\.\/)?section-([^)#]+?)\.md(?:#ref=([^)]*?))?)\)/gu, (_match, linkText: string, href: string, safeId: string, encodedCanonicalRef?: string) => {
+    const canonicalRef = readCanonicalReference(encodedCanonicalRef);
+    const referencedTitleNumber = canonicalRef?.titleNumber
+      ?? readReferencedTitleNumberFromHref(href)
+      ?? readReferencedTitleNumberFromLinkText(linkText)
+      ?? titleIr.titleNumber;
+    const sectionNumber = canonicalRef?.sectionNumber ?? readReferencedSectionNumber(linkText, safeId);
     const target = sectionTargetsByRef?.get(buildSectionTargetKey(referencedTitleNumber, sectionNumber));
     if (target) {
       return `[${linkText}](${target})`;
@@ -212,13 +216,39 @@ function readReferencedSectionNumber(linkText: string, safeId: string): string {
   return readReferencedSectionNumberFromLinkText(linkText) ?? readSectionNumberFromSafeId(safeId);
 }
 
-function readReferencedSectionNumberFromLinkText(linkText: string): string | undefined {
-  const match = linkText.match(/\bsection\s+(.+?)\s+of\s+title\s+\d+\b/iu);
-  if (!match) {
+function readCanonicalReference(encodedCanonicalRef: string | undefined): { titleNumber: number; sectionNumber: string } | undefined {
+  if (!encodedCanonicalRef) {
     return undefined;
   }
 
-  const sectionNumber = (match[1] ?? '').trim();
+  const decoded = decodeURIComponent(encodedCanonicalRef);
+  const separatorIndex = decoded.indexOf(':');
+  if (separatorIndex <= 0) {
+    return undefined;
+  }
+
+  const titleNumber = Number.parseInt(decoded.slice(0, separatorIndex), 10);
+  const sectionNumber = decoded.slice(separatorIndex + 1).trim();
+  if (!Number.isFinite(titleNumber) || titleNumber <= 0 || !sectionNumber) {
+    return undefined;
+  }
+
+  return { titleNumber, sectionNumber };
+}
+
+function readReferencedSectionNumberFromLinkText(linkText: string): string | undefined {
+  const titledMatch = linkText.match(/\bsection\s+(.+?)\s+of\s+title\s+\d+\b/iu);
+  if (titledMatch) {
+    const sectionNumber = (titledMatch[1] ?? '').trim();
+    return sectionNumber || undefined;
+  }
+
+  const bareMatch = linkText.match(/^section\s+(.+)$/iu);
+  if (!bareMatch) {
+    return undefined;
+  }
+
+  const sectionNumber = (bareMatch[1] ?? '').trim();
   return sectionNumber || undefined;
 }
 

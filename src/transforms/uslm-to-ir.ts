@@ -529,6 +529,12 @@ function parseLabeledNodeOrdered(
       if (text) {
         inlineParts.push(text);
       }
+      continue;
+    }
+
+    const text = readOrderedNodeText(parseErrors, [child], xmlPath, sectionHint, `${type} text`);
+    if (text) {
+      inlineParts.push(text);
     }
   }
 
@@ -858,14 +864,16 @@ function hrefToMarkdownLink(href: string): string | null {
     return null;
   }
 
-  // Collapse slash-separated subsection identifiers (e.g., "125/d" → "125d")
-  // so that ref links match the canonical filenames generated from @value attributes
+  // Keep the filename-safe href for local section markdown compatibility,
+  // but preserve the canonical slash-bearing ref in the fragment so
+  // chapter-mode rewriting can recover the exact referenced identifier.
   const collapsedSection = sectionTail.replaceAll('/', '');
   const titleDirectory = titleDirectoryName({
     titleNumber,
     heading: resolveKnownTitleHeading(titleNumber),
   });
-  return `../${titleDirectory}/section-${sectionFileSafeId(collapsedSection)}.md`;
+  const canonicalRef = encodeURIComponent(`${titleNumber}:${sectionTail}`);
+  return `../${titleDirectory}/section-${sectionFileSafeId(collapsedSection)}.md#ref=${canonicalRef}`;
 }
 
 function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {
