@@ -37,12 +37,16 @@ export function renderSectionMarkdown(section: SectionIR): string {
   if (section.lastAmendedBy) frontmatter.last_amended_by = section.lastAmendedBy;
   if (section.sourceCredit) frontmatter.source_credit = section.sourceCredit;
 
-  const body = renderSectionBody(section, {
-    sectionHeadingLevel: 1,
-    statutoryNotesLevel: 2,
-    statutoryNoteItemLevel: 3,
-    editorialNotesLevel: 2,
-  });
+  const body = stripCanonicalRefFragments(
+    renderSectionBody(section, {
+      sectionHeadingLevel: 1,
+      statutoryNotesLevel: 2,
+      statutoryNoteItemLevel: 3,
+      editorialNotesLevel: 2,
+      structuredSubsectionHeadings: false,
+      emphasizeStructuredHeadings: false,
+    }),
+  );
 
   return matter.stringify(body, frontmatter);
 }
@@ -117,6 +121,8 @@ function renderEmbeddedSections(
       statutoryNoteItemLevel: 4,
       editorialNotesLevel: 3,
       anchor,
+      structuredSubsectionHeadings: true,
+      emphasizeStructuredHeadings: true,
     });
 
     return rewriteChapterModeLinks(body, titleIr, sectionTargetsByRef);
@@ -133,15 +139,24 @@ function renderSectionBody(
     statutoryNoteItemLevel: number;
     editorialNotesLevel: number;
     anchor?: string;
+    structuredSubsectionHeadings: boolean;
+    emphasizeStructuredHeadings: boolean;
   },
 ): string {
   const lines: string[] = [];
 
   lines.push(renderSectionHeading(section, options.sectionHeadingLevel, options.anchor));
 
-  const contentLines = renderContentNodes(section.content);
+  const contentLines = renderContentNodes(section.content, {
+    structuredSubsectionHeadings: options.structuredSubsectionHeadings,
+    emphasizeStructuredHeadings: options.emphasizeStructuredHeadings,
+  });
   if (contentLines.length > 0) {
-    lines.push('', ...contentLines);
+    if (isLabeledLine(contentLines[0] ?? '')) {
+      lines.push(...contentLines);
+    } else {
+      lines.push('', ...contentLines);
+    }
   }
 
   if (section.statutoryNotes && section.statutoryNotes.length > 0) {
@@ -256,12 +271,15 @@ function readSectionNumberFromSafeId(safeId: string): string {
   return safeId.replace(/^0+(?=\d)/u, '');
 }
 
-function renderContentNodes(nodes: ContentNode[]): string[] {
+function renderContentNodes(
+  nodes: ContentNode[],
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string[] {
   const lines: string[] = [];
   const duplicateTextTracker = buildDuplicateTextTracker(nodes);
 
   for (const node of nodes) {
-    const renderedLines = renderContentNodeLines(node, 0, duplicateTextTracker);
+    const renderedLines = renderContentNodeLines(node, 0, duplicateTextTracker, options);
     if (renderedLines.length === 0) {
       continue;
     }
@@ -290,7 +308,12 @@ function isLabeledLine(line: string): boolean {
   return /^\s*\([^)]+\)/u.test(line);
 }
 
-function renderContentNodeLines(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string[] {
+function renderContentNodeLines(
+  node: ContentNode,
+  indent: number,
+  duplicateTextTracker: Map<string, number>,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string[] {
   const runtimeNode = readRuntimeNode(node);
   const nodeType = runtimeNode.type ?? runtimeNode.kind;
   const children = runtimeNode.children ?? [];
@@ -314,25 +337,32 @@ function renderContentNodeLines(node: ContentNode, indent: number, duplicateText
   }
 
   const lines: string[] = [];
-  const line = renderStructuredLine(nodeType, label, heading, text, indent);
+  const line = renderStructuredLine(nodeType, label, heading, text, indent, options);
   if (line) {
     lines.push(line);
   }
 
   const childIndent = nodeType === 'subsection' ? indent : indent + 2;
   for (const child of children) {
-    lines.push(...renderContentNodeLines(child, childIndent, duplicateTextTracker));
+    lines.push(...renderContentNodeLines(child, childIndent, duplicateTextTracker, options));
   }
 
   return lines;
 }
 
-function renderStructuredLine(nodeType: string | undefined, label: string, heading: string, text: string, indent: number): string {
-  if (nodeType === 'subsection') {
+function renderStructuredLine(
+  nodeType: string | undefined,
+  label: string,
+  heading: string,
+  text: string,
+  indent: number,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string {
+  if (nodeType === 'subsection' && options.structuredSubsectionHeadings) {
     return renderSubsectionHeading(label, heading, text);
   }
 
-  return renderLabeledLine(label, heading, text, indent);
+  return renderLabeledLine(label, heading, text, indent, options);
 }
 
 function renderSubsectionHeading(label: string, heading: string, text: string): string {
@@ -341,14 +371,30 @@ function renderSubsectionHeading(label: string, heading: string, text: string): 
   return inlineText ? `## ${inlineText}` : '';
 }
 
-function renderLabeledLine(label: string, heading: string, text: string, indent: number): string {
+function renderLabeledLine(
+  label: string,
+  heading: string,
+  text: string,
+  indent: number,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string {
   const formattedLabel = formatLabel(label);
-  const headingText = heading ? (text ? `${formatHeading(heading, indent)} — ${text}` : formatHeading(heading, indent)) : text;
+  const headingText = heading
+    ? (text ? `${formatHeading(heading, indent, options)}${options.emphasizeStructuredHeadings ? ' — ' : ' '}${text}` : formatHeading(heading, indent, options))
+    : text;
   const parts = [formattedLabel, headingText].filter(Boolean);
   return parts.length > 0 ? `${' '.repeat(indent)}${parts.join(' ')}`.trimEnd() : '';
 }
 
-function formatHeading(heading: string, indent: number): string {
+function formatHeading(
+  heading: string,
+  indent: number,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string {
+  if (!options.emphasizeStructuredHeadings) {
+    return heading;
+  }
+
   return indent === 0 ? `**${heading}**` : `*${heading}*`;
 }
 
@@ -424,6 +470,10 @@ function renderStatutoryNote(note: StatutoryNoteIR, headingLevel: number): strin
 
 function renderNote(note: NoteIR): string {
   return note.text;
+}
+
+function stripCanonicalRefFragments(markdown: string): string {
+  return markdown.replace(/(\]\((?:\.\.\/title-[^/]+\/|\.\/)?section-[^)#]+?\.md)#ref=[^)]+(\))/gu, '$1$2');
 }
 
 function compactLines(lines: string[]): string {
