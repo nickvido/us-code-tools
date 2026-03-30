@@ -159,6 +159,56 @@ async function commitVintage(
   });
 }
 
+export interface OlrcBackfillDryRunSummary {
+  phase: 'olrc';
+  dryRun: true;
+  vintagesPlanned: number;
+  vintages: Array<{ vintage: string; year: number; congress: number; congressBoundary: boolean; cacheDir: string; titlesCached: number }>;
+  tags: Array<{ tag: string; vintage: string }>;
+  cacheValid: boolean;
+  missingVintages: string[];
+}
+
+/**
+ * Dry-run: validate caches and show the plan without writing anything.
+ */
+export function runOlrcBackfillDryRun(
+  vintageIds: string[],
+  projectRoot: string,
+): OlrcBackfillDryRunSummary {
+  const plan = buildOlrcBackfillPlan(vintageIds);
+  const missingVintages: string[] = [];
+  const vintageDetails = plan.vintages.map((entry) => {
+    const cacheDir = vintageCacheDir(projectRoot, entry.vintage);
+    let titlesCached = 0;
+    if (existsSync(cacheDir)) {
+      titlesCached = readdirSync(cacheDir).filter((f) => f.startsWith('title-')).length;
+    } else {
+      missingVintages.push(entry.vintage);
+    }
+    return {
+      vintage: entry.vintage,
+      year: entry.year,
+      congress: entry.congress,
+      congressBoundary: entry.congressBoundary,
+      cacheDir,
+      titlesCached,
+    };
+  });
+
+  const tags = [...plan.tags.entries()].map(([tag, vintage]) => ({ tag, vintage }));
+
+  return {
+    phase: 'olrc',
+    dryRun: true,
+    vintagesPlanned: plan.vintages.length,
+    vintages: vintageDetails,
+    tags,
+    cacheValid: missingVintages.length === 0,
+    missingVintages,
+  };
+}
+
 /**
  * Run the full OLRC historical backfill.
  */

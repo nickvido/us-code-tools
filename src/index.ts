@@ -39,6 +39,12 @@ async function runBackfillCommand(args: string[]): Promise<number> {
 
   try {
     if (parsed.value.phase === 'olrc') {
+      if (parsed.value.dryRun) {
+        const { runOlrcBackfillDryRun } = await import('./backfill/olrc-orchestrator.js');
+        const summary = runOlrcBackfillDryRun(parsed.value.vintages!, process.cwd());
+        process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+        return summary.cacheValid ? 0 : 1;
+      }
       const { runOlrcBackfill } = await import('./backfill/olrc-orchestrator.js');
       const summary = await runOlrcBackfill(parsed.value.target, parsed.value.vintages!, process.cwd());
       process.stdout.write(`${JSON.stringify(summary)}\n`);
@@ -59,12 +65,14 @@ interface BackfillArgs {
   phase: 'constitution' | 'olrc';
   target: string;
   vintages?: string[];
+  dryRun?: boolean;
 }
 
 function parseBackfillArgs(args: string[]): { ok: true; value: BackfillArgs } | { ok: false; error: string } {
   let phase: string | null = null;
   let target: string | null = null;
   let vintages: string | null = null;
+  let dryRun = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
@@ -114,6 +122,11 @@ function parseBackfillArgs(args: string[]): { ok: true; value: BackfillArgs } | 
       continue;
     }
 
+    if (token === '--dry-run') {
+      dryRun = true;
+      continue;
+    }
+
     if (token.startsWith('--')) {
       return { ok: false, error: `Unknown flag '${token}'` };
     }
@@ -139,6 +152,7 @@ function parseBackfillArgs(args: string[]): { ok: true; value: BackfillArgs } | 
         phase: 'olrc',
         target: resolve(target),
         vintages: vintages.split(',').map((v) => v.trim()).filter(Boolean),
+        dryRun,
       },
     };
   }
