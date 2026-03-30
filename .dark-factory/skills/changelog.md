@@ -388,3 +388,35 @@
   - `npm run build` ✅
   - `npm test` ✅
   - `npx eslint .` ⚠️ repo has no eslint config, so standalone ESLint exits before linting
+
+## Feature #29 — Markdown chapter rendering correctness
+- Updated `src/domain/normalize.ts`:
+  - added `embeddedSectionAnchor(...)` for deterministic embedded anchors (`125/d` -> `section-125-d`)
+  - added `buildCanonicalSectionUrl(...)` so unmapped chapter-mode refs fall back through one canonical helper
+- Updated `src/transforms/uslm-to-ir.ts`:
+  - title-level `sourceUrlTemplate` is now the concrete title URL `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{title}`
+  - section-level `source` remains the concrete section URL
+  - added shared `readSectionHeading(...)` so ordered and non-ordered parse paths preserve `<heading>` content consistently
+  - parser/IR chapter-rewrite metadata still keeps canonical refs in `#ref=${encodeURIComponent(`${title}:${section}`)}` fragments so chapter-mode rewriting can recover slash-bearing ids like `125/d`, but standalone-rendered relative USC links strip any visible `#ref=` fragment
+- Updated `src/transforms/markdown.ts`:
+  - embedded chapter sections now render as `## § ... {#section-*}` while standalone section files remain `# § ...`
+  - chapter-mode statutory notes render at `###` / `####`, editorial notes at `###`
+  - nested labeled content now renders as multi-line indented blocks with parent-before-child ordering and preserved blank lines before top-level labeled lists
+  - chapter-mode xrefs now resolve through `sectionTargetsByRef` and fall back exactly to canonical `uscode.house.gov` section URLs instead of local `section-*.md` paths
+  - `_title.md` no longer renders the duplicate `## Sections` list
+- Updated `src/transforms/write-output.ts`:
+  - chapter-mode rendering now precomputes `${title}:${section}` targets to actual `./chapter-...md#section-...` or `./_uncategorized.md#section-...` outputs before rendering chapter files
+- Added/updated regression coverage in:
+  - `tests/chapter-rendering-qa.test.ts`
+  - `tests/unit/issue16-chapter-mode.test.ts`
+- Branch/review context captured:
+  - `3b902b5` — QA/adversary regression coverage for ordered xref-only paragraphs and slash-bearing canonical refs
+  - `67d7f86` — main chapter-rendering implementation + ordered-xref/slash-bearing fixes
+  - `151a50e` — regression coverage for the late standalone subsection-heading and standalone-link-output findings
+  - `76bfe71` — final implementation fix restoring standalone subsection body rendering and stripping visible `#ref=` metadata from standalone relative USC links
+  - PR `#30` remains the active branch PR for `df2/issue-29`
+- Verification captured from issue context:
+  - `npx vitest run` ✅ after the final `76bfe71` standalone-regression fix
+  - `npx tsc --noEmit` ✅ after the final `76bfe71` standalone-regression fix
+  - `npm run build` ✅ after the final `76bfe71` standalone-regression fix
+  - `npx eslint .` ⚠️ repo has no eslint config, so standalone ESLint exits before linting

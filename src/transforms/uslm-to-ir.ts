@@ -71,7 +71,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     positiveLaw,
     chapters: collectChapterMetadata(titleNode, parseErrors, xmlPath),
     sections: [],
-    sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section{section}`,
+    sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}`,
   };
 
   let uncodifiedSectionIndex = 0;
@@ -317,7 +317,7 @@ function parseSection(
   return {
     titleNumber,
     sectionNumber,
-    heading: readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading'),
+    heading: readSectionHeading(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber),
     status: normalizeStatus(readRawText(sectionNode.status)),
     source,
     identifier,
@@ -333,6 +333,28 @@ function parseSection(
     editorialNotes: parsedNotes.editorialNotes,
     content: parseContent(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber),
   };
+}
+
+function readSectionHeading(
+  sectionNode: XmlNode,
+  orderedSectionNode: OrderedEntry[] | undefined,
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): string {
+  const orderedHeading = readOrderedOptionalText(
+    parseErrors,
+    orderedChildArrayFromChildren(orderedSectionNode ?? [], 'heading'),
+    xmlPath,
+    'section heading',
+    sectionHint,
+  );
+
+  if (orderedHeading !== undefined) {
+    return orderedHeading;
+  }
+
+  return readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading', sectionHint);
 }
 
 function parseContent(
@@ -507,6 +529,16 @@ function parseLabeledNodeOrdered(
       if (text) {
         inlineParts.push(text);
       }
+      continue;
+    }
+
+    if (tag === 'num' || tag === 'heading') {
+      continue;
+    }
+
+    const text = readOrderedNodeText(parseErrors, [child], xmlPath, sectionHint, `${type} text`);
+    if (text) {
+      inlineParts.push(text);
     }
   }
 
@@ -836,14 +868,16 @@ function hrefToMarkdownLink(href: string): string | null {
     return null;
   }
 
-  // Collapse slash-separated subsection identifiers (e.g., "125/d" → "125d")
-  // so that ref links match the canonical filenames generated from @value attributes
+  // Keep the filename-safe href for local section markdown compatibility,
+  // but preserve the canonical slash-bearing ref in the fragment so
+  // chapter-mode rewriting can recover the exact referenced identifier.
   const collapsedSection = sectionTail.replaceAll('/', '');
   const titleDirectory = titleDirectoryName({
     titleNumber,
     heading: resolveKnownTitleHeading(titleNumber),
   });
-  return `../${titleDirectory}/section-${sectionFileSafeId(collapsedSection)}.md`;
+  const canonicalRef = encodeURIComponent(`${titleNumber}:${sectionTail}`);
+  return `../${titleDirectory}/section-${sectionFileSafeId(collapsedSection)}.md#ref=${canonicalRef}`;
 }
 
 function readCanonicalNumText(parseErrors: ParseError[], value: XmlValue | undefined, xmlPath: string | undefined, fieldName: string, sectionHint?: string): string {

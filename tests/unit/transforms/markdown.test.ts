@@ -439,7 +439,7 @@ describe('markdown renderer', () => {
     expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
   });
 
-  it('renders subsection lines as heading blocks and keeps deep nested indentation stable', async () => {
+  it('keeps standalone subsection lines as body content and preserves deep nested indentation', async () => {
     const markdown = await renderFixtureSection({
       titleDir: 'title-26',
       relativePath: '26-deep-hierarchy-sections.xml',
@@ -447,12 +447,13 @@ describe('markdown renderer', () => {
     });
 
     const lines = markdown.split('\n');
-    expect(lines).toContain('## (b) Definition of head of household');
+    expect(lines).toContain('(b) Definition of head of household');
     expect(lines).toContain('(1) In general For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
     expect(lines).toContain('  (A) maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
     expect(lines).toContain('    (i) a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
     expect(lines).toContain('      (I) is married at the close of the taxpayer’s taxable year, and');
     expect(lines).toContain('      (II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
+    expect(lines).not.toContain('## (b) Definition of head of household');
   });
 
   it('renders cross-title references from parsed USLM fixtures with slugged target directories on the real parser-to-markdown path', async () => {

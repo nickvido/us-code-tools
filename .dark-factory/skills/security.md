@@ -101,6 +101,8 @@
   - issue #16 requires non-zero exit on any `OUTPUT_WRITE_FAILED` chapter-mode partial write even if `_title.md` and another chapter file succeeded
   - issue #20 treats XML-derived title headings as untrusted path input: `slugifyTitleHeading(...)` lowercases, strips quotes/apostrophes, replaces non-alphanumeric runs with `-`, collapses repeated separators, trims edges, and falls back to exact legacy `title-{NN}` when normalization empties out
   - issue #20 requires every writer and cross-title link surface to call the same `titleDirectoryName(...)` helper so section mode, chapter mode, `_title.md`, `_uncategorized.md`, markdown helpers, and parser-generated USC links cannot drift onto mixed legacy/slugged paths
+  - issue #29 constrains chapter-mode link emission to two outputs only: writer-derived relative chapter targets (`chapter-*.md#section-*` or `_uncategorized.md#section-*`) and exact canonical `https://uscode.house.gov/view.xhtml?...` fallback URLs from `buildCanonicalSectionUrl(...)`; local `section-*.md` links are now a security/correctness regression in chapter mode
+  - issue #29 centralizes chapter anchor normalization in `embeddedSectionAnchor(...)` so slash-bearing identifiers like `125/d` become deterministic anchors (`section-125-d`) instead of renderer-local ad hoc strings
   - issue #20 keeps the parser-path fallback explicit: `resolveKnownTitleHeading(...)` is allowed only because inline `/us/usc/t{title}/s{section}` refs expose the destination title number but not the destination heading text
 - `src/domain/normalize.ts`
   - is the intended single sanitization boundary for section sort/file/link identifiers via `splitSectionNumber()`, `compareSectionNumbers()`, and `sectionFileSafeId()`
@@ -136,6 +138,9 @@
 - **Issue #16 warning classification is part of the public contract:** uncategorized sections surface via `TransformWarning` / `warnings[]`, not `ParseError`, so successful runs can still report zero `parse_errors`.
 - **Issue #21 historical OLRC fetches must remain discovery-driven:** once the listing is parsed, `selectVintagePlan()` must reuse the discovered per-vintage title URL map rather than synthesizing `resolveTitleUrl(title, vintage)` for titles that were never advertised.
 - **Issue #21 listing mode is intentionally side-effect free:** `listOlrcVintages()` may perform OLRC discovery but must not persist manifest state, cache artifacts, or cookie material.
+- **Issue #29 chapter-mode links are allowlisted outputs, not best-effort guesses:** renderer output may only use writer-derived relative chapter targets or exact `https://uscode.house.gov/` canonical fallbacks; emitting `section-*.md`, arbitrary domains, or guessed chapter filenames is a contract violation.
+- **Issue #29 canonical slash-bearing refs are integrity-sensitive:** parse-output links may use filename-safe hrefs, but chapter-mode rewriting must preserve canonical ids like `125/d` for both map lookup keys and fallback URLs; collapsing them to `125d` or `125-d` changes the legal reference target.
+- **Issue #29 heading extraction must fail closed to empty string:** `readSectionHeading(...)` may read only real `<heading>` content; substituting descendant paragraph text into `SectionIR.heading` would be an integrity bug, not a resilience feature.
 
 ## Things Future Agents Should Not Mislabel as Bugs
 - No database/auth/RLS: intentional; this repo is a local CLI, not a service.
@@ -157,6 +162,9 @@
 - Slugged title directories are now part of that same path-safety/correctness contract; future agents should not dismiss mixed `title-18/` vs `title-18-crimes-and-criminal-procedure/` outputs as harmless cosmetic drift because cross-title links depend on the shared helper contract.
 - Issue #21 sparse historical vintages are valid upstream behavior; missing discovered links should populate `missing_titles`, not trigger fabricated 404 fetch failures.
 - Issue #21 only updates the top-level OLRC compatibility mirror (`selected_vintage` + `titles`) for plain latest-mode fetches; historical single-vintage and all-vintages runs persist canonical state under `sources.olrc.vintages` without redefining latest-mode semantics.
+- Chapter-mode omission of local `section-*.md` links is intentional after issue #29; if a local chapter target is unknown, exact canonical `uscode.house.gov` fallback URLs are the required degraded mode.
+- `_title.md` no longer listing sections is intentional after issue #29; duplicate `§ 1.` / `§ 2.` entries and uncodified parser artifacts were removed from the navigation contract, not accidentally dropped.
+- Embedded chapter-mode headings intentionally differ from standalone section headings after issue #29 (`##` vs `#`); that is required context-sensitive rendering, not heading drift.
 
 ## Milestones / Releases Security Notes (Issue #18)
 
@@ -221,6 +229,7 @@
   - issue #16 output-integrity hardening: one shared chapter filename boundary, explicit pre-write collision rejection, report-only uncategorized warnings, and non-zero exit on any chapter write failure
   - issue #20 path-integrity hardening: one shared title-directory normalization boundary, filesystem-safe heading slugification, exact fallback to legacy `title-{NN}`, and shared-link enforcement across writer and parser surfaces
   - issue #21 historical OLRC hardening: duplicate/malformed `--vintage` rejection before discovery, in-memory-only cookie reuse across list/latest/single/all-vintages modes, additive manifest normalization for old OLRC state, and discovery-driven sparse-vintage handling
+  - issue #29 output-integrity hardening: centralized embedded-anchor normalization, exact canonical fallback URL generation, title-directory-safe cross-title chapter links, section-heading parity across ordered/non-ordered parsing, and elimination of broken local `section-*.md` chapter-mode refs
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes

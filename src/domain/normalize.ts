@@ -208,6 +208,20 @@ export function sectionFileSafeId(sectionNumber: string): string {
   return `${String(numeric).padStart(5, '0')}${suffix.replaceAll('/', '-')}`;
 }
 
+export function embeddedSectionAnchor(sectionNumber: string): string {
+  const normalized = normalizeWhitespace(sectionNumber)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '');
+
+  return `section-${normalized || 'unknown'}`;
+}
+
+export function buildCanonicalSectionUrl(titleNumber: number, sectionNumber: string): string {
+  return `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section${sectionNumber}`;
+}
+
 export function sortSections<T extends { sectionNumber: string }>(sections: T[]): T[] {
   return [...sections].sort((left, right) => compareSectionNumbers(left.sectionNumber, right.sectionNumber));
 }

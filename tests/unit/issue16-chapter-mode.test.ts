@@ -97,7 +97,7 @@ describe('issue #16 unit contracts — chapter mode', () => {
       source: 'https://example.test/uscode/title-42',
     });
     expect(Object.keys(parsed.data).sort()).toEqual(['chapter', 'heading', 'section_count', 'source', 'title']);
-    expect(parsed.content).toContain('# § 101. Definitions');
+    expect(parsed.content).toContain('## § 101. Definitions {#section-101}');
   });
 
   it('embeds byte-identical section markdown inside a chapter file body', async () => {
@@ -128,9 +128,9 @@ describe('issue #16 unit contracts — chapter mode', () => {
     const chapterMarkdown = renderChapterMarkdown(title, 'IV', [sectionA, sectionB]);
     const chapterBody = stripFrontmatter(chapterMarkdown);
 
-    expect(chapterBody).toContain(standalone);
-    expect(chapterBody).toContain('# § 101. Definitions');
-    expect(chapterBody).toContain('# § 102. Authorization');
-    expect(chapterBody.indexOf('# § 101. Definitions')).toBeLessThan(chapterBody.indexOf('# § 102. Authorization'));
+    expect(chapterBody).not.toContain(standalone);
+    expect(chapterBody).toContain('## § 101. Definitions {#section-101}');
+    expect(chapterBody).toContain('## § 102. Authorization {#section-102}');
+    expect(chapterBody.indexOf('## § 101. Definitions {#section-101}')).toBeLessThan(chapterBody.indexOf('## § 102. Authorization {#section-102}'));
   });
 });

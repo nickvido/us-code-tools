@@ -310,7 +310,7 @@ describe('issue #16 integration — transform CLI chapter mode', () => {
       expect(parsed.data.source).toBeTypeOf('string');
       expect(Object.keys(parsed.data).sort()).toEqual(['chapter', 'heading', 'section_count', 'source', 'title']);
 
-      const headingMatches = [...parsed.content.matchAll(/^# § ([^\n]+)$/gmu)].map((match) => match[1]);
+      const headingMatches = [...parsed.content.matchAll(/^## § ([^\n]+)$/gmu)].map((match) => match[1]);
       expect(headingMatches.length).toBeGreaterThan(1);
       expect(headingMatches[0]).toMatch(/^1\. /);
       expect(headingMatches[1]).toMatch(/^2\. /);

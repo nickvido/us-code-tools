@@ -1,7 +1,12 @@
 import matter from 'gray-matter';
 import { relative } from 'node:path';
 import type { ContentNode, NoteIR, SectionIR, StatutoryNoteIR, TitleIR } from '../domain/model.js';
-import { sectionFileSafeId, sortSections, titleDirectoryName } from '../domain/normalize.js';
+import {
+  buildCanonicalSectionUrl,
+  embeddedSectionAnchor,
+  sectionFileSafeId,
+  titleDirectoryName,
+} from '../domain/normalize.js';
 
 export function sectionRelativeMarkdownLink(
   from: { titleNumber: number; heading?: string | null },
@@ -32,39 +37,25 @@ export function renderSectionMarkdown(section: SectionIR): string {
   if (section.lastAmendedBy) frontmatter.last_amended_by = section.lastAmendedBy;
   if (section.sourceCredit) frontmatter.source_credit = section.sourceCredit;
 
-  const lines = [`# § ${section.sectionNumber}. ${section.heading}`.trim()];
+  const body = stripCanonicalRefFragments(
+    renderSectionBody(section, {
+      sectionHeadingLevel: 1,
+      statutoryNotesLevel: 2,
+      statutoryNoteItemLevel: 3,
+      editorialNotesLevel: 2,
+      structuredSubsectionHeadings: false,
+      emphasizeStructuredHeadings: false,
+    }),
+  );
 
-  const duplicateTextTracker = buildDuplicateTextTracker(section.content);
-
-  for (const node of section.content) {
-    const rendered = renderContentNode(node, 0, duplicateTextTracker);
-    if (rendered) {
-      lines.push(rendered);
-    }
-  }
-
-  if (section.statutoryNotes && section.statutoryNotes.length > 0) {
-    lines.push('', '## Statutory Notes');
-    for (const note of section.statutoryNotes) {
-      lines.push(renderStatutoryNote(note));
-    }
-  }
-
-  if (section.editorialNotes && section.editorialNotes.length > 0) {
-    lines.push('', '## Notes');
-    for (const note of section.editorialNotes) {
-      lines.push(`- ${renderNote(note)}`);
-    }
-  }
-
-  return matter.stringify(compactLines(lines), frontmatter);
+  return matter.stringify(body, frontmatter);
 }
 
 export function renderChapterMarkdown(
   titleIr: TitleIR,
   chapter: string,
   sections: SectionIR[],
-  options: { sectionTargetsByNumber?: ReadonlyMap<string, string> } = {},
+  options: { sectionTargetsByRef?: ReadonlyMap<string, string> } = {},
 ): string {
   const heading = titleIr.chapters.find((entry) => entry.number === chapter)?.heading ?? `Chapter ${chapter}`;
   const frontmatter = {
@@ -75,13 +66,13 @@ export function renderChapterMarkdown(
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(sections, options.sectionTargetsByNumber), frontmatter);
+  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByRef), frontmatter);
 }
 
 export function renderUncategorizedMarkdown(
   titleIr: TitleIR,
   sections: SectionIR[],
-  options: { sectionTargetsByNumber?: ReadonlyMap<string, string> } = {},
+  options: { sectionTargetsByRef?: ReadonlyMap<string, string> } = {},
 ): string {
   const frontmatter = {
     title: titleIr.titleNumber,
@@ -90,7 +81,7 @@ export function renderUncategorizedMarkdown(
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(sections, options.sectionTargetsByNumber), frontmatter);
+  return matter.stringify(renderEmbeddedSections(titleIr, sections, options.sectionTargetsByRef), frontmatter);
 }
 
 export function renderTitleMarkdown(titleIr: TitleIR): string {
@@ -114,86 +105,297 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
     }
   }
 
-  lines.push('', '## Sections');
-  for (const section of sortSections(titleIr.sections)) {
-    lines.push(`- § ${section.sectionNumber}. ${section.heading}`);
-  }
-
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-function renderEmbeddedSections(sections: SectionIR[], sectionTargetsByNumber?: ReadonlyMap<string, string>): string {
+function renderEmbeddedSections(
+  titleIr: TitleIR,
+  sections: SectionIR[],
+  sectionTargetsByRef?: ReadonlyMap<string, string>,
+): string {
   const bodies = sections.map((section) => {
-    const body = matter(renderSectionMarkdown(section)).content.trim();
-    return rewriteChapterModeLinks(body, sectionTargetsByNumber);
+    const anchor = embeddedSectionAnchor(section.sectionNumber);
+    const body = renderSectionBody(section, {
+      sectionHeadingLevel: 2,
+      statutoryNotesLevel: 3,
+      statutoryNoteItemLevel: 4,
+      editorialNotesLevel: 3,
+      anchor,
+      structuredSubsectionHeadings: true,
+      emphasizeStructuredHeadings: true,
+    });
+
+    return rewriteChapterModeLinks(body, titleIr, sectionTargetsByRef);
   });
+
   return `${bodies.join('\n\n').trimEnd()}\n`;
 }
 
-function rewriteChapterModeLinks(markdown: string, sectionTargetsByNumber?: ReadonlyMap<string, string>): string {
-  if (!sectionTargetsByNumber || sectionTargetsByNumber.size === 0) {
-    return markdown;
+function renderSectionBody(
+  section: SectionIR,
+  options: {
+    sectionHeadingLevel: number;
+    statutoryNotesLevel: number;
+    statutoryNoteItemLevel: number;
+    editorialNotesLevel: number;
+    anchor?: string;
+    structuredSubsectionHeadings: boolean;
+    emphasizeStructuredHeadings: boolean;
+  },
+): string {
+  const lines: string[] = [];
+
+  lines.push(renderSectionHeading(section, options.sectionHeadingLevel, options.anchor));
+
+  const contentLines = renderContentNodes(section.content, {
+    structuredSubsectionHeadings: options.structuredSubsectionHeadings,
+    emphasizeStructuredHeadings: options.emphasizeStructuredHeadings,
+  });
+  if (contentLines.length > 0) {
+    if (isLabeledLine(contentLines[0] ?? '')) {
+      lines.push(...contentLines);
+    } else {
+      lines.push('', ...contentLines);
+    }
   }
 
-  return markdown.replace(/\]\((?:\.\/)?section-([^)]+?)\.md\)/gu, (_match, safeId: string) => {
-    const sectionNumber = readSectionNumberFromSafeId(safeId);
-    const target = sectionTargetsByNumber.get(sectionNumber);
-    if (!target) {
-      return `](./section-${safeId}.md)`;
+  if (section.statutoryNotes && section.statutoryNotes.length > 0) {
+    lines.push('', `${'#'.repeat(options.statutoryNotesLevel)} Statutory Notes`);
+    for (const note of section.statutoryNotes) {
+      lines.push('', ...renderStatutoryNote(note, options.statutoryNoteItemLevel));
+    }
+  }
+
+  if (section.editorialNotes && section.editorialNotes.length > 0) {
+    lines.push('', `${'#'.repeat(options.editorialNotesLevel)} Notes`);
+    for (const note of section.editorialNotes) {
+      lines.push(`- ${renderNote(note)}`);
+    }
+  }
+
+  return compactLines(lines);
+}
+
+function renderSectionHeading(section: SectionIR, level: number, anchor?: string): string {
+  const prefix = '#'.repeat(level);
+  const heading = section.heading ? `${prefix} § ${section.sectionNumber}. ${section.heading}` : `${prefix} § ${section.sectionNumber}.`;
+  return anchor ? `${heading} {#${anchor}}` : heading;
+}
+
+function rewriteChapterModeLinks(
+  markdown: string,
+  titleIr: TitleIR,
+  sectionTargetsByRef?: ReadonlyMap<string, string>,
+): string {
+  return markdown.replace(/\[([^\]]+)\]\(((?:\.\.\/title-[^/]+\/|\.\/)?section-([^)#]+?)\.md(?:#ref=([^)]*?))?)\)/gu, (_match, linkText: string, href: string, safeId: string, encodedCanonicalRef?: string) => {
+    const canonicalRef = readCanonicalReference(encodedCanonicalRef);
+    const referencedTitleNumber = canonicalRef?.titleNumber
+      ?? readReferencedTitleNumberFromHref(href)
+      ?? readReferencedTitleNumberFromLinkText(linkText)
+      ?? titleIr.titleNumber;
+    const sectionNumber = canonicalRef?.sectionNumber ?? readReferencedSectionNumber(linkText, safeId);
+    const target = sectionTargetsByRef?.get(buildSectionTargetKey(referencedTitleNumber, sectionNumber));
+    if (target) {
+      return `[${linkText}](${target})`;
     }
 
-    return `](./${target})`;
+    return `[${linkText}](${buildCanonicalSectionUrl(referencedTitleNumber, sectionNumber)})`;
   });
+}
+
+function buildSectionTargetKey(titleNumber: number, sectionNumber: string): string {
+  return `${titleNumber}:${sectionNumber}`;
+}
+
+function readReferencedTitleNumberFromHref(href: string): number | undefined {
+  const match = href.match(/^\.\.\/title-(\d+)-[^/]+\/section-[^/]+\.md$/u);
+  if (!match) {
+    return undefined;
+  }
+
+  const titleNumber = Number.parseInt(match[1] ?? '', 10);
+  return Number.isFinite(titleNumber) ? titleNumber : undefined;
+}
+
+function readReferencedTitleNumberFromLinkText(linkText: string): number | undefined {
+  const match = linkText.match(/\bsection\s+.+?\s+of\s+title\s+(\d+)\b/iu);
+  if (!match) {
+    return undefined;
+  }
+
+  const titleNumber = Number.parseInt(match[1] ?? '', 10);
+  return Number.isFinite(titleNumber) ? titleNumber : undefined;
+}
+
+function readReferencedSectionNumber(linkText: string, safeId: string): string {
+  return readReferencedSectionNumberFromLinkText(linkText) ?? readSectionNumberFromSafeId(safeId);
+}
+
+function readCanonicalReference(encodedCanonicalRef: string | undefined): { titleNumber: number; sectionNumber: string } | undefined {
+  if (!encodedCanonicalRef) {
+    return undefined;
+  }
+
+  const decoded = decodeURIComponent(encodedCanonicalRef);
+  const separatorIndex = decoded.indexOf(':');
+  if (separatorIndex <= 0) {
+    return undefined;
+  }
+
+  const titleNumber = Number.parseInt(decoded.slice(0, separatorIndex), 10);
+  const sectionNumber = decoded.slice(separatorIndex + 1).trim();
+  if (!Number.isFinite(titleNumber) || titleNumber <= 0 || !sectionNumber) {
+    return undefined;
+  }
+
+  return { titleNumber, sectionNumber };
+}
+
+function readReferencedSectionNumberFromLinkText(linkText: string): string | undefined {
+  const titledMatch = linkText.match(/\bsection\s+(.+?)\s+of\s+title\s+\d+\b/iu);
+  if (titledMatch) {
+    const sectionNumber = (titledMatch[1] ?? '').trim();
+    return sectionNumber || undefined;
+  }
+
+  const bareMatch = linkText.match(/^section\s+(.+)$/iu);
+  if (!bareMatch) {
+    return undefined;
+  }
+
+  const sectionNumber = (bareMatch[1] ?? '').trim();
+  return sectionNumber || undefined;
 }
 
 function readSectionNumberFromSafeId(safeId: string): string {
   return safeId.replace(/^0+(?=\d)/u, '');
 }
 
-function renderContentNode(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string {
+function renderContentNodes(
+  nodes: ContentNode[],
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string[] {
+  const lines: string[] = [];
+  const duplicateTextTracker = buildDuplicateTextTracker(nodes);
+
+  for (const node of nodes) {
+    const renderedLines = renderContentNodeLines(node, 0, duplicateTextTracker, options);
+    if (renderedLines.length === 0) {
+      continue;
+    }
+
+    if (lines.length > 0 && shouldSeparateWithBlankLine(lines, renderedLines)) {
+      lines.push('');
+    }
+
+    lines.push(...renderedLines);
+  }
+
+  return lines;
+}
+
+function shouldSeparateWithBlankLine(existingLines: string[], nextLines: string[]): boolean {
+  const lastNonBlank = [...existingLines].reverse().find((line) => line !== '');
+  const firstNonBlank = nextLines.find((line) => line !== '');
+  if (!lastNonBlank || !firstNonBlank) {
+    return false;
+  }
+
+  return !isLabeledLine(lastNonBlank) && isLabeledLine(firstNonBlank);
+}
+
+function isLabeledLine(line: string): boolean {
+  return /^\s*\([^)]+\)/u.test(line);
+}
+
+function renderContentNodeLines(
+  node: ContentNode,
+  indent: number,
+  duplicateTextTracker: Map<string, number>,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string[] {
   const runtimeNode = readRuntimeNode(node);
   const nodeType = runtimeNode.type ?? runtimeNode.kind;
   const children = runtimeNode.children ?? [];
-  const text = runtimeNode.text ?? '';
+  const text = (runtimeNode.text ?? '').trim();
   const label = runtimeNode.label ?? '';
-  const heading = runtimeNode.heading;
+  const heading = (runtimeNode.heading ?? '').trim();
 
   if (nodeType === 'text') {
-    const key = text.trim();
+    const key = text;
     const remaining = duplicateTextTracker.get(key) ?? 0;
     if (remaining > 1) {
       duplicateTextTracker.set(key, remaining - 1);
-      return '';
+      return [];
     }
 
     if (remaining === 1) {
       duplicateTextTracker.delete(key);
     }
 
-    return `${' '.repeat(indent)}${text.trimEnd()}`.trimEnd();
+    return key ? [`${' '.repeat(indent)}${key}`] : [];
   }
 
-  if (nodeType === 'subsection') {
-    const headingLine = ['##', formatLabel(label), heading, text].filter(Boolean).join(' ');
-    const lines = [headingLine.trimEnd()];
-    for (const child of children) {
-      const rendered = renderContentNode(child, 0, duplicateTextTracker);
-      if (rendered) {
-        lines.push(rendered);
-      }
-    }
-    return lines.join('\n');
+  const lines: string[] = [];
+  const line = renderStructuredLine(nodeType, label, heading, text, indent, options);
+  if (line) {
+    lines.push(line);
   }
 
-  const labelLine = [formatLabel(label), heading, text].filter(Boolean).join(' ').trim();
-  const lines = [labelLine ? `${' '.repeat(indent)}${labelLine}`.trimEnd() : `${' '.repeat(indent)}${text.trimEnd()}`.trimEnd()].filter(Boolean);
+  const childIndent = nodeType === 'subsection' ? indent : indent + 2;
   for (const child of children) {
-    const rendered = renderContentNode(child, indent + 2, duplicateTextTracker);
-    if (rendered) {
-      lines.push(rendered);
-    }
+    lines.push(...renderContentNodeLines(child, childIndent, duplicateTextTracker, options));
   }
-  return lines.join('\n');
+
+  return lines;
+}
+
+function renderStructuredLine(
+  nodeType: string | undefined,
+  label: string,
+  heading: string,
+  text: string,
+  indent: number,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string {
+  if (nodeType === 'subsection' && options.structuredSubsectionHeadings) {
+    return renderSubsectionHeading(label, heading, text);
+  }
+
+  return renderLabeledLine(label, heading, text, indent, options);
+}
+
+function renderSubsectionHeading(label: string, heading: string, text: string): string {
+  const formattedLabel = formatLabel(label);
+  const inlineText = [formattedLabel, heading, text].filter(Boolean).join(' ');
+  return inlineText ? `## ${inlineText}` : '';
+}
+
+function renderLabeledLine(
+  label: string,
+  heading: string,
+  text: string,
+  indent: number,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string {
+  const formattedLabel = formatLabel(label);
+  const headingText = heading
+    ? (text ? `${formatHeading(heading, indent, options)}${options.emphasizeStructuredHeadings ? ' — ' : ' '}${text}` : formatHeading(heading, indent, options))
+    : text;
+  const parts = [formattedLabel, headingText].filter(Boolean);
+  return parts.length > 0 ? `${' '.repeat(indent)}${parts.join(' ')}`.trimEnd() : '';
+}
+
+function formatHeading(
+  heading: string,
+  indent: number,
+  options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+): string {
+  if (!options.emphasizeStructuredHeadings) {
+    return heading;
+  }
+
+  return indent === 0 ? `**${heading}**` : `*${heading}*`;
 }
 
 function buildDuplicateTextTracker(nodes: ContentNode[]): Map<string, number> {
@@ -255,15 +457,23 @@ function formatLabel(label: string): string {
   return trimmed.startsWith('(') ? trimmed : `(${trimmed})`;
 }
 
-function renderStatutoryNote(note: StatutoryNoteIR): string {
-  const parts = [] as string[];
-  if (note.heading) parts.push(`### ${note.heading}`);
-  parts.push(note.text);
-  return parts.join('\n');
+function renderStatutoryNote(note: StatutoryNoteIR, headingLevel: number): string[] {
+  const lines: string[] = [];
+  if (note.heading) {
+    lines.push(`${'#'.repeat(headingLevel)} ${note.heading}`);
+  }
+  if (note.text) {
+    lines.push(note.text);
+  }
+  return lines;
 }
 
 function renderNote(note: NoteIR): string {
   return note.text;
+}
+
+function stripCanonicalRefFragments(markdown: string): string {
+  return markdown.replace(/(\]\((?:\.\.\/title-[^/]+\/|\.\/)?section-[^)#]+?\.md)#ref=[^)]+(\))/gu, '$1$2');
 }
 
 function compactLines(lines: string[]): string {

@@ -154,6 +154,7 @@ describe('issue #12 CLI transform QA', () => {
       expect(parsedSection.content).toContain('[section 125(d) of this title](../title-10-armed-forces/section-00125d.md)');
       expect(parsedSection.content).not.toContain('section 125(d) of this title](/us/usc/t10/s125/d)');
       expect(parsedSection.content).not.toContain('[section 125(d) of this title]()');
+      expect(parsedSection.content).not.toContain('#ref=');
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
     }
@@ -220,10 +221,13 @@ describe('issue #12 CLI transform QA', () => {
       const titleMarkdown = readFileSync(join(outTree, '_title.md'), 'utf8');
       const parsedTitle = matter(titleMarkdown);
       expect(parsedTitle.data.sections).toBe(6);
-
-      const positions = ['§ 1', '§ 2', '§ 10', '§ 106a', '§ 106b', '§ 114'].map((needle) => titleMarkdown.indexOf(needle));
-      expect(positions.every((position) => position >= 0)).toBe(true);
-      expect(positions).toEqual([...positions].sort((a, b) => a - b));
+      expect(titleMarkdown).not.toContain('## Sections');
+      expect(titleMarkdown).not.toContain('§ 1');
+      expect(titleMarkdown).not.toContain('§ 2');
+      expect(titleMarkdown).not.toContain('§ 10');
+      expect(titleMarkdown).not.toContain('§ 106a');
+      expect(titleMarkdown).not.toContain('§ 106b');
+      expect(titleMarkdown).not.toContain('§ 114');
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
     }
