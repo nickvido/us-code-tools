@@ -28,6 +28,7 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 - [ ] When the referenced section number exists in the chapter output mapping for the referenced title, the rendered link target is a chapter markdown file plus a deterministic embedded-section anchor, for example `./chapter-004-...md#section-411` or `../title-03-the-president/chapter-004-...md#section-411`.  <!-- Touches: src/transforms/markdown.ts, src/domain/normalize.ts -->
 - [ ] When the referenced section cannot be mapped to a generated local chapter file, the rendered link target falls back to the exact canonical section URL `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{referencedTitleNumber}-section{referencedSectionNumber}` instead of emitting a broken relative markdown link.  <!-- Touches: src/transforms/markdown.ts and/or src/transforms/uslm-to-ir.ts -->
 - [ ] Embedded-section anchor generation is deterministic for numeric and alphanumeric section identifiers including `411`, `125d`, `301-1`, and `125/d`; tests assert the exact anchor strings.  <!-- Touches: src/transforms/markdown.ts, src/domain/normalize.ts -->
+- [ ] Chapter-mode link rewriting must preserve slash-bearing referenced section identifiers from real parse-output markdown links even when the visible link text omits `of title {N}` and the href is filename-safe. A rendered input like `[section 125/d](../title-05-government-organization-and-employees/section-00125d.md)` must resolve through `sectionTargetsByRef["5:125/d"]` to the mapped local anchor `./chapter-004-officers-and-employees.md#section-125-d`, and if no mapping exists it must fall back exactly to `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125/d`.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts, src/transforms/write-output.ts -->
 - [ ] ⚡ Cross-title relative links continue to derive title directory paths via `titleDirectoryName()` rather than hardcoded title-directory strings.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts, src/domain/normalize.ts -->
 
 ### 4. Nested subsection formatting
@@ -70,14 +71,16 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 5. Verify chapter frontmatter `source:` contains no `{section}` placeholder and exactly equals `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{titleNumber}` for the rendered title.
 6. Verify an inline cross-reference to a locally mapped section points to a chapter markdown file plus `#section-...` anchor, not `section-....md`.
 7. Verify an unmapped cross-reference falls back exactly to `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{referencedTitleNumber}-section{referencedSectionNumber}`.
-8. Verify nested subsection content renders as multiple lines with deterministic indentation increasing by one fixed step per nesting depth.
-9. Open generated `_title.md` and verify it includes the title heading and chapter list but no `## Sections` block.
-10. Parse a regression fixture modeled on Title 51 and verify all sections with `<heading>` elements retain non-empty `SectionIR.heading` values and render with heading text in markdown.
+8. Verify a real parse-output markdown link shaped like `[section 125/d](../title-05-government-organization-and-employees/section-00125d.md)` resolves to `./chapter-004-officers-and-employees.md#section-125-d` when `sectionTargetsByRef` contains `5:125/d`, and otherwise falls back exactly to `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125/d`.
+9. Verify nested subsection content renders as multiple lines with deterministic indentation increasing by one fixed step per nesting depth.
+10. Open generated `_title.md` and verify it includes the title heading and chapter list but no `## Sections` block.
+11. Parse a regression fixture modeled on Title 51 and verify all sections with `<heading>` elements retain non-empty `SectionIR.heading` values and render with heading text in markdown.
 
 ## Edge Case Catalog
 - **Malformed input:** `<heading>` values containing nested inline tags, xrefs, or truncated markup; malformed `<num>` values; truncated preserve-order child arrays.
 - **Partial data:** sections with `<num>` but no `<heading>`; sections with `<heading>` but empty body; chaptered titles with some sections missing `hierarchy.chapter`.
 - **Delimiter edge cases:** section identifiers containing letters, hyphens, slashes, repeated punctuation, or trailing separators such as `125d`, `301-1`, and `125/d`.
+- **Real parse-output xref shapes:** markdown links whose visible text is only `section {identifier}` while the href is a filename-safe relative path such as `../title-05-government-organization-and-employees/section-00125d.md`; chapter-mode rewriting must still recover the canonical referenced title/section pair for mapped-anchor lookup and exact canonical fallback URL generation.
 - **Encoding issues:** BOM-prefixed XML, mixed whitespace, smart quotes, em dashes, non-breaking spaces, Unicode headings, emoji, or RTL text inside headings or paragraph text.
 - **Boundaries:** titles with zero chapters, one chapter, or many chapters; sections with zero children, one child, or deeply nested labeled descendants through `subitem`.
 - **State:** duplicate section numbers across files; uncodified sections using fallback identifiers; sections marked repealed, transferred, or omitted.
