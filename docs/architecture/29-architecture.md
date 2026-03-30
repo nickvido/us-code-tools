@@ -622,6 +622,20 @@ Output:
 
 This fallback is mandatory, not best-effort.
 
+#### Slash-bearing parse-output markdown references
+
+Chapter-mode link rewriting must also handle real parse-output markdown links where:
+- the visible text is only `section {identifier}` (for example, `section 125/d`), and
+- the href is already filename-safe (for example, `../title-05-government-organization-and-employees/section-00125d.md`).
+
+Required behavior:
+- recover the canonical referenced pair from the combined markdown link text and href context
+- look up the mapping by canonical ref key (`5:125/d`, not `5:125d` or `5:125-d`)
+- when mapped, emit the final local target `./chapter-004-officers-and-employees.md#section-125-d`
+- when unmapped, emit the exact canonical fallback URL `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125/d`
+
+This rule exists to ensure slash-bearing identifiers round-trip correctly even when the parse-output href has already been normalized for filename safety.
+
 ### 6.4 Parser parity contract
 
 Heading extraction must not depend on whether the parser path is preserve-order or object-tree.
