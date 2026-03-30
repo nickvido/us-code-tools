@@ -16,12 +16,12 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 - [ ] `renderChapterMarkdown()` emits each embedded section heading as level-2 markdown: `## § {sectionNumber}. {heading}` when `heading` is non-empty, and `## § {sectionNumber}.` when `heading` is empty.  <!-- Touches: src/transforms/markdown.ts -->
 - [ ] In chapter-mode output, the statutory notes wrapper heading renders as `### Statutory Notes`, and any individual statutory note heading renders as `#### {note.heading}`.  <!-- Touches: src/transforms/markdown.ts -->
 - [ ] In chapter-mode output, the editorial notes wrapper heading renders as `### Notes`.  <!-- Touches: src/transforms/markdown.ts -->
-- [ ] Standalone `renderSectionMarkdown()` output does not regress existing section-per-file heading behavior unless the implementation intentionally changes it and updates tests to assert the new behavior.  <!-- Touches: src/transforms/markdown.ts, tests/* -->
+- [ ] Standalone `renderSectionMarkdown()` continues to emit the section heading line as level-1 markdown: `# § {sectionNumber}. {heading}` when `heading` is non-empty, and `# § {sectionNumber}.` when `heading` is empty.  <!-- Touches: src/transforms/markdown.ts, tests/* -->
 
 ### 2. Source URL resolution
 - [ ] Every rendered chapter markdown file writes a concrete `source` value in YAML frontmatter with no `{section}` placeholder and no unmatched template braces.  <!-- Touches: src/transforms/markdown.ts, src/transforms/uslm-to-ir.ts -->
-- [ ] Chapter markdown frontmatter `source` uses one deterministic canonical `https://uscode.house.gov/` URL format derived from `TitleIR`; tests assert the exact URL string chosen by the implementation.  <!-- Touches: src/transforms/markdown.ts, src/transforms/uslm-to-ir.ts -->
-- [ ] Section markdown frontmatter continues to emit a concrete section-specific `source` URL using the actual title and section identifiers.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts -->
+- [ ] Chapter markdown frontmatter `source` equals `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{titleNumber}` using the decimal `TitleIR.titleNumber` value with no zero-padding, chapter suffix, or section placeholder. Example: Title 42 renders `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42`.  <!-- Touches: src/transforms/markdown.ts, src/transforms/uslm-to-ir.ts -->
+- [ ] Section markdown frontmatter continues to emit a concrete section-specific `source` URL in the format `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{titleNumber}-section{sectionNumber}` using the actual title and section identifiers.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts -->
 
 ### 3. Chapter-mode cross-reference links
 - [ ] Cross-references rendered inside chapter markdown never point to local `section-*.md` files.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts -->
@@ -49,9 +49,7 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 - [ ] Regression coverage includes a fixture patterned after the Title 51 failure mode where adjacent sections that each contain `<heading>` elements all retain their headings after parse + render.  <!-- Touches: tests/*, fixtures if present -->
 
 ### Non-Functional
-- [ ] Performance: chapter-mode rendering does not add more than one additional in-memory pass over each section body versus current behavior, and the repository transform test suite completes within the existing CI timeout budget.  <!-- Touches: tests/* -->
 - [ ] Security: link generation may emit only relative markdown links or `https://uscode.house.gov/` URLs, and the renderer must not introduce new executable HTML/JS output beyond current behavior.  <!-- Touches: src/transforms/markdown.ts, src/transforms/uslm-to-ir.ts -->
-- [ ] Compatibility: existing public exports from `src/transforms/markdown.ts` and `src/transforms/uslm-to-ir.ts` remain import-compatible unless an intentional API change is covered by updated tests.  <!-- Touches: src/transforms/markdown.ts, src/transforms/uslm-to-ir.ts -->
 
 ## Out of Scope
 - Changing the project’s output strategy from chapter-per-file back to section-per-file.
@@ -69,7 +67,7 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 2. Open the generated chapter markdown file and verify each embedded section starts with `## § ...`, not `# § ...`.
 3. Verify the statutory notes wrapper renders as `### Statutory Notes` and individual statutory note headings render as `#### ...`.
 4. Verify the editorial notes wrapper renders as `### Notes`.
-5. Verify chapter frontmatter `source:` contains no `{section}` placeholder and matches the exact canonical URL format asserted by tests.
+5. Verify chapter frontmatter `source:` contains no `{section}` placeholder and exactly equals `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{titleNumber}` for the rendered title.
 6. Verify an inline cross-reference to a locally mapped section points to a chapter markdown file plus `#section-...` anchor, not `section-....md`.
 7. Verify an unmapped cross-reference falls back to `https://uscode.house.gov/...`.
 8. Verify nested subsection content renders as multiple lines with deterministic indentation increasing by one fixed step per nesting depth.
