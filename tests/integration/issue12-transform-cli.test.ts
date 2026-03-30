@@ -106,7 +106,7 @@ describe('issue #12 CLI transform QA', () => {
 
         expect(result.status).toBe(0);
         const report = parseReportFromStdout(result.stdout);
-        expect(report?.title).toBe(testCase.title);
+        expect(String(report?.title)).toBe(String(testCase.title));
         expect(report?.sections_found).toBe(testCase.expectedSections);
         expect(report?.files_written).toBe(testCase.expectedSections + 1);
 

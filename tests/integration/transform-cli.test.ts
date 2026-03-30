@@ -74,7 +74,7 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(written).toEqual(expect.arrayContaining(manifest.expected_files));
 
     const report = parseReportFromStdout(result.stdout);
-    expect(report?.title).toBe(1);
+    expect(String(report?.title)).toBe('1');
     expect(report?.sections_found).toBe(3);
     expect(report?.files_written).toBe(4);
     expect(report?.parse_errors).toHaveLength(manifest.expected_parse_errors.length);
@@ -110,7 +110,7 @@ describe('CLI integration — Title 1 fixture run', () => {
     expect(result.status).toBe(0);
 
     const report = parseReportFromStdout(result.stdout);
-    expect(report?.title).toBe(1);
+    expect(String(report?.title)).toBe('1');
     expect(report?.sections_found).toBeGreaterThan(0);
     expect(report?.files_written).toBeGreaterThanOrEqual(2);
 
@@ -142,7 +142,7 @@ describe('CLI integration — Title 1 fixture run', () => {
       expect(result.status).toBe(0);
 
       const report = parseReportFromStdout(result.stdout);
-      expect(report?.title).toBe(1);
+      expect(String(report?.title)).toBe('1');
       expect(report?.sections_found).toBe(53);
       expect(report?.files_written).toBe(54);
 
@@ -199,7 +199,7 @@ describe('CLI integration — Title 1 fixture run', () => {
 
         expect(result.status).toBe(0);
         const report = parseReportFromStdout(result.stdout);
-        expect(report?.title).toBe(title);
+        expect(String(report?.title)).toBe(String(title));
         expect(report?.sections_found).toBe(53);
         expect(report?.files_written).toBe(54);
 
@@ -236,13 +236,13 @@ describe('CLI integration — Title 1 fixture run', () => {
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('1 through 54');
+    expect(result.stderr).toMatch(/1 (through|and) 54/);
 
     expect(readdirSync(outputDir).length).toBe(0);
     rmSync(outputDir, { recursive: true, force: true });
   });
 
-  it('keeps the integer-only title contract for appendix identifiers like 5a', async () => {
+  it('accepts appendix identifiers like 5a at the CLI boundary and fails later when no cached artifact exists', async () => {
     const outputDir = mkdtempSync(join(tmpdir(), 'us-code-tools-it-appendix-'));
 
     const distEntry = resolve(process.cwd(), 'dist', 'index.js');
@@ -253,7 +253,7 @@ describe('CLI integration — Title 1 fixture run', () => {
     });
 
     expect(result.status).not.toBe(0);
-    expect(`${result.stdout}\n${result.stderr}`).toMatch(/1 through 54|integer|number/i);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/no cached olrc artifact|ENOENT|INVALID_XML|fetch olrc first/i);
     expect(readdirSync(outputDir).length).toBe(0);
     rmSync(outputDir, { recursive: true, force: true });
   });

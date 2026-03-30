@@ -4,7 +4,8 @@ import { basename, isAbsolute, resolve } from 'node:path';
 import yauzl from 'yauzl';
 import type { Entry, ZipFile } from 'yauzl';
 import type { XmlEntry } from '../domain/model.js';
-import { padTitleNumber } from '../domain/normalize.js';
+import { normalizeTitleSelector, padTitleNumber } from '../domain/normalize.js';
+import type { NormalizedTitleTarget } from '../domain/normalize.js';
 import { getCachePaths } from '../utils/cache.js';
 import { getDataDirectory, readManifest, writeManifest } from '../utils/manifest.js';
 import type {
@@ -69,14 +70,18 @@ export async function getTitleZipPath(titleNumber: number, cacheRoot: string): P
   });
 }
 
-export async function resolveCachedOlrcTitleZipPath(titleNumber: number, dataDirectory = getDataDirectory()): Promise<string> {
-  const fixturePath = process.env[`${FIXTURE_ENV_PREFIX}${padTitleNumber(titleNumber)}_FIXTURE_ZIP`];
+export async function resolveCachedOlrcTitleZipPath(selector: number | string | NormalizedTitleTarget, dataDirectory = getDataDirectory()): Promise<string> {
+  const normalizedTarget = typeof selector === 'object'
+    ? selector
+    : normalizeTitleSelector(String(selector));
+
+  const fixturePath = process.env[`${FIXTURE_ENV_PREFIX}${normalizedTarget.fixtureEnvKey}_FIXTURE_ZIP`];
   if (fixturePath) {
     return fixturePath;
   }
 
   const manifest = await readManifest(dataDirectory);
-  const titleState = manifest.sources.olrc.titles[String(titleNumber)];
+  const titleState = manifest.sources.olrc.titles[normalizedTarget.reportId];
 
   if (titleState?.status === 'downloaded') {
     return resolveManifestPath(titleState.zip_path, dataDirectory);
@@ -84,11 +89,11 @@ export async function resolveCachedOlrcTitleZipPath(titleNumber: number, dataDir
 
   const selectedVintage = manifest.sources.olrc.selected_vintage;
   if (selectedVintage) {
-    const zipName = basename(resolveTitleUrl(titleNumber, selectedVintage));
-    return resolve(dataDirectory, 'cache', 'olrc', 'vintages', selectedVintage, `title-${padTitleNumber(titleNumber)}`, zipName);
+    const zipName = basename(resolveTitleUrl(normalizedTarget, selectedVintage));
+    return resolve(dataDirectory, 'cache', 'olrc', 'vintages', selectedVintage, `title-${normalizedTarget.cacheKey}`, zipName);
   }
 
-  throw new Error(`No cached OLRC artifact found for title ${titleNumber}; fetch OLRC first`);
+  throw new Error(`No cached OLRC artifact found for title ${normalizedTarget.reportId}; fetch OLRC first`);
 }
 
 interface OlrcVintagePlan {
@@ -111,12 +116,15 @@ interface ReservedEmptyClassification {
   classification_reason: OlrcTitleReservedEmptyState['classification_reason'];
 }
 
-export function resolveTitleUrl(titleNumber: number, selectedVintage = '118-200'): string {
+export function resolveTitleUrl(selector: number | string | NormalizedTitleTarget, selectedVintage = '118-200'): string {
+  const normalizedTarget = typeof selector === 'object'
+    ? selector
+    : normalizeTitleSelector(String(selector));
   const [congress, version] = selectedVintage.split('-');
   if (congress && version) {
-    return `https://uscode.house.gov/download/releasepoints/us/pl/${congress}/${version}/xml_usc${padTitleNumber(titleNumber)}@${selectedVintage}.zip`;
+    return `https://uscode.house.gov/download/releasepoints/us/pl/${congress}/${version}/xml_${normalizedTarget.sourceXmlStem}@${selectedVintage}.zip`;
   }
-  return `https://uscode.house.gov/download/releasepoints/us/pl/${selectedVintage}/xml_usc${padTitleNumber(titleNumber)}@${selectedVintage}.zip`;
+  return `https://uscode.house.gov/download/releasepoints/us/pl/${selectedVintage}/xml_${normalizedTarget.sourceXmlStem}@${selectedVintage}.zip`;
 }
 
 export async function fetchOlrcSource(invocation?: { force?: boolean; cacheRoot?: string }): Promise<OlrcFetchResult> {

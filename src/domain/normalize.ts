@@ -7,7 +7,7 @@ export function asArray<T>(value: T | T[] | undefined): T[] {
 }
 
 export function normalizeWhitespace(value: string | undefined): string {
-  return (value ?? '').replace(/\s+/gu, ' ').trim()
+  return (value ?? '').replace(/\s+/gu, ' ').trim();
 }
 
 export function padTitleNumber(titleNumber: number): string {
@@ -29,6 +29,27 @@ export function slugifyTitleHeading(heading: string | undefined | null): string 
 
   return slug || null;
 }
+
+export const SUPPORTED_APPENDIX_TITLE_NUMBERS = [5, 11, 18, 28, 50] as const;
+export type SupportedAppendixTitleNumber = typeof SUPPORTED_APPENDIX_TITLE_NUMBERS[number];
+
+export type TransformTitleSelector =
+  | { kind: 'numeric'; value: number }
+  | { kind: 'appendix'; value: SupportedAppendixTitleNumber; suffix: 'A' };
+
+export interface NormalizedTitleTarget {
+  selector: TransformTitleSelector;
+  reportId: string;
+  cacheKey: string;
+  fixtureEnvKey: string;
+  sourceXmlStem: string;
+  outputDirectoryName: string;
+  sourceUrlId: string;
+  isReservedEmptyCandidate: boolean;
+}
+
+const APPENDIX_SELECTOR_SET = new Set<string>(SUPPORTED_APPENDIX_TITLE_NUMBERS.map((value) => `${value}A`));
+const SUPPORTED_APPENDIX_SELECTOR_TEXT = SUPPORTED_APPENDIX_TITLE_NUMBERS.map((value) => `${value}A`).join(', ');
 
 const KNOWN_TITLE_HEADINGS: Readonly<Record<number, string>> = {
   1: 'General Provisions',
@@ -97,6 +118,60 @@ export function titleDirectoryName(input: { titleNumber: number; heading?: strin
   return headingSlug ? `${baseName}-${headingSlug}` : baseName;
 }
 
+export function normalizeTitleSelector(rawSelector: string): NormalizedTitleTarget {
+  const normalized = normalizeWhitespace(rawSelector).toUpperCase();
+  if (!normalized) {
+    throw new Error(`--title must be a numeric title between 1 and 54 (1 and 54 inclusive) or one of the appendix selectors: ${SUPPORTED_APPENDIX_SELECTOR_TEXT}`);
+  }
+
+  if (/^\d+A$/u.test(normalized)) {
+    if (!APPENDIX_SELECTOR_SET.has(normalized)) {
+      throw new Error(`Unsupported appendix selector '${rawSelector}'. Accepted appendix selectors: ${SUPPORTED_APPENDIX_SELECTOR_TEXT}`);
+    }
+
+    const numericValue = Number.parseInt(normalized.slice(0, -1), 10) as SupportedAppendixTitleNumber;
+    const paddedValue = padTitleNumber(numericValue);
+
+    return {
+      selector: { kind: 'appendix', value: numericValue, suffix: 'A' },
+      reportId: `${numericValue}A`,
+      cacheKey: `${paddedValue}A`,
+      fixtureEnvKey: `${paddedValue}A`,
+      sourceXmlStem: `usc${paddedValue}A`,
+      outputDirectoryName: `title-${paddedValue.toLowerCase()}a-appendix`,
+      sourceUrlId: `${paddedValue}A`,
+      isReservedEmptyCandidate: false,
+    };
+  }
+
+  if (!/^\d+$/u.test(normalized)) {
+    throw new Error(`--title must be a numeric title between 1 and 54 (1 and 54 inclusive) or one of the appendix selectors: ${SUPPORTED_APPENDIX_SELECTOR_TEXT}`);
+  }
+
+  const numericValue = Number.parseInt(normalized, 10);
+  if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > 54) {
+    throw new Error(`--title must be a numeric title between 1 and 54 (1 and 54 inclusive) or one of the appendix selectors: ${SUPPORTED_APPENDIX_SELECTOR_TEXT}`);
+  }
+
+  const paddedValue = padTitleNumber(numericValue);
+  return {
+    selector: { kind: 'numeric', value: numericValue },
+    reportId: String(numericValue),
+    cacheKey: paddedValue,
+    fixtureEnvKey: paddedValue,
+    sourceXmlStem: `usc${paddedValue}`,
+    outputDirectoryName: `title-${paddedValue}`,
+    sourceUrlId: paddedValue,
+    isReservedEmptyCandidate: numericValue === 53,
+  };
+}
+
+export function allTransformTitleTargets(): NormalizedTitleTarget[] {
+  const numericTargets = Array.from({ length: 54 }, (_, index) => normalizeTitleSelector(String(index + 1)));
+  const appendixTargets = SUPPORTED_APPENDIX_TITLE_NUMBERS.map((value) => normalizeTitleSelector(`${value}A`));
+  return [...numericTargets, ...appendixTargets];
+}
+
 export interface SplitSectionNumber {
   numeric: number;
   suffix: string;
@@ -123,8 +198,6 @@ export function compareSectionNumbers(left: string, right: string): number {
     return leftParts.numeric - rightParts.numeric;
   }
 
-  // Use codepoint comparison for deterministic ordering:
-  // uppercase before lowercase (A < a), so 106A < 106a
   if (leftParts.suffix < rightParts.suffix) return -1;
   if (leftParts.suffix > rightParts.suffix) return 1;
   return 0;
@@ -154,8 +227,28 @@ export function chapterFileSafeId(chapter: string): string {
   return normalized || 'unnamed';
 }
 
-export function chapterOutputFilename(chapter: string): string {
-  return `chapter-${chapterFileSafeId(chapter)}.md`;
+export function normalizeDescriptiveSlug(input: string | undefined): string {
+  const normalized = normalizeWhitespace(input);
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized
+    .toLowerCase()
+    .replace(/['"“”‘’]/gu, '')
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '');
+}
+
+export function descriptiveChapterOutputFilename(chapter: string, heading?: string): string {
+  const safeChapterId = chapterFileSafeId(chapter);
+  const headingSlug = normalizeDescriptiveSlug(heading);
+  return headingSlug ? `chapter-${safeChapterId}-${headingSlug}.md` : `chapter-${safeChapterId}.md`;
+}
+
+export function chapterOutputFilename(chapter: string, heading?: string): string {
+  return descriptiveChapterOutputFilename(chapter, heading);
 }
 
 export function compareChapterIdentifiers(left: string, right: string): number {

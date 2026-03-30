@@ -2,6 +2,8 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { ParseError, TitleIR, TransformGroupBy } from './domain/model.js';
+import { allTransformTitleTargets, normalizeTitleSelector } from './domain/normalize.js';
+import type { NormalizedTitleTarget } from './domain/normalize.js';
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const [command, ...args] = argv;
@@ -118,26 +120,53 @@ async function runTransformCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  const { titleNumber, outputDir, groupBy } = parsed.value;
-
-  const outputValidationError = await validateOutputDirectory(outputDir);
+  const outputValidationError = await validateOutputDirectory(parsed.value.outputDir);
   if (outputValidationError) {
     transformUsage(outputValidationError);
     return 1;
   }
 
   try {
-    const { extractXmlEntriesFromZip, resolveCachedOlrcTitleZipPath, resolveTitleUrl } = await import('./sources/olrc.js');
-    const { parseUslmToIr } = await import('./transforms/uslm-to-ir.js');
-    const { writeTitleOutput } = await import('./transforms/write-output.js');
-    const zipPath = await resolveCachedOlrcTitleZipPath(titleNumber);
+    await mkdir(parsed.value.outputDir, { recursive: true });
+
+    if (parsed.value.scope === 'all') {
+      const targets = [] as Array<Record<string, unknown>>;
+      let shouldFail = false;
+
+      for (const normalizedTarget of allTransformTitleTargets()) {
+        const result = await transformSingleTitle(normalizedTarget, parsed.value.outputDir, parsed.value.groupBy);
+        targets.push(result.report);
+        shouldFail = shouldFail || (result.exitCode !== 0 && !normalizedTarget.isReservedEmptyCandidate);
+      }
+
+      process.stdout.write(`${JSON.stringify({ requested_scope: 'all', targets })}\n`);
+      return shouldFail ? 1 : 0;
+    }
+
+    const result = await transformSingleTitle(parsed.value.target, parsed.value.outputDir, parsed.value.groupBy);
+    process.stdout.write(`${JSON.stringify(result.report)}\n`);
+    return result.exitCode;
+  } catch (error) {
+    process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
+    return 1;
+  }
+}
+
+async function transformSingleTitle(normalizedTarget: NormalizedTitleTarget, outputDir: string, groupBy: TransformGroupBy): Promise<{ report: Record<string, unknown>; exitCode: number }> {
+  const { extractXmlEntriesFromZip, resolveCachedOlrcTitleZipPath, resolveTitleUrl } = await import('./sources/olrc.js');
+  const { parseUslmToIr } = await import('./transforms/uslm-to-ir.js');
+  const { writeTitleOutput } = await import('./transforms/write-output.js');
+
+  const parseErrors: ParseError[] = [];
+
+  try {
+    const zipPath = await resolveCachedOlrcTitleZipPath(normalizedTarget);
     const xmlEntries = await extractXmlEntriesFromZip(zipPath);
     if (xmlEntries.length === 0) {
-      throw new Error(`failed to download title ${titleNumber} from ${resolveTitleUrl(titleNumber)} (no XML entries)`);
+      throw new Error(`No writable sections found for title ${normalizedTarget.reportId}`);
     }
 
     let mergedTitle: TitleIR | null = null;
-    const parseErrors: ParseError[] = [];
     const seenSectionNumbers = new Set<string>();
     let hasDuplicateSectionCollision = false;
 
@@ -180,61 +209,83 @@ async function runTransformCommand(args: string[]): Promise<number> {
     }
 
     if (!mergedTitle || mergedTitle.sections.length === 0) {
-      throw new Error(`No writable sections found for title ${titleNumber}`);
+      throw new Error(`No writable sections found for title ${normalizedTarget.reportId}`);
     }
 
-    await mkdir(outputDir, { recursive: true });
-    const writeResult = await writeTitleOutput(outputDir, mergedTitle, { groupBy });
+    const writeOptions = normalizedTarget.selector.kind === 'appendix'
+      ? { groupBy, normalizedTarget }
+      : { groupBy };
+    const writeResult = await writeTitleOutput(outputDir, mergedTitle, writeOptions);
     const report = {
-      title: titleNumber,
-      source_url: resolveTitleUrl(titleNumber),
+      title: normalizedTarget.reportId,
+      source_url: resolveTitleUrl(normalizedTarget),
       sections_found: mergedTitle.sections.length,
       files_written: writeResult.filesWritten,
       parse_errors: [...parseErrors, ...writeResult.parseErrors],
       warnings: writeResult.warnings,
     };
 
-    process.stdout.write(`${JSON.stringify(report)}\n`);
-
-    if (hasDuplicateSectionCollision) {
-      return 1;
-    }
-
     const hasOutputWriteFailure = writeResult.parseErrors.some((parseError) => parseError.code === 'OUTPUT_WRITE_FAILED');
-    if (hasOutputWriteFailure && groupBy === 'chapter') {
-      return 1;
+    if (hasDuplicateSectionCollision || (hasOutputWriteFailure && groupBy === 'chapter')) {
+      return { report, exitCode: 1 };
     }
 
     if (groupBy === 'section') {
-      return writeResult.filesWritten > 0 ? 0 : 1;
+      return { report, exitCode: writeResult.filesWritten > 0 ? 0 : 1 };
     }
 
-    return writeResult.filesWritten > 1 ? 0 : 1;
+    return { report, exitCode: writeResult.filesWritten > 1 ? 0 : 1 };
   } catch (error) {
-    process.stderr.write(`Error: ${error instanceof Error ? error.message : 'Unknown failure'}\n`);
-    return 1;
+    const message = error instanceof Error ? error.message : 'Unknown failure';
+    const report = {
+      title: normalizedTarget.reportId,
+      source_url: (await import('./sources/olrc.js')).resolveTitleUrl(normalizedTarget),
+      sections_found: 0,
+      files_written: 0,
+      parse_errors: [{ code: 'INVALID_XML', message }],
+      warnings: [],
+    };
+    return { report, exitCode: 1 };
   }
 }
 
-function parseTransformArgs(args: string[]): { ok: true; value: { titleNumber: number; outputDir: string; groupBy: TransformGroupBy } } | { ok: false; error: string } {
+function parseTransformArgs(args: string[]):
+  | { ok: true; value: { scope: 'single'; target: NormalizedTitleTarget; outputDir: string; groupBy: TransformGroupBy } }
+  | { ok: true; value: { scope: 'all'; outputDir: string; groupBy: TransformGroupBy } }
+  | { ok: false; error: string } {
   let title: string | null = null;
   let output: string | null = null;
   let groupBy: TransformGroupBy = 'section';
   let sawGroupBy = false;
+  let sawAll = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
 
     if (token === '--title') {
       const value = args[index + 1];
-      if (!value) {
+      if (!value || value.startsWith('--')) {
         return { ok: false, error: 'Missing required --title flag' };
       }
       if (title !== null) {
         return { ok: false, error: 'Duplicate --title flag' };
       }
+      if (sawAll) {
+        return { ok: false, error: '--title and --all are mutually exclusive' };
+      }
       title = value;
       index += 1;
+      continue;
+    }
+
+    if (token === '--all') {
+      if (sawAll) {
+        return { ok: false, error: 'Duplicate --all flag' };
+      }
+      if (title !== null) {
+        return { ok: false, error: '--title and --all are mutually exclusive' };
+      }
+      sawAll = true;
       continue;
     }
 
@@ -275,27 +326,38 @@ function parseTransformArgs(args: string[]): { ok: true; value: { titleNumber: n
     return { ok: false, error: `Unknown argument '${token}'` };
   }
 
-  if (title === null) {
-    return { ok: false, error: 'Missing required --title flag' };
-  }
-
   if (output === null) {
     return { ok: false, error: 'Missing required --output flag' };
   }
 
-  const titleNumber = Number(title);
-  if (!Number.isInteger(titleNumber) || titleNumber < 1 || titleNumber > 54) {
-    return { ok: false, error: '--title must be an integer between 1 and 54 (1 through 54)' };
+  if (!sawAll && title === null) {
+    return { ok: false, error: 'Missing required --title flag' };
   }
 
-  return {
-    ok: true,
-    value: {
-      titleNumber,
-      outputDir: resolve(output),
-      groupBy,
-    },
-  };
+  if (sawAll) {
+    return {
+      ok: true,
+      value: {
+        scope: 'all',
+        outputDir: resolve(output),
+        groupBy,
+      },
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      value: {
+        scope: 'single',
+        target: normalizeTitleSelector(title ?? ''),
+        outputDir: resolve(output),
+        groupBy,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Invalid --title selector' };
+  }
 }
 
 async function validateOutputDirectory(outputDir: string): Promise<string | null> {
@@ -317,11 +379,11 @@ async function validateOutputDirectory(outputDir: string): Promise<string | null
 }
 
 function usage(error: string): void {
-  process.stderr.write(`Usage: transform --title <number> --output <dir> [--group-by chapter]\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nUsage: milestones plan --target <repo> --metadata <file>\nUsage: milestones apply --target <repo> --metadata <file>\nUsage: milestones release --target <repo> --metadata <file>\nError: ${error}\n`);
+  process.stderr.write(`Usage: transform (--title <selector> | --all) --output <dir> [--group-by chapter]\nUsage: backfill --phase <name> --target <dir>\nUsage: fetch (--status | --all | --source=<name>) [--congress=<n>] [--force]\nUsage: milestones plan --target <repo> --metadata <file>\nUsage: milestones apply --target <repo> --metadata <file>\nUsage: milestones release --target <repo> --metadata <file>\nError: ${error}\n`);
 }
 
 function transformUsage(error: string): void {
-  process.stderr.write(`Usage: transform --title <number> --output <dir> [--group-by chapter]\nError: ${error}\n`);
+  process.stderr.write(`Usage: transform (--title <selector> | --all) --output <dir> [--group-by chapter]\nLegacy usage: transform --title <number> --output <dir> [--group-by chapter]\nAccepted appendix selectors: 5A, 11A, 18A, 28A, 50A\nError: ${error}\n`);
 }
 
 function backfillUsage(error: string): void {

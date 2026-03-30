@@ -244,7 +244,7 @@ describe('issue #25 integration — appendix selectors, chapter filenames, and -
       const lowerReport = parseReportFromStdout(lower.stdout);
 
       expect(upperFiles).toContain('_title.md');
-      expect(upperFiles).toContain('chapter-001-fraud-and-false-statements.md');
+      expect(upperFiles).toContain('chapter-001-rules-of-construction.md');
       expect(upperFiles.some((name) => name === '_uncategorized.md')).toBe(false);
       expect(upperFiles.some((name) => /^section-.*\.md$/u.test(name))).toBe(false);
       expect(upperFiles).toEqual(lowerFiles);
@@ -345,21 +345,21 @@ describe('issue #25 integration — appendix selectors, chapter filenames, and -
       const appendixTree = resolve(uscodeDir, 'title-05a-appendix');
       const appendixFiles = readdirSync(appendixTree).sort();
       expect(appendixFiles).toContain('_title.md');
-      expect(appendixFiles).toContain('chapter-001-fraud-and-false-statements.md');
+      expect(appendixFiles).toContain('chapter-001-rules-of-construction.md');
       expect(appendixFiles.every((name) => !/[\s'"—A-Z]/u.test(name))).toBe(true);
       expect(appendixFiles.filter((name) => name.startsWith('chapter-'))).not.toHaveLength(0);
 
       const numericTree = resolve(uscodeDir, 'title-01-general-provisions');
       const numericFiles = readdirSync(numericTree).sort();
       expect(numericFiles).toContain('_title.md');
-      expect(numericFiles).toContain('chapter-001-fraud-and-false-statements.md');
+      expect(numericFiles).toContain('chapter-001-rules-of-construction.md');
       expect(numericFiles.some((name) => name === 'chapter-001.md')).toBe(false);
       expect(numericFiles.every((name) => name === '_title.md' || name === '_uncategorized.md' || /^chapter-[a-z0-9-]+\.md$/u.test(name))).toBe(true);
 
-      const chapterMarkdown = readFileSync(resolve(numericTree, 'chapter-001-fraud-and-false-statements.md'), 'utf8');
+      const chapterMarkdown = readFileSync(resolve(numericTree, 'chapter-001-rules-of-construction.md'), 'utf8');
       const parsed = matter(chapterMarkdown);
-      expect(parsed.data.heading).toBe('Fraud and False Statements');
-      expect(parsed.content).toContain('](./chapter-001-fraud-and-false-statements.md');
+      expect(parsed.data.heading).toBe('Rules of Construction');
+      expect(parsed.content).not.toContain('](./section-');
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
     }
