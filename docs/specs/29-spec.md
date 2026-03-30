@@ -26,7 +26,7 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 ### 3. Chapter-mode cross-reference links
 - [ ] Cross-references rendered inside chapter markdown never point to local `section-*.md` files.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts -->
 - [ ] When the referenced section number exists in the chapter output mapping for the referenced title, the rendered link target is a chapter markdown file plus a deterministic embedded-section anchor, for example `./chapter-004-...md#section-411` or `../title-03-the-president/chapter-004-...md#section-411`.  <!-- Touches: src/transforms/markdown.ts, src/domain/normalize.ts -->
-- [ ] When the referenced section cannot be mapped to a generated local chapter file, the rendered link target falls back to a canonical `https://uscode.house.gov/` URL instead of emitting a broken relative markdown link.  <!-- Touches: src/transforms/markdown.ts and/or src/transforms/uslm-to-ir.ts -->
+- [ ] When the referenced section cannot be mapped to a generated local chapter file, the rendered link target falls back to the exact canonical section URL `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{referencedTitleNumber}-section{referencedSectionNumber}` instead of emitting a broken relative markdown link.  <!-- Touches: src/transforms/markdown.ts and/or src/transforms/uslm-to-ir.ts -->
 - [ ] Embedded-section anchor generation is deterministic for numeric and alphanumeric section identifiers including `411`, `125d`, `301-1`, and `125/d`; tests assert the exact anchor strings.  <!-- Touches: src/transforms/markdown.ts, src/domain/normalize.ts -->
 - [ ] ⚡ Cross-title relative links continue to derive title directory paths via `titleDirectoryName()` rather than hardcoded title-directory strings.  <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts, src/domain/normalize.ts -->
 
@@ -69,7 +69,7 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 4. Verify the editorial notes wrapper renders as `### Notes`.
 5. Verify chapter frontmatter `source:` contains no `{section}` placeholder and exactly equals `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{titleNumber}` for the rendered title.
 6. Verify an inline cross-reference to a locally mapped section points to a chapter markdown file plus `#section-...` anchor, not `section-....md`.
-7. Verify an unmapped cross-reference falls back to `https://uscode.house.gov/...`.
+7. Verify an unmapped cross-reference falls back exactly to `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{referencedTitleNumber}-section{referencedSectionNumber}`.
 8. Verify nested subsection content renders as multiple lines with deterministic indentation increasing by one fixed step per nesting depth.
 9. Open generated `_title.md` and verify it includes the title heading and chapter list but no `## Sections` block.
 10. Parse a regression fixture modeled on Title 51 and verify all sections with `<heading>` elements retain non-empty `SectionIR.heading` values and render with heading text in markdown.
@@ -82,8 +82,8 @@ Fix the chapter-mode markdown renderer so generated chapter files have a valid h
 - **Boundaries:** titles with zero chapters, one chapter, or many chapters; sections with zero children, one child, or deeply nested labeled descendants through `subitem`.
 - **State:** duplicate section numbers across files; uncodified sections using fallback identifiers; sections marked repealed, transferred, or omitted.
 - **Concurrency:** not a runtime concern for batch transforms, but repeated runs over the same input must produce byte-for-byte equivalent link targets and anchors.
-- **Subsystem failure:** no network dependency is in scope; when no local chapter target can be resolved, rendering degrades to a canonical `uscode.house.gov` URL instead of a broken local path.
-- **Fallback behavior:** unresolved local cross-reference target → canonical external URL; missing heading element → empty heading string, not guessed descendant text.
+- **Subsystem failure:** no network dependency is in scope; when no local chapter target can be resolved, rendering degrades to the canonical section URL `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{referencedTitleNumber}-section{referencedSectionNumber}` instead of a broken local path.
+- **Fallback behavior:** unresolved local cross-reference target → exact canonical section URL; missing heading element → empty heading string, not guessed descendant text.
 - **Recovery:** once chapter-target mapping or heading extraction logic is fixed, rerunning the transform produces corrected links and headings without manual cleanup.
 - **Time:** no timezone or clock-dependent behavior is in scope; output must remain deterministic regardless of system time.
 
