@@ -38,6 +38,13 @@ async function runBackfillCommand(args: string[]): Promise<number> {
   }
 
   try {
+    if (parsed.value.phase === 'olrc') {
+      const { runOlrcBackfill } = await import('./backfill/olrc-orchestrator.js');
+      const summary = await runOlrcBackfill(parsed.value.target, parsed.value.vintages!, process.cwd());
+      process.stdout.write(`${JSON.stringify(summary)}\n`);
+      return 0;
+    }
+
     const { runConstitutionBackfill } = await import('./backfill/orchestrator.js');
     const summary = await runConstitutionBackfill(parsed.value.target);
     process.stdout.write(`${JSON.stringify(summary)}\n`);
@@ -48,9 +55,16 @@ async function runBackfillCommand(args: string[]): Promise<number> {
   }
 }
 
-function parseBackfillArgs(args: string[]): { ok: true; value: { phase: 'constitution'; target: string } } | { ok: false; error: string } {
+interface BackfillArgs {
+  phase: 'constitution' | 'olrc';
+  target: string;
+  vintages?: string[];
+}
+
+function parseBackfillArgs(args: string[]): { ok: true; value: BackfillArgs } | { ok: false; error: string } {
   let phase: string | null = null;
   let target: string | null = null;
+  let vintages: string | null = null;
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
@@ -85,6 +99,21 @@ function parseBackfillArgs(args: string[]): { ok: true; value: { phase: 'constit
       continue;
     }
 
+    if (token === '--vintages') {
+      const value = args[index + 1];
+      if (!value) {
+        return { ok: false, error: 'Missing required --vintages value' };
+      }
+
+      if (vintages !== null) {
+        return { ok: false, error: 'Duplicate --vintages flag' };
+      }
+
+      vintages = value;
+      index += 1;
+      continue;
+    }
+
     if (token.startsWith('--')) {
       return { ok: false, error: `Unknown flag '${token}'` };
     }
@@ -100,8 +129,22 @@ function parseBackfillArgs(args: string[]): { ok: true; value: { phase: 'constit
     return { ok: false, error: 'Missing required --target flag' };
   }
 
+  if (phase === 'olrc') {
+    if (vintages === null) {
+      return { ok: false, error: '--phase olrc requires --vintages <comma-separated-list>' };
+    }
+    return {
+      ok: true,
+      value: {
+        phase: 'olrc',
+        target: resolve(target),
+        vintages: vintages.split(',').map((v) => v.trim()).filter(Boolean),
+      },
+    };
+  }
+
   if (phase !== 'constitution') {
-    return { ok: false, error: `Unsupported --phase '${phase}'; expected 'constitution'` };
+    return { ok: false, error: `Unsupported --phase '${phase}'; expected 'constitution' or 'olrc'` };
   }
 
   return {
@@ -387,7 +430,7 @@ function transformUsage(error: string): void {
 }
 
 function backfillUsage(error: string): void {
-  process.stderr.write(`Usage: backfill --phase <name> --target <dir>\nError: ${error}\n`);
+  process.stderr.write(`Usage: backfill --phase <name> --target <dir> [--vintages <list>]\nPhases: constitution, olrc\nOLRC phase requires --vintages (comma-separated vintage ids)\nError: ${error}\n`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
