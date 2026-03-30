@@ -154,6 +154,7 @@ describe('issue #12 CLI transform QA', () => {
       expect(parsedSection.content).toContain('[section 125(d) of this title](../title-10-armed-forces/section-00125d.md)');
       expect(parsedSection.content).not.toContain('section 125(d) of this title](/us/usc/t10/s125/d)');
       expect(parsedSection.content).not.toContain('[section 125(d) of this title]()');
+      expect(parsedSection.content).not.toContain('#ref=');
     } finally {
       rmSync(sandboxRoot, { recursive: true, force: true });
     }

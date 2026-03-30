@@ -92,6 +92,41 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
     expect(standalone).not.toContain('## § 411. Definitions');
   });
 
+  it('keeps standalone subsection labels as body lines instead of promoting them into markdown headings', () => {
+    const section = {
+      titleNumber: 26,
+      sectionNumber: '2',
+      heading: 'Definitions and special rules',
+      source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section2',
+      content: [
+        {
+          type: 'subsection',
+          label: '(b)',
+          heading: 'Definition of head of household',
+          children: [
+            {
+              type: 'paragraph',
+              label: '(1)',
+              heading: 'In general',
+              text: 'An individual is a head of household if the statutory conditions are met.',
+              children: [],
+            },
+          ],
+        },
+      ],
+      statutoryNotes: [],
+      editorialNotes: [],
+    };
+
+    const standalone = renderSectionMarkdown(section as never);
+
+    expect(standalone).toContain('# § 2. Definitions and special rules');
+    expect(standalone).toContain('(b) Definition of head of household');
+    expect(standalone).toContain('(1) In general An individual is a head of household if the statutory conditions are met.');
+    expect(standalone).not.toContain('## (b) Definition of head of household');
+    expect(standalone).not.toContain('\n## (1) In general');
+  });
+
   it('renders nested labeled content as multiple indented lines in source order', () => {
     const title = {
       titleNumber: 25,

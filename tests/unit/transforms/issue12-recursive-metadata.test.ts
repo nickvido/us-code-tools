@@ -178,17 +178,18 @@ describe('issue #12 recursive hierarchy and metadata QA', () => {
     });
     expect(parsed10.data.subchapter).toBeUndefined();
     expect(parsed10.content).toContain('## Statutory Notes');
-    expect(parsed10.content).toMatch(/\[[^\]]*125\(d\)[^\]]*\]\(\.\.\/title-10-armed-forces\/section-00125d\.md(?:#ref=[^)]+)?\)/u);
-    expect(parsed10.content).not.toMatch(/\[[^\]]+\]\(\.\.\.\/title-10\/section-00125d\.md(?:#ref=[^)]+)?\)/u);
+    expect(parsed10.content).toMatch(/\[[^\]]*125\(d\)[^\]]*\]\(\.\.\/title-10-armed-forces\/section-00125d\.md\)/u);
+    expect(parsed10.content).not.toMatch(/\[[^\]]+\]\(\.\.\.\/title-10\/section-00125d\.md\)/u);
     expect(parsed10.content).toContain(
-      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md#ref=10%3A191) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md#ref=10%3A125%2Fd) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department',
+      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department',
     );
     expect(parsed10.content).toContain(
-      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md#ref=10%3A191) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md#ref=10%3A125%2Fd) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department; and',
+      'that is established by the Secretary of Defense under [section 191 of this title](../title-10-armed-forces/section-00191.md) (or under the second sentence of [section 125(d) of this title](../title-10-armed-forces/section-00125d.md) (as in effect before October 1, 1986)) to perform a supply or service activity common to more than one military department; and',
     );
     expect(parsed10.content).toContain(
-      '[Section 125(d) of this title](../title-10-armed-forces/section-00125d.md#ref=10%3A125%2Fd), referred to in subsec. (a)(12)(A), was repealed by Pub. L. 99–433, title III, § 301(b)(1), Oct. 1, 1986, 100 Stat. 1022.',
+      '[Section 125(d) of this title](../title-10-armed-forces/section-00125d.md), referred to in subsec. (a)(12)(A), was repealed by Pub. L. 99–433, title III, § 301(b)(1), Oct. 1, 1986, 100 Stat. 1022.',
     );
+    expect(parsed10.content).not.toContain('#ref=');
     expect(String(parsed10.data.source_credit)).toContain('(Aug. 10, 1956, ch. 1041, 70A Stat. 3;');
     expect(String(parsed10.data.source_credit)).toContain('Pub. L. 85–861, §§ 1(1), 33(a)(1), Sept. 2, 1958, 72 Stat. 1437, 1564;');
     expect(String(parsed10.data.source_credit)).toContain('Pub. L. 99–433, title III, § 302, Oct. 1, 1986, 100 Stat. 1022;');
