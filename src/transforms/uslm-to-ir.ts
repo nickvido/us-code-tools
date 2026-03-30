@@ -305,7 +305,9 @@ function parseSection(
   const parsedNotes = parseNotes(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber);
 
   const identifier = normalizeWhitespace(sectionNode['@_identifier']);
+  const appendixIdentifierPrefix = `/us/usc/t${titleNumber}a/s`;
   const isCodifiedSection = identifier.startsWith(`/us/usc/t${titleNumber}/s`)
+    || identifier.toLowerCase().startsWith(appendixIdentifierPrefix)
     || sectionNode.source !== undefined
     || sectionNode.enacted !== undefined
     || sectionNode['public-law'] !== undefined

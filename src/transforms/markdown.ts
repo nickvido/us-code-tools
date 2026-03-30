@@ -60,7 +60,12 @@ export function renderSectionMarkdown(section: SectionIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-export function renderChapterMarkdown(titleIr: TitleIR, chapter: string, sections: SectionIR[]): string {
+export function renderChapterMarkdown(
+  titleIr: TitleIR,
+  chapter: string,
+  sections: SectionIR[],
+  options: { sectionTargetsByNumber?: ReadonlyMap<string, string> } = {},
+): string {
   const heading = titleIr.chapters.find((entry) => entry.number === chapter)?.heading ?? `Chapter ${chapter}`;
   const frontmatter = {
     title: titleIr.titleNumber,
@@ -70,10 +75,14 @@ export function renderChapterMarkdown(titleIr: TitleIR, chapter: string, section
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(sections), frontmatter);
+  return matter.stringify(renderEmbeddedSections(sections, options.sectionTargetsByNumber), frontmatter);
 }
 
-export function renderUncategorizedMarkdown(titleIr: TitleIR, sections: SectionIR[]): string {
+export function renderUncategorizedMarkdown(
+  titleIr: TitleIR,
+  sections: SectionIR[],
+  options: { sectionTargetsByNumber?: ReadonlyMap<string, string> } = {},
+): string {
   const frontmatter = {
     title: titleIr.titleNumber,
     heading: 'Uncategorized',
@@ -81,7 +90,7 @@ export function renderUncategorizedMarkdown(titleIr: TitleIR, sections: SectionI
     source: titleIr.sourceUrlTemplate,
   };
 
-  return matter.stringify(renderEmbeddedSections(sections), frontmatter);
+  return matter.stringify(renderEmbeddedSections(sections, options.sectionTargetsByNumber), frontmatter);
 }
 
 export function renderTitleMarkdown(titleIr: TitleIR): string {
@@ -113,9 +122,32 @@ export function renderTitleMarkdown(titleIr: TitleIR): string {
   return matter.stringify(compactLines(lines), frontmatter);
 }
 
-function renderEmbeddedSections(sections: SectionIR[]): string {
-  const bodies = sections.map((section) => matter(renderSectionMarkdown(section)).content.trim());
+function renderEmbeddedSections(sections: SectionIR[], sectionTargetsByNumber?: ReadonlyMap<string, string>): string {
+  const bodies = sections.map((section) => {
+    const body = matter(renderSectionMarkdown(section)).content.trim();
+    return rewriteChapterModeLinks(body, sectionTargetsByNumber);
+  });
   return `${bodies.join('\n\n').trimEnd()}\n`;
+}
+
+function rewriteChapterModeLinks(markdown: string, sectionTargetsByNumber?: ReadonlyMap<string, string>): string {
+  if (!sectionTargetsByNumber || sectionTargetsByNumber.size === 0) {
+    return markdown;
+  }
+
+  return markdown.replace(/\]\((?:\.\/)?section-([^)]+?)\.md\)/gu, (_match, safeId: string) => {
+    const sectionNumber = readSectionNumberFromSafeId(safeId);
+    const target = sectionTargetsByNumber.get(sectionNumber);
+    if (!target) {
+      return `](./section-${safeId}.md)`;
+    }
+
+    return `](./${target})`;
+  });
+}
+
+function readSectionNumberFromSafeId(safeId: string): string {
+  return safeId.replace(/^0+(?=\d)/u, '');
 }
 
 function renderContentNode(node: ContentNode, indent: number, duplicateTextTracker: Map<string, number>): string {
