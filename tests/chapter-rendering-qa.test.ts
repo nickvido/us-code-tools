@@ -261,6 +261,49 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
     expect(markdown).not.toContain('section-00411.md');
   });
 
+  it('rewrites real parse-output cross-title section links to chapter anchors during chapter rendering', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<uslm>
+  <title>
+    <num>Title 5</num>
+    <heading>Government Organization and Employees</heading>
+    <chapter>
+      <num>4</num>
+      <heading>Officers and Employees</heading>
+    </chapter>
+    <section>
+      <num>§ 4101</num>
+      <heading>Training</heading>
+      <chapter>
+        <num>4</num>
+      </chapter>
+      <paragraph>
+        <xref href="/us/usc/t3/s411">section 411 of title 3</xref>
+      </paragraph>
+    </section>
+  </title>
+</uslm>`;
+
+    const parsed = parseUslmToIr(xml, 'title5.xml');
+    const title3Directory = titleDirectoryName({ titleNumber: 3, heading: 'The President' });
+    const markdown = renderChapterMarkdown(
+      parsed.titleIr as never,
+      '4' as never,
+      parsed.titleIr.sections as never,
+      {
+        sectionTargetsByNumber: new Map([
+          ['411', `../${title3Directory}/chapter-004-officers-and-employees.md#section-411`],
+        ]),
+      } as never,
+    );
+
+    expect(markdown).toContain('[section 411 of title 3]');
+    expect(markdown).toContain(`../${title3Directory}/chapter-004-officers-and-employees.md#section-411`);
+    expect(markdown).not.toContain(`../${title3Directory}/section-00411.md`);
+    expect(markdown).not.toContain('./section-00411.md');
+    expect(markdown).not.toMatch(/\]\([^)]*section-\d+\.md\)/);
+  });
+
   it('preserves section headings across equivalent ordered and non-ordered parse paths and returns empty string when heading is absent', () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <uslm>
