@@ -611,4 +611,99 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
     expect(headingsBySection.get('303')).toBe('');
   });
 
+  it('preserves ordered xref-only paragraph content so chapter rendering can rewrite the parsed markdown link', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<uslm>
+  <title>
+    <num>Title 5</num>
+    <heading>Government Organization and Employees</heading>
+    <chapter>
+      <num>4</num>
+      <heading>Officers and Employees</heading>
+    </chapter>
+    <section>
+      <num>§ 4101</num>
+      <heading>Training</heading>
+      <chapter>
+        <num>4</num>
+      </chapter>
+      <paragraph>
+        <xref href="/us/usc/t3/s411">section 411 of title 3</xref>
+      </paragraph>
+    </section>
+  </title>
+</uslm>`;
+
+    const parsed = parseUslmToIr(xml, 'title5-xref-only.xml');
+    const title3Directory = titleDirectoryName({ titleNumber: 3, heading: 'The President' });
+    const markdown = renderChapterMarkdown(
+      parsed.titleIr as never,
+      '4' as never,
+      parsed.titleIr.sections as never,
+      {
+        sectionTargetsByRef: new Map([
+          ['3:411', `../${title3Directory}/chapter-004-officers-and-employees.md#section-411`],
+        ]),
+      } as never,
+    );
+
+    expect(markdown).toContain('[section 411 of title 3]');
+    expect(markdown).toContain(`../${title3Directory}/chapter-004-officers-and-employees.md#section-411`);
+    expect(markdown).not.toContain('../title-03-the-president/section-00411.md');
+    expect(markdown).not.toContain('./section-00411.md');
+    expect(markdown).not.toMatch(/\n## § 4101\. Training[^]*section 411 of title 3[^]*\n\n###/);
+  });
+
+  it('recovers slash-bearing canonical refs from ordered parse-output links and falls back to the exact canonical slash URL when unmapped', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<uslm>
+  <title>
+    <num>Title 5</num>
+    <heading>Government Organization and Employees</heading>
+    <chapter>
+      <num>4</num>
+      <heading>Officers and Employees</heading>
+    </chapter>
+    <section>
+      <num>§ 4101</num>
+      <heading>Training</heading>
+      <chapter>
+        <num>4</num>
+      </chapter>
+      <paragraph>
+        <xref href="/us/usc/t5/s125/d">section 125/d</xref>
+      </paragraph>
+    </section>
+  </title>
+</uslm>`;
+
+    const parsed = parseUslmToIr(xml, 'title5-slash-xref.xml');
+    const mappedMarkdown = renderChapterMarkdown(
+      parsed.titleIr as never,
+      '4' as never,
+      parsed.titleIr.sections as never,
+      {
+        sectionTargetsByRef: new Map([
+          ['5:125/d', './chapter-004-officers-and-employees.md#section-125-d'],
+        ]),
+      } as never,
+    );
+    const fallbackMarkdown = renderChapterMarkdown(
+      parsed.titleIr as never,
+      '4' as never,
+      parsed.titleIr.sections as never,
+      { sectionTargetsByRef: new Map() } as never,
+    );
+
+    expect(mappedMarkdown).toContain('[section 125/d]');
+    expect(mappedMarkdown).toContain('./chapter-004-officers-and-employees.md#section-125-d');
+    expect(mappedMarkdown).not.toContain('./section-00125d.md');
+    expect(mappedMarkdown).not.toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125d');
+
+    expect(fallbackMarkdown).toContain('[section 125/d]');
+    expect(fallbackMarkdown).toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125/d');
+    expect(fallbackMarkdown).not.toContain('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section125d');
+    expect(fallbackMarkdown).not.toContain('./section-00125d.md');
+  });
+
 });
