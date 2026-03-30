@@ -27,6 +27,17 @@ function pickTitleRenderer(moduleExports: Record<string, unknown>): (titleIr: an
   ]) as (titleIr: any) => string;
 }
 
+function pickSectionLinkRenderer(
+  moduleExports: Record<string, unknown>,
+): (from: { titleNumber: number; heading?: string | null }, to: { titleNumber: number; heading?: string | null; sectionNumber: string }) => string {
+  return pickCallable(moduleExports, [
+    'sectionRelativeMarkdownLink',
+    'renderSectionRelativeMarkdownLink',
+    'sectionLinkHref',
+    'renderSectionLinkHref',
+  ]) as (from: { titleNumber: number; heading?: string | null }, to: { titleNumber: number; heading?: string | null; sectionNumber: string }) => string;
+}
+
 describe('markdown renderer', () => {
   it('renders section frontmatter including required keys', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
@@ -155,6 +166,25 @@ describe('markdown renderer', () => {
       chapters: 2,
       sections: 2,
     });
+  });
+
+  it('derives cross-title section links through the shared slugged title directory helper with fallback support', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+    const renderSectionLink = pickSectionLinkRenderer(mod);
+
+    const sluggedLink = renderSectionLink(
+      { titleNumber: 1, heading: 'General Provisions' },
+      { titleNumber: 18, heading: 'Crimes and Criminal Procedure', sectionNumber: '1' },
+    );
+    expect(sluggedLink).toBe('../title-18-crimes-and-criminal-procedure/section-00001.md');
+
+    const fallbackLink = renderSectionLink(
+      { titleNumber: 1, heading: 'General Provisions' },
+      { titleNumber: 4, heading: ` ' `, sectionNumber: '1' },
+    );
+    expect(fallbackLink).toBe('../title-04/section-00001.md');
   });
 
   it('keeps editorial/cross-reference material in rendered section snapshot', async () => {
@@ -424,6 +454,19 @@ describe('markdown renderer', () => {
     expect(lines).toContain('      (I) is married at the close of the taxpayer’s taxable year, and');
     expect(lines).toContain('      (II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
   });
+
+  it('renders cross-title references from parsed USLM fixtures with slugged target directories on the real parser-to-markdown path', async () => {
+    const markdown = await renderFixtureSectionByNeedle({
+      titleDir: 'title-05',
+      relativePath: '05-part-chapter-sections.xml',
+      needle: 'Federal Prison Oversight Act',
+    });
+
+    expect(markdown).toContain('[section 4041 of Title 18](../title-18-crimes-and-criminal-procedure/section-04041.md)');
+    expect(markdown).toContain('[section 2473 of Title 42](../title-42-the-public-health-and-welfare/section-02473.md)');
+    expect(markdown).not.toContain('../title-18/section-04041.md');
+    expect(markdown).not.toContain('../title-42/section-02473.md');
+  });
 });
 
 function parseFrontmatter(markdown: string) {
@@ -435,6 +478,22 @@ function readFixtureFrom(titleDir: string, relativePath: string): string {
 }
 
 async function renderFixtureSection(xmlFixture: { titleDir: string; relativePath: string; sectionNumber: string }) {
+  const { titleIr, renderSectionMarkdown } = await loadParsedFixture(xmlFixture.titleDir, xmlFixture.relativePath);
+  const section = titleIr.sections.find((entry: any) => entry.sectionNumber === xmlFixture.sectionNumber);
+
+  expect(section).toBeTruthy();
+  return renderSectionMarkdown(section);
+}
+
+async function renderFixtureSectionByNeedle(xmlFixture: { titleDir: string; relativePath: string; needle: string }) {
+  const { titleIr, renderSectionMarkdown } = await loadParsedFixture(xmlFixture.titleDir, xmlFixture.relativePath);
+  const section = titleIr.sections.find((entry: any) => JSON.stringify(entry).includes(xmlFixture.needle));
+
+  expect(section).toBeTruthy();
+  return renderSectionMarkdown(section);
+}
+
+async function loadParsedFixture(titleDir: string, relativePath: string) {
   const parseModulePath = resolve(process.cwd(), 'src', 'transforms', 'uslm-to-ir.ts');
   const parseModule = await safeImport(parseModulePath);
   ensureModuleLoaded(parseModulePath, parseModule);
@@ -454,10 +513,8 @@ async function renderFixtureSection(xmlFixture: { titleDir: string; relativePath
   ensureModuleLoaded(renderModulePath, renderModule);
   const renderSectionMarkdown = pickSectionRenderer(renderModule);
 
-  const parsed = await parseUslmToIr(readFixtureFrom(xmlFixture.titleDir, xmlFixture.relativePath));
+  const parsed = await parseUslmToIr(readFixtureFrom(titleDir, relativePath));
   const titleIr = parsed.titleIr ?? parsed.ir ?? parsed.title ?? parsed.result;
-  const section = titleIr.sections.find((entry: any) => entry.sectionNumber === xmlFixture.sectionNumber);
 
-  expect(section).toBeTruthy();
-  return renderSectionMarkdown(section);
+  return { titleIr, renderSectionMarkdown };
 }

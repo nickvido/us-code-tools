@@ -56,6 +56,12 @@
   - `src/domain/normalize.ts` is now also the single boundary for chapter bucket naming/ordering via `chapterFileSafeId()`, `chapterOutputFilename()`, and `compareChapterIdentifiers()`
   - `src/transforms/markdown.ts` adds `renderChapterMarkdown(...)` and `renderUncategorizedMarkdown(...)`, both built by embedding `renderSectionMarkdown(...)` output so chapter files reuse section rendering byte-for-byte after frontmatter stripping
   - `src/transforms/write-output.ts` preserves default section writes, adds chapter bucketing by `section.hierarchy.chapter`, writes `_uncategorized.md` for missing chapter metadata, rejects normalized filename collisions before any chapter writes, and still always writes `_title.md`
+- issue #20 extends that shared output-path contract from bare `title-NN` folders to slugged title directories:
+  - `src/domain/normalize.ts` now owns `slugifyTitleHeading(...)` and `titleDirectoryName(...)` so section mode, chapter mode, and link rendering all derive `title-{NN}-{heading-slug}` from one normalization boundary with exact fallback to `title-{NN}`
+  - the same module now exposes `resolveKnownTitleHeading(...)`, a canonical title-number → heading map used when the real parser/link path only has a target title number during cross-title USC ref rendering
+  - `src/transforms/write-output.ts` routes section files, chapter files, `_uncategorized.md`, and `_title.md` through `titleFileDirectoryPath(...)` so both default and `--group-by chapter` output land under the same slugged directory
+  - `src/transforms/markdown.ts` exports `sectionRelativeMarkdownLink(...)`, which now computes relative links against the same `titleDirectoryName(...)` helper instead of hard-coding `title-{NN}`
+  - `src/transforms/uslm-to-ir.ts` now routes `/us/usc/t{title}/s{section}` link targets through `titleDirectoryName(...)` + `resolveKnownTitleHeading(...)` so parsed inline refs land in slugged destination directories on the real XML-to-markdown path
 - `src/backfill/constitution/dataset.ts` — committed Constitution dataset (7 articles, 27 amendments) plus metadata/author mapping.
 - `src/backfill/renderer.ts` — deterministic YAML frontmatter + markdown rendering for Constitution provisions.
 - `src/backfill/messages.ts` — exact Constitution/amendment commit-message formatting.
@@ -162,6 +168,7 @@
 - Issue #12 makes recursive hierarchy traversal the production path. Do not add new fixed-depth loops that assume sections only live directly under `<title>` or `<chapter>`.
 - Hierarchy preservation is not just parser IR now; rendered section markdown is required to serialize present `subtitle`, `part`, `subpart`, `chapter`, and `subchapter` keys and omit absent ones.
 - `src/domain/normalize.ts` is now the single normalization boundary for section sort order and file stems. `_title.md` ordering, section filenames, and USC ref targets must all flow through the same helpers.
+- Issue #20 extends that rule to title directories too: `slugifyTitleHeading(...)`, `titleDirectoryName(...)`, and `resolveKnownTitleHeading(...)` are now the only production contract for title folder naming. Do not reformat title paths in writers, markdown helpers, or parser link code.
 - `sectionFileSafeId()` pads the leading numeric root to width 5 and preserves trailing suffixes/case, so examples like `106A`, `106a`, `106b`, and `2/3` remain distinct and stable.
 - Branch commit `07b954e` fixed the earlier issue #12 adversary seams around slash-separated `/us/usc/t10/s125/d` refs and equal-root mixed-case suffix ordering (`106 < 106A < 106a < 106b`).
 - Current head `2fb5c52` completes the remaining mixed-content seam in `src/transforms/uslm-to-ir.ts`: the module now dual-parses XML with a preserve-order tree and routes section body parsing, `sourceCredit`, and statutory-note extraction through ordered-text helpers (`readOrderedRawText(...)`, `readOrderedNodeText(...)`, `parseNotesOrdered(...)`) so inline `<ref>` / `<date>` siblings keep source document order.
@@ -283,7 +290,13 @@
     - numeric chapter ids zero-pad to width 3 (`1` -> `chapter-001.md`); non-numeric ids normalize through one shared helper (`IV` -> `chapter-iv.md`, `***` -> `chapter-unnamed.md`)
     - chapter files embed existing rendered section bodies in canonical `sortSections()` order rather than re-rendering from raw content nodes
     - partial chapter write failures and normalized chapter filename collisions are fatal reportable write errors
-  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, #12, #14, and #16
+  - issue #20 title-directory slug layer:
+    - both section mode and chapter mode now write under `uscode/title-{NN}-{heading-slug}/` when `TitleIR.heading` slugifies successfully
+    - title headings normalize by lowercasing, stripping straight/curly quotes and apostrophes, replacing non-alphanumeric runs with `-`, collapsing repeated hyphens, and trimming edges
+    - empty/punctuation-only headings intentionally fall back to the exact legacy directory `title-{NN}`
+    - cross-title USC ref links on both helper and real parser/render paths now target the same slugged directories via shared helpers
+    - real-link fallback for parsed refs uses `resolveKnownTitleHeading(...)` because inline `/us/usc/t{title}/s{section}` targets expose the destination title number but not its heading text
+  - unit, integration, snapshot, and adversary coverage for issues #3, #5, #8, #10, #12, #14, #16, and #20
 - What's intentionally deferred:
   - non-Constitution backfill phases that consume fetched artifacts
   - rewriting/repairing non-prefix histories

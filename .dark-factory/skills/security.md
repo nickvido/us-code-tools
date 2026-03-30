@@ -99,6 +99,9 @@
   - issue #16 treats uncategorized sections as report-only `warnings[]` and routes them to `_uncategorized.md`; they are intentionally not parse errors and must not change a successful exit on their own
   - issue #16 rejects normalized chapter filename collisions before any chapter write (`A-B` vs `A / B` -> same `chapter-a-b.md`) so one bucket cannot silently overwrite another
   - issue #16 requires non-zero exit on any `OUTPUT_WRITE_FAILED` chapter-mode partial write even if `_title.md` and another chapter file succeeded
+  - issue #20 treats XML-derived title headings as untrusted path input: `slugifyTitleHeading(...)` lowercases, strips quotes/apostrophes, replaces non-alphanumeric runs with `-`, collapses repeated separators, trims edges, and falls back to exact legacy `title-{NN}` when normalization empties out
+  - issue #20 requires every writer and cross-title link surface to call the same `titleDirectoryName(...)` helper so section mode, chapter mode, `_title.md`, `_uncategorized.md`, markdown helpers, and parser-generated USC links cannot drift onto mixed legacy/slugged paths
+  - issue #20 keeps the parser-path fallback explicit: `resolveKnownTitleHeading(...)` is allowed only because inline `/us/usc/t{title}/s{section}` refs expose the destination title number but not the destination heading text
 - `src/domain/normalize.ts`
   - is the intended single sanitization boundary for section sort/file/link identifiers via `splitSectionNumber()`, `compareSectionNumbers()`, and `sectionFileSafeId()`
   - pads only the leading numeric root to width 5 while preserving suffix case
@@ -127,6 +130,8 @@
 - **Issue #14 preserves sibling isolation by source order, not tag buckets:** `continuation` text belongs after nested children of the same parent node, and the ordered parser path is the control that prevents it from drifting onto siblings or being emitted too early.
 - **Issue #14 label normalization is output hardening, not semantic rewriting:** markdown rendering may add missing parentheses around bare labels like `1` → `(1)`, but it must not double-wrap already normalized labels or rewrite the canonical machine-readable label value used elsewhere.
 - **Issue #16 keeps chapter filename normalization as the sole filename boundary:** numeric chapters zero-pad to width 3; non-numeric chapters flow through `chapterFileSafeId()` / `chapterOutputFilename()` using the spec-defined ASCII-safe normalization contract.
+- **Issue #20 keeps title-directory normalization as the sole parent-path boundary:** XML-derived headings must become directory names only through `slugifyTitleHeading(...)` / `titleDirectoryName(...)`, with exact fallback to `title-{NN}` when the heading is missing or normalizes to empty.
+- **Issue #20 real-link fallback uses a canonical heading map intentionally:** `resolveKnownTitleHeading(...)` supplies destination headings for cross-title USC links on the real parser path so markdown targets stay aligned with emitted directories even when only the target title number is present in the XML href.
 - **Issue #16 collision detection is integrity hardening, not optional polish:** because chapter normalization is many-to-one by design, future agents must preserve the explicit pre-write collision check instead of letting later buckets overwrite earlier ones.
 - **Issue #16 warning classification is part of the public contract:** uncategorized sections surface via `TransformWarning` / `warnings[]`, not `ParseError`, so successful runs can still report zero `parse_errors`.
 - **Issue #21 historical OLRC fetches must remain discovery-driven:** once the listing is parsed, `selectVintagePlan()` must reuse the discovered per-vintage title URL map rather than synthesizing `resolveTitleUrl(title, vintage)` for titles that were never advertised.
@@ -149,6 +154,7 @@
 - Issue #16 chapter-grouped output is required additive behavior when `--group-by chapter` is passed; falling back to `section-*.md` output in that mode is a contract regression.
 - Issue #16 `_uncategorized.md` plus `warnings[]` is expected behavior for chapter-less sections and should not be mislabeled as a failed transform.
 - Zero-padded section filenames are part of the transform safety/correctness contract now because lexicographic directory order must match canonical numeric order during local review and downstream processing.
+- Slugged title directories are now part of that same path-safety/correctness contract; future agents should not dismiss mixed `title-18/` vs `title-18-crimes-and-criminal-procedure/` outputs as harmless cosmetic drift because cross-title links depend on the shared helper contract.
 - Issue #21 sparse historical vintages are valid upstream behavior; missing discovered links should populate `missing_titles`, not trigger fabricated 404 fetch failures.
 - Issue #21 only updates the top-level OLRC compatibility mirror (`selected_vintage` + `titles`) for plain latest-mode fetches; historical single-vintage and all-vintages runs persist canonical state under `sources.olrc.vintages` without redefining latest-mode semantics.
 
@@ -213,6 +219,7 @@
   - issue #12 transform hardening: one shared normalization boundary for XML-derived identifiers reused in frontmatter/paths/links, recursive hierarchy coverage for positive-law titles, preserved statutory note wrapper metadata, and fail-closed relative USC ref rendering
   - issue #14 transform integrity hardening: preserve-order structured-body parsing prevents chapeau/body/continuation loss or sibling drift, and markdown label normalization now preserves readable numbering without changing canonical parser identifiers
   - issue #16 output-integrity hardening: one shared chapter filename boundary, explicit pre-write collision rejection, report-only uncategorized warnings, and non-zero exit on any chapter write failure
+  - issue #20 path-integrity hardening: one shared title-directory normalization boundary, filesystem-safe heading slugification, exact fallback to legacy `title-{NN}`, and shared-link enforcement across writer and parser surfaces
   - issue #21 historical OLRC hardening: duplicate/malformed `--vintage` rejection before discovery, in-memory-only cookie reuse across list/latest/single/all-vintages modes, additive manifest normalization for old OLRC state, and discovery-driven sparse-vintage handling
 - What's intentionally deferred:
   - signed-commit enforcement

@@ -1,6 +1,17 @@
 import matter from 'gray-matter';
+import { relative } from 'node:path';
 import type { ContentNode, NoteIR, SectionIR, StatutoryNoteIR, TitleIR } from '../domain/model.js';
-import { sortSections } from '../domain/normalize.js';
+import { sectionFileSafeId, sortSections, titleDirectoryName } from '../domain/normalize.js';
+
+export function sectionRelativeMarkdownLink(
+  from: { titleNumber: number; heading?: string | null },
+  to: { titleNumber: number; heading?: string | null; sectionNumber: string },
+): string {
+  const fromDirectory = titleDirectoryName({ titleNumber: from.titleNumber, heading: from.heading });
+  const targetPath = `${titleDirectoryName({ titleNumber: to.titleNumber, heading: to.heading })}/section-${sectionFileSafeId(to.sectionNumber)}.md`;
+
+  return relative(fromDirectory, targetPath);
+}
 
 export function renderSectionMarkdown(section: SectionIR): string {
   const frontmatter: Record<string, string | number> = {};

@@ -1,11 +1,15 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { ParseError, SectionIR, TitleIR, TransformGroupBy, TransformWarning } from '../domain/model.js';
-import { chapterOutputFilename, compareChapterIdentifiers, padTitleNumber, sectionFileSafeId, sortSections } from '../domain/normalize.js';
+import { chapterOutputFilename, compareChapterIdentifiers, sectionFileSafeId, sortSections, titleDirectoryName } from '../domain/normalize.js';
 import { atomicWriteFile, assertSafeOutputPath } from '../utils/fs.js';
 import { renderChapterMarkdown, renderSectionMarkdown, renderTitleMarkdown, renderUncategorizedMarkdown } from './markdown.js';
 
-export function sectionFilePath(titleNumber: number, sectionId: string): string {
-  return resolve('uscode', `title-${padTitleNumber(titleNumber)}`, `section-${sectionFileSafeId(sectionId)}.md`);
+export function titleFileDirectoryPath(titleNumber: number, titleHeading?: string | null): string {
+  return join('uscode', titleDirectoryName({ titleNumber, heading: titleHeading }));
+}
+
+export function sectionFilePath(titleNumber: number, sectionId: string, titleHeading?: string | null): string {
+  return join(titleFileDirectoryPath(titleNumber, titleHeading), `section-${sectionFileSafeId(sectionId)}.md`);
 }
 
 export async function writeTitleOutput(
@@ -18,16 +22,17 @@ export async function writeTitleOutput(
   let filesWritten = 0;
   const sortedSections = sortSections(titleIr.sections);
   const groupBy = options.groupBy ?? 'section';
+  const titleDirectoryPath = resolve(outputRoot, titleFileDirectoryPath(titleIr.titleNumber, titleIr.heading));
 
   if (groupBy === 'chapter') {
-    const writeResult = await writeChapterOutput(outputRoot, titleIr, sortedSections);
+    const writeResult = await writeChapterOutput(outputRoot, titleIr, sortedSections, titleDirectoryPath);
     filesWritten += writeResult.filesWritten;
     parseErrors.push(...writeResult.parseErrors);
     warnings.push(...writeResult.warnings);
   } else {
     for (const section of sortedSections) {
       try {
-        filesWritten += await writeSection(outputRoot, section);
+        filesWritten += await writeSection(outputRoot, section, titleIr.heading);
       } catch (error) {
         parseErrors.push({
           code: 'OUTPUT_WRITE_FAILED',
@@ -38,7 +43,7 @@ export async function writeTitleOutput(
     }
   }
 
-  const titlePath = resolve(outputRoot, 'uscode', `title-${padTitleNumber(titleIr.titleNumber)}`, '_title.md');
+  const titlePath = resolve(titleDirectoryPath, '_title.md');
 
   try {
     await assertSafeOutputPath(outputRoot, titlePath);
@@ -59,6 +64,7 @@ async function writeChapterOutput(
   outputRoot: string,
   titleIr: TitleIR,
   sortedSections: SectionIR[],
+  titleDirectoryPath: string,
 ): Promise<{ filesWritten: number; parseErrors: ParseError[]; warnings: TransformWarning[] }> {
   const parseErrors: ParseError[] = [];
   const warnings: TransformWarning[] = [];
@@ -104,12 +110,7 @@ async function writeChapterOutput(
   for (const chapter of orderedChapters) {
     const sections = chapterBuckets.get(chapter) ?? [];
     const outputFilename = chapterOutputFilename(chapter);
-    const absolutePath = resolve(
-      outputRoot,
-      'uscode',
-      `title-${padTitleNumber(titleIr.titleNumber)}`,
-      outputFilename,
-    );
+    const absolutePath = resolve(titleDirectoryPath, outputFilename);
 
     try {
       await assertSafeOutputPath(outputRoot, absolutePath);
@@ -125,7 +126,7 @@ async function writeChapterOutput(
   }
 
   if (uncategorizedSections.length > 0) {
-    const absolutePath = resolve(outputRoot, 'uscode', `title-${padTitleNumber(titleIr.titleNumber)}`, '_uncategorized.md');
+    const absolutePath = resolve(titleDirectoryPath, '_uncategorized.md');
     try {
       await assertSafeOutputPath(outputRoot, absolutePath);
       await atomicWriteFile(absolutePath, renderUncategorizedMarkdown(titleIr, uncategorizedSections));
@@ -142,8 +143,8 @@ async function writeChapterOutput(
   return { filesWritten, parseErrors, warnings };
 }
 
-async function writeSection(outputRoot: string, section: SectionIR): Promise<number> {
-  const absolutePath = resolve(outputRoot, 'uscode', `title-${padTitleNumber(section.titleNumber)}`, `section-${sectionFileSafeId(section.sectionNumber)}.md`);
+async function writeSection(outputRoot: string, section: SectionIR, titleHeading?: string | null): Promise<number> {
+  const absolutePath = resolve(outputRoot, sectionFilePath(section.titleNumber, section.sectionNumber, titleHeading));
   await assertSafeOutputPath(outputRoot, absolutePath);
   await atomicWriteFile(absolutePath, renderSectionMarkdown(section));
   return 1;
