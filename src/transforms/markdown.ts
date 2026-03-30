@@ -175,30 +175,36 @@ function rewriteChapterModeLinks(
   titleIr: TitleIR,
   sectionTargetsByNumber?: ReadonlyMap<string, string>,
 ): string {
-  return markdown.replace(/\]\((?:\.\/)?section-([^)]+?)\.md\)/gu, (_match, safeId: string) => {
+  return markdown.replace(/\[([^\]]+)\]\(((?:\.\.\/title-[^/]+\/|\.\/)?section-([^)]+?)\.md)\)/gu, (_match, linkText: string, href: string, safeId: string) => {
     const sectionNumber = readSectionNumberFromSafeId(safeId);
     const target = sectionTargetsByNumber?.get(sectionNumber);
     if (target) {
-      return `](${target})`;
+      return `[${linkText}](${target})`;
     }
 
-    return `](${buildCanonicalSectionUrl(readReferencedTitleNumber(markdown, sectionNumber) ?? titleIr.titleNumber, sectionNumber)})`;
+    const referencedTitleNumber = readReferencedTitleNumberFromHref(href) ?? readReferencedTitleNumberFromLinkText(linkText) ?? titleIr.titleNumber;
+    return `[${linkText}](${buildCanonicalSectionUrl(referencedTitleNumber, sectionNumber)})`;
   });
 }
 
-function readReferencedTitleNumber(markdown: string, sectionNumber: string): number | undefined {
-  const pattern = new RegExp(`\\[([^\\]]*section\\s+${escapeForRegExp(sectionNumber)}\\s+of\\s+title\\s+(\\d+)[^\\]]*)\\]\\((?:\\.\\/)?section-${escapeForRegExp(sectionFileSafeId(sectionNumber))}\\.md\\)`, 'iu');
-  const match = markdown.match(pattern);
+function readReferencedTitleNumberFromHref(href: string): number | undefined {
+  const match = href.match(/^\.\.\/title-(\d+)-[^/]+\/section-[^/]+\.md$/u);
   if (!match) {
     return undefined;
   }
 
-  const titleNumber = Number.parseInt(match[2] ?? '', 10);
+  const titleNumber = Number.parseInt(match[1] ?? '', 10);
   return Number.isFinite(titleNumber) ? titleNumber : undefined;
 }
 
-function escapeForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+function readReferencedTitleNumberFromLinkText(linkText: string): number | undefined {
+  const match = linkText.match(/\bsection\s+.+?\s+of\s+title\s+(\d+)\b/iu);
+  if (!match) {
+    return undefined;
+  }
+
+  const titleNumber = Number.parseInt(match[1] ?? '', 10);
+  return Number.isFinite(titleNumber) ? titleNumber : undefined;
 }
 
 function readSectionNumberFromSafeId(safeId: string): string {
