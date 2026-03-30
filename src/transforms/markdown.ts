@@ -137,11 +137,7 @@ function renderSectionBody(
 ): string {
   const lines: string[] = [];
 
-  if (options.anchor) {
-    lines.push(`<a id="${options.anchor}"></a>`);
-  }
-
-  lines.push(renderSectionHeading(section, options.sectionHeadingLevel));
+  lines.push(renderSectionHeading(section, options.sectionHeadingLevel, options.anchor));
 
   const contentLines = renderContentNodes(section.content);
   if (contentLines.length > 0) {
@@ -165,9 +161,10 @@ function renderSectionBody(
   return compactLines(lines);
 }
 
-function renderSectionHeading(section: SectionIR, level: number): string {
+function renderSectionHeading(section: SectionIR, level: number, anchor?: string): string {
   const prefix = '#'.repeat(level);
-  return section.heading ? `${prefix} § ${section.sectionNumber}. ${section.heading}` : `${prefix} § ${section.sectionNumber}.`;
+  const heading = section.heading ? `${prefix} § ${section.sectionNumber}. ${section.heading}` : `${prefix} § ${section.sectionNumber}.`;
+  return anchor ? `${heading} {#${anchor}}` : heading;
 }
 
 function rewriteChapterModeLinks(
@@ -287,16 +284,31 @@ function renderContentNodeLines(node: ContentNode, indent: number, duplicateText
   }
 
   const lines: string[] = [];
-  const line = renderLabeledLine(label, heading, text, indent);
+  const line = renderStructuredLine(nodeType, label, heading, text, indent);
   if (line) {
     lines.push(line);
   }
 
+  const childIndent = nodeType === 'subsection' ? indent : indent + 2;
   for (const child of children) {
-    lines.push(...renderContentNodeLines(child, indent + 2, duplicateTextTracker));
+    lines.push(...renderContentNodeLines(child, childIndent, duplicateTextTracker));
   }
 
   return lines;
+}
+
+function renderStructuredLine(nodeType: string | undefined, label: string, heading: string, text: string, indent: number): string {
+  if (nodeType === 'subsection') {
+    return renderSubsectionHeading(label, heading, text);
+  }
+
+  return renderLabeledLine(label, heading, text, indent);
+}
+
+function renderSubsectionHeading(label: string, heading: string, text: string): string {
+  const formattedLabel = formatLabel(label);
+  const inlineText = [formattedLabel, heading, text].filter(Boolean).join(' ');
+  return inlineText ? `## ${inlineText}` : '';
 }
 
 function renderLabeledLine(label: string, heading: string, text: string, indent: number): string {

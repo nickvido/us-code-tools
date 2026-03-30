@@ -317,7 +317,7 @@ function parseSection(
   return {
     titleNumber,
     sectionNumber,
-    heading: readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading'),
+    heading: readSectionHeading(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber),
     status: normalizeStatus(readRawText(sectionNode.status)),
     source,
     identifier,
@@ -333,6 +333,28 @@ function parseSection(
     editorialNotes: parsedNotes.editorialNotes,
     content: parseContent(sectionNode, orderedSectionNode, parseErrors, xmlPath, sectionNumber),
   };
+}
+
+function readSectionHeading(
+  sectionNode: XmlNode,
+  orderedSectionNode: OrderedEntry[] | undefined,
+  parseErrors: ParseError[],
+  xmlPath: string | undefined,
+  sectionHint: string,
+): string {
+  const orderedHeading = readOrderedOptionalText(
+    parseErrors,
+    orderedChildArrayFromChildren(orderedSectionNode ?? [], 'heading'),
+    xmlPath,
+    'section heading',
+    sectionHint,
+  );
+
+  if (orderedHeading !== undefined) {
+    return orderedHeading;
+  }
+
+  return readNormalizedText(parseErrors, sectionNode.heading, xmlPath, 'section heading', sectionHint);
 }
 
 function parseContent(
