@@ -288,12 +288,16 @@ export async function runOlrcBackfill(
     if (i < alreadyApplied) {
       process.stderr.write(`[backfill] Skipping vintage ${entry.vintage} (${entry.year}) — already committed.\n`);
       vintagesApplied++;
-      // Still apply tags (idempotent)
-      for (const [tagName, tagVintage] of plan.tags) {
-        if (tagVintage === entry.vintage) {
-          await git(repoPath, ['tag', '-d', tagName]).catch(() => '');
-          await git(repoPath, ['tag', tagName]).catch(() => '');
-          appliedTags.push(tagName);
+      // Re-apply tags to the correct commit (not HEAD) for idempotency
+      const shas = (await git(repoPath, ['rev-list', '--reverse', 'HEAD'])).split('\n').filter(Boolean);
+      const commitSha = shas[i];
+      if (commitSha) {
+        for (const [tagName, tagVintage] of plan.tags) {
+          if (tagVintage === entry.vintage) {
+            await git(repoPath, ['tag', '-d', tagName]).catch(() => '');
+            await git(repoPath, ['tag', tagName, commitSha]).catch(() => '');
+            appliedTags.push(tagName);
+          }
         }
       }
       continue;
