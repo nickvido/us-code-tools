@@ -210,7 +210,39 @@ export function runOlrcBackfillDryRun(
 }
 
 /**
+ * Detect how many vintages from the plan are already committed in the target repo.
+ * Matches by commit message prefix "Update US Code through Public Law {congress}-{lawNumber}".
+ */
+async function detectAppliedVintages(
+  repoPath: string,
+  plan: OlrcBackfillPlan,
+): Promise<number> {
+  const revList = await git(repoPath, ['rev-list', '--reverse', 'HEAD']).catch(() => '');
+  const shas = revList.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (shas.length === 0) {
+    return 0;
+  }
+
+  let matched = 0;
+  for (let i = 0; i < Math.min(shas.length, plan.vintages.length); i++) {
+    const raw = await git(repoPath, ['log', '--format=%s', '-1', shas[i]!]);
+    const expectedPrefix = `Update US Code through Public Law ${plan.vintages[i]!.congress}-${plan.vintages[i]!.lawNumber}`;
+    if (raw.trim() === expectedPrefix) {
+      matched++;
+    } else {
+      break; // Non-matching commit breaks the prefix chain
+    }
+  }
+
+  return matched;
+}
+
+/**
  * Run the full OLRC historical backfill.
+ *
+ * Resume-safe: detects already-applied vintages by matching commit messages
+ * against the plan and skips them. Re-running after a crash picks up where
+ * it left off.
  */
 export async function runOlrcBackfill(
   target: string,
@@ -231,36 +263,78 @@ export async function runOlrcBackfill(
 
   const branch = await git(repoPath, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => 'main');
 
+  // Detect already-applied vintages for resume support
+  const alreadyApplied = await detectAppliedVintages(repoPath, plan);
+  if (alreadyApplied > 0) {
+    process.stderr.write(`[backfill] Resuming: ${alreadyApplied} of ${plan.vintages.length} vintages already applied, skipping.\n`);
+  }
+
+  // If a previous run crashed mid-vintage, clean up dirty state
+  const dirtyStatus = await git(repoPath, ['status', '--porcelain']).catch(() => '');
+  if (dirtyStatus.trim() !== '') {
+    process.stderr.write(`[backfill] Cleaning dirty working tree from interrupted run...\n`);
+    await git(repoPath, ['checkout', '--', '.']).catch(() => '');
+    await git(repoPath, ['clean', '-fd']).catch(() => '');
+  }
+
   let vintagesApplied = 0;
+  let vintagesFailed = 0;
   const appliedTags: string[] = [];
 
-  for (const entry of plan.vintages) {
-    process.stderr.write(`[backfill] Processing vintage ${entry.vintage} (${entry.year})...\n`);
+  for (let i = 0; i < plan.vintages.length; i++) {
+    const entry = plan.vintages[i]!;
 
-    // Clear the uscode directory for a clean snapshot
-    // writeTitleOutput writes into <outputDir>/uscode/<title-dir>/ so we pass repoPath
-    const uscodeDir = resolve(repoPath, 'uscode');
-    if (existsSync(uscodeDir)) {
-      await rm(uscodeDir, { recursive: true, force: true });
+    // Skip already-applied vintages
+    if (i < alreadyApplied) {
+      process.stderr.write(`[backfill] Skipping vintage ${entry.vintage} (${entry.year}) — already committed.\n`);
+      vintagesApplied++;
+      // Still apply tags (idempotent)
+      for (const [tagName, tagVintage] of plan.tags) {
+        if (tagVintage === entry.vintage) {
+          await git(repoPath, ['tag', '-d', tagName]).catch(() => '');
+          await git(repoPath, ['tag', tagName]).catch(() => '');
+          appliedTags.push(tagName);
+        }
+      }
+      continue;
     }
 
-    // Transform all titles for this vintage — output root is the repo itself
-    // (writeTitleOutput creates the uscode/ subdirectory internally)
-    const result = await transformVintage(projectRoot, entry.vintage, repoPath);
-    process.stderr.write(`[backfill]   ${result.sectionsFound} sections → ${result.filesWritten} files\n`);
+    process.stderr.write(`[backfill] [${i + 1}/${plan.vintages.length}] Processing vintage ${entry.vintage} (${entry.year})...\n`);
 
-    // Commit the snapshot
-    await commitVintage(repoPath, branch, entry);
-    vintagesApplied += 1;
-
-    // Apply tags
-    for (const [tagName, tagVintage] of plan.tags) {
-      if (tagVintage === entry.vintage) {
-        // Delete existing tag if it exists (for idempotency)
-        await git(repoPath, ['tag', '-d', tagName]).catch(() => '');
-        await git(repoPath, ['tag', tagName]);
-        appliedTags.push(tagName);
+    try {
+      // Clear the uscode directory for a clean snapshot
+      const uscodeDir = resolve(repoPath, 'uscode');
+      if (existsSync(uscodeDir)) {
+        await rm(uscodeDir, { recursive: true, force: true });
       }
+
+      // Transform all titles for this vintage
+      const result = await transformVintage(projectRoot, entry.vintage, repoPath);
+      process.stderr.write(`[backfill]   ${result.sectionsFound} sections → ${result.filesWritten} files\n`);
+
+      // Commit the snapshot
+      await commitVintage(repoPath, branch, entry);
+      vintagesApplied++;
+
+      // Apply tags
+      for (const [tagName, tagVintage] of plan.tags) {
+        if (tagVintage === entry.vintage) {
+          await git(repoPath, ['tag', '-d', tagName]).catch(() => '');
+          await git(repoPath, ['tag', tagName]);
+          appliedTags.push(tagName);
+        }
+      }
+
+      process.stderr.write(`[backfill]   ✓ committed\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[backfill]   ✗ FAILED: ${message}\n`);
+      process.stderr.write(`[backfill]   Cleaning up and continuing with next vintage...\n`);
+      vintagesFailed++;
+
+      // Clean up dirty state so the next vintage starts clean
+      await git(repoPath, ['checkout', '--', '.']).catch(() => '');
+      await git(repoPath, ['clean', '-fd']).catch(() => '');
     }
   }
 
@@ -271,7 +345,6 @@ export async function runOlrcBackfill(
     const remote = remotes.includes('origin') ? 'origin' : remotes[0];
     try {
       await git(repoPath, ['push', '--set-upstream', remote!, branch]);
-      // Push tags
       for (const tag of appliedTags) {
         await git(repoPath, ['push', remote!, `refs/tags/${tag}`]).catch(() => '');
       }
@@ -286,7 +359,7 @@ export async function runOlrcBackfill(
     target: repoPath,
     vintagesPlanned: plan.vintages.length,
     vintagesApplied,
-    vintagesSkipped: plan.vintages.length - vintagesApplied,
+    vintagesSkipped: plan.vintages.length - vintagesApplied - vintagesFailed,
     tags: appliedTags,
     pushResult,
   };
