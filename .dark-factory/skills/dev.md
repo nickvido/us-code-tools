@@ -37,6 +37,9 @@
 - Focused issue #21 tests:
   - `npx vitest run tests/cli/issue21-historical-olrc.test.ts tests/utils/issue21-manifest-historical.test.ts`
   - full regression proof from dev handoff: `npm test` (`166/166` passing at commit `051ce97`)
+- Focused issue #29 tests:
+  - `npx vitest run tests/chapter-rendering-qa.test.ts tests/unit/issue16-chapter-mode.test.ts`
+  - full regression proof from dev handoff: `npx vitest run` plus `npx tsc --noEmit` and `npm run build`
 - Run backfill after build:
   - `node dist/index.js backfill --phase constitution --target ./test-repo`
 - Run transform after build:
@@ -102,9 +105,9 @@
 - `src/backfill/planner.ts` → `src/backfill/constitution/dataset.ts`, `src/backfill/renderer.ts`, `src/backfill/messages.ts`
 - `src/backfill/renderer.ts` → `src/backfill/constitution/dataset.ts`, `gray-matter`
 - `src/backfill/messages.ts` → no downstream state; keep pure and template-exact
-- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10/#12/#14/#20: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, canonical title/chapter/section numbers flow through `readCanonicalNumText(...)`, recursive traversal accumulates `subtitle`/`part`/`subpart`/`chapter`/`subchapter`, `parseNotes()` emits `sourceCredit` + `statutoryNotes`, ordered-body helpers preserve `chapeau`, inline body text, nested descendants, and `continuation` across `subsection -> ... -> subitem`, and cross-title USC hrefs now derive slugged destination title directories through `titleDirectoryName(...)` + `resolveKnownTitleHeading(...)`)
-- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12/#14/#16/#20: section frontmatter now serializes hierarchy keys + `source_credit`, `_title.md` must use `sortSections()`, section prose may contain relative USC links generated from sanitized section ids, labeled body rendering normalizes bare labels like `1` to `(1)` while keeping deterministic indentation, chapter-mode renderers must embed `renderSectionMarkdown()` output rather than re-render section bodies, and cross-title relative links must derive both source and destination title directories through `titleDirectoryName(...)`)
-- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`, `src/domain/normalize.ts` (issue #12/#16/#20: all section file paths must use zero-padded `sectionFileSafeId()` output, chapter bucketing must use `section.hierarchy.chapter`, collision detection must happen on `chapterOutputFilename()` before any chapter writes, and every section/chapter/title path must flow through `titleFileDirectoryPath()` / `titleDirectoryName(...)` so the slugged title-directory contract cannot drift by output mode)
+- `src/transforms/uslm-to-ir.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `fast-xml-parser` (issue #8/#10/#12/#14/#20/#29: parser config uses `removeNSPrefix: true`, root discovery falls back from `uscDoc.main.title` to `uslm.title`, canonical title/chapter/section numbers flow through `readCanonicalNumText(...)`, recursive traversal accumulates `subtitle`/`part`/`subpart`/`chapter`/`subchapter`, `parseNotes()` emits `sourceCredit` + `statutoryNotes`, ordered-body helpers preserve `chapeau`, inline body text, nested descendants, and `continuation` across `subsection -> ... -> subitem`, cross-title USC hrefs derive slugged destination title directories through `titleDirectoryName(...)` + `resolveKnownTitleHeading(...)`, ordered-path xrefs preserve canonical refs in `#ref=${encodeURIComponent(`${title}:${section}`)}`, and `readSectionHeading(...)` is now the shared heading-parity seam for ordered vs non-ordered parsing)
+- `src/transforms/markdown.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `gray-matter` (issue #12/#14/#16/#20/#29: section frontmatter serializes hierarchy keys + `source_credit`, `_title.md` no longer renders a per-section list, section prose may contain relative USC links generated from sanitized section ids, labeled body rendering normalizes bare labels like `1` to `(1)` while keeping deterministic indentation, chapter-mode rendering now uses explicit contextual heading levels + `{#section-*}` anchors, and chapter-mode xref rewriting depends on `embeddedSectionAnchor(...)`, `buildCanonicalSectionUrl(...)`, and `sectionTargetsByRef` rather than local `section-*.md` paths)
+- `src/transforms/write-output.ts` → `src/transforms/markdown.ts`, `src/utils/fs.ts`, `src/domain/model.ts`, `src/domain/normalize.ts` (issue #12/#16/#20/#29: all section file paths must use zero-padded `sectionFileSafeId()` output, chapter bucketing must use `section.hierarchy.chapter`, collision detection must happen on `chapterOutputFilename()` before any chapter writes, every section/chapter/title path must flow through `titleFileDirectoryPath()` / `titleDirectoryName(...)`, and chapter-mode rendering now consumes a precomputed `${title}:${section}` -> `./chapter-...md#section-...` map built from actual output filenames/anchors)
 
 ### Call Chain: Entry Point → Your Code
 ```text
@@ -225,6 +228,9 @@ src/index.ts (main)
   - issue #14 builds on that same preserve-order seam: `parseOrderedContentChildren(...)` and `parseLabeledNodeOrdered(...)` are now the production path for structured section bodies when ordered children are available; preserve the source-order contract `chapeau -> inline body -> nested labeled children -> continuation`
   - issue #16 chapter mode must build on the existing transform contracts instead of bypassing them: group only on parsed `hierarchy.chapter`, order sections with `sortSections()`, derive chapter paths only through `chapterOutputFilename()`, and embed section output by stripping frontmatter from `renderSectionMarkdown()` results
   - issue #20 extends the same centralization rule upward one directory level: never format `title-${NN}` paths inline when `titleDirectoryName(...)` is available, and use `resolveKnownTitleHeading(...)` only for parser/link paths that know the destination title number but not its parsed heading
+  - issue #29 adds two more shared boundaries future agents should not bypass: `readSectionHeading(...)` for section-heading parity and `embeddedSectionAnchor(...)` / `buildCanonicalSectionUrl(...)` for chapter-mode anchors + unmapped xref fallbacks
+  - chapter-mode xref rewriting now depends on the writer-provided `sectionTargetsByRef` map keyed as `${titleNumber}:${canonicalSectionNumber}`; do not rebuild chapter filenames or anchors ad hoc inside tests or renderer call sites
+  - ordered parse-output USC links intentionally carry canonical slash-bearing refs in `#ref=` fragments while keeping filename-safe local hrefs; do not strip that fragment unless you also replace the chapter-mode recovery path
   - when modifying `src/transforms/uslm-to-ir.ts`, treat `readOrderedRawText(...)` + `parseNotesOrdered(...)` as the production issue-#12 path and treat the ordered body helpers as the production issue-#14 path; keep legacy `readRawText(...)` behavior only where the ordered tree is unavailable, and avoid reintroducing per-tag bucket concatenation for mixed-content nodes
   - treat hierarchy frontmatter as part of the user-visible contract, not an internal parser detail
 
@@ -362,6 +368,12 @@ src/index.ts
     - `fetchOlrcVintagePlan()` is the one discovery pass for list/latest/single/all-vintages modes
     - `fetchDiscoveredOlrcVintage()` persists canonical per-vintage state and only updates the latest-mode mirror when `updateSelectedVintageMirror` is true
     - sparse historical vintages are expected: absent title links belong in `missing_titles`, not fabricated ZIP requests
+  - issue #29 chapter-rendering correctness work:
+    - chapter mode now renders embedded sections with explicit H2 headings and `#section-*` anchors instead of section-mode H1 headings
+    - chapter-level xrefs never point to `section-*.md`; they resolve through writer-built `sectionTargetsByRef` entries or exact `uscode.house.gov` section URLs
+    - `_title.md` intentionally keeps only title/chapter navigation, while nested labeled content now renders as multiple indented lines with parent-before-child ordering
+    - ordered and non-ordered parse paths must agree on `SectionIR.heading`; the shared helper seam is `readSectionHeading(...)`
+- What's intentionally deferred:
 - What's intentionally deferred:
   - additional backfill phases
   - auto-repair of internal-gap histories

@@ -340,3 +340,24 @@
 - **Decision:** `OlrcVintagePlan` now retains `titleUrlsByVintage`, and `selectVintagePlan()` clones the discovered map for the requested vintage so absent titles remain represented by `missing_titles` rather than invented download requests.
 - **Consequence:** Future agents should treat sparse vintage listings as valid upstream input and should not reintroduce fallback URL synthesis for titles missing from the discovered listing.
 - **Feature:** #21 Historical OLRC annual release-point fetch
+
+### ADR-048: Chapter-mode link rewriting is driven by writer-built section target maps plus exact canonical fallback URLs
+- **Status:** Active
+- **Context:** Issue #29 found that chapter-mode markdown still linked to nonexistent local `section-*.md` files, and slash-bearing parse-output refs like `125/d` could lose their canonical identifier during rewrite/fallback.
+- **Decision:** `src/transforms/write-output.ts` builds `sectionTargetsByRef` entries keyed as `${titleNumber}:${sectionNumber}` from actual chapter filenames/anchors, `src/transforms/markdown.ts` rewrites chapter-mode links through that map, and unmapped refs fall back exactly through `buildCanonicalSectionUrl(titleNumber, sectionNumber)`.
+- **Consequence:** Renderer link targets now match actual written chapter files, and canonical refs like `125/d` must remain intact for both map lookup and fallback URL emission. Future agents should not reintroduce local `section-*.md` chapter links or ad hoc fallback URL builders.
+- **Feature:** #29 Markdown chapter rendering correctness
+
+### ADR-049: Embedded chapter-mode rendering is context-aware, while section-mode rendering remains standalone
+- **Status:** Active
+- **Context:** Chapter files embed multiple sections, so reusing standalone section markdown byte-for-byte caused invalid heading hierarchy, missing embedded anchors, and note heading levels that were too shallow for chapter pages.
+- **Decision:** `src/transforms/markdown.ts` keeps standalone section rendering at H1, but chapter-mode embedded sections render with explicit H2 headings plus `{#section-*}` anchors, statutory notes at H3/H4, editorial notes at H3, and depth-indented labeled content lines.
+- **Consequence:** Future agents should treat heading level, anchor insertion, and chapter-mode note levels as contextual renderer concerns rather than trying to get chapter output by stripping frontmatter from standalone section markdown.
+- **Feature:** #29 Markdown chapter rendering correctness
+
+### ADR-050: Section heading extraction must share one helper across ordered and non-ordered parser paths
+- **Status:** Active
+- **Context:** Issue #29 exposed intermittent missing headings in parsed sections, especially when sections also contained structured/nested ordered content.
+- **Decision:** `src/transforms/uslm-to-ir.ts` now routes section-heading extraction through `readSectionHeading(...)`, which prefers ordered-path heading text when available and otherwise falls back to the non-ordered `<heading>` read, returning `''` when the element is absent.
+- **Consequence:** Ordered/non-ordered parsing must stay heading-equivalent for the same section input, and future agents should not substitute descendant paragraph text into `SectionIR.heading` as a fallback.
+- **Feature:** #29 Markdown chapter rendering correctness
