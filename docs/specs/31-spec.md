@@ -27,7 +27,7 @@ Update the markdown renderer so chapter/embed output no longer emits visible `{#
 - [ ] Nested child lines under a subsection (paragraphs, subparagraphs, clauses, items, and continuation text) must retain their current source order and indentation after subsection paragraph separation is introduced. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
 
 #### 3. Regression coverage
-- [ ] Unit or snapshot tests must cover chapter/embed rendering for a section with an embedded anchor and assert that the output contains `<a id="section-...'></a>`-style markup and does not contain `{#section-...}`. <!-- Touches: tests/unit/transforms/markdown.test.ts -->
+- [ ] Unit or snapshot tests must cover chapter/embed rendering for a section with an embedded anchor and assert that the output contains `<a id="section-..."></a>`-style markup and does not contain `{#section-...}`. <!-- Touches: tests/unit/transforms/markdown.test.ts -->
 - [ ] Unit or snapshot tests must cover at least two sibling subsection nodes and assert that the rendered markdown contains `\n\n**(a)` and `\n\n**(b)` boundaries (or equivalent paragraph breaks) rather than a single continuous paragraph. <!-- Touches: tests/unit/transforms/markdown.test.ts -->
 - [ ] Existing renderer tests for standalone section output, deep hierarchy ordering, and cross-title links must continue to pass without expectation changes unrelated to the new anchor/paragraph formatting. <!-- Touches: tests/unit/transforms/markdown.test.ts, tests/unit/transforms/__snapshots__/markdown.test.ts.snap -->
 
