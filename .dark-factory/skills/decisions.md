@@ -361,3 +361,17 @@
 - **Decision:** `src/transforms/uslm-to-ir.ts` now routes section-heading extraction through `readSectionHeading(...)`, which prefers ordered-path heading text when available and otherwise falls back to the non-ordered `<heading>` read, returning `''` when the element is absent.
 - **Consequence:** Ordered/non-ordered parsing must stay heading-equivalent for the same section input, and future agents should not substitute descendant paragraph text into `SectionIR.heading` as a fallback.
 - **Feature:** #29 Markdown chapter rendering correctness
+
+### ADR-051: Canonical OLRC section URLs and embedded anchors are centralized helper contracts
+- **Status:** Active
+- **Context:** Issue #31 showed that renderer-generated OLRC fallbacks and chapter-mode embedded headings had drifted into broken visible `{#section-*}` suffixes and incomplete `uscode.house.gov` URLs.
+- **Decision:** `src/domain/normalize.ts` owns both `buildCanonicalSectionUrl(...)` (exact `&num=0&edition=prelim` contract) and `embeddedSectionAnchor(...)`; `src/transforms/markdown.ts` renders embedded chapter headings as an exact `<a id="section-*"></a>` line followed by the section heading.
+- **Consequence:** Future agents should not hand-roll OLRC section URLs or anchor ids in renderer/tests. Raw HTML remains constrained to normalized anchor tags only.
+- **Feature:** #31 Formatting round 2: anchor tags visible, subsections not separated
+
+### ADR-052: Note structure is preserved through parser extraction and emitted as markdown-safe paragraphs/tables
+- **Status:** Active
+- **Context:** Issue #31 exposed multiple note regressions at once: multi-`<p>` notes collapsed into walls of text, Historical and Revision Notes tables flattened, and embedded Act sections leaking out of note scope into top-level title sections.
+- **Decision:** `src/transforms/uslm-to-ir.ts` preserves note paragraph/table/embedded-section structure via the ordered parse path (`parseNotesOrdered(...)`, `readOrderedMixedNoteText(...)`, `renderMarkdownTableFromOrderedEntry(...)`) and excludes note-scoped `<section>` nodes from top-level section discovery; `src/transforms/markdown.ts` then emits the preserved note text with blank-line paragraph boundaries instead of whitespace-joined runs.
+- **Consequence:** Future agents must treat note structure as a first-class transform contract, not a lossy text-normalization surface. Table output must remain markdown-escaped, and note-contained Acts must stay inside their parent note blocks.
+- **Feature:** #31 Formatting round 2: anchor tags visible, subsections not separated

@@ -241,3 +241,9 @@
   - temp repos and bare remotes in tests are doubles for downstream targets
   - actual repo-preflight and git execution code paths are production paths exercised in integration tests
   - fixture source payloads are doubles; manifest/cache/crosswalk cleanup behavior is production logic
+
+- issue #31 renderer/parser hardening:
+  - canonical `uscode.house.gov` section URLs must come only from `buildCanonicalSectionUrl(...)`, which appends `&num=0&edition=prelim`; omitting those parameters is a correctness and integrity regression because OLRC redirects to `docnotfound.xhtml`
+  - embedded chapter anchors are allowlisted raw HTML output: only exact `<a id="section-*"></a>` tags built from `embeddedSectionAnchor(...)` are permitted; visible `{#...}` suffixes and arbitrary HTML passthrough remain forbidden
+  - note tables must stay on the markdown-safe escaping boundary (`escapeMarkdownTableCell(...)`) so untrusted XML cannot break table layout or inject arbitrary markdown structure
+  - note-scoped embedded Act sections must remain inside note text; promoting them to top-level `SectionIR` records is both a parsing integrity bug and a scope-confusion risk for downstream consumers
