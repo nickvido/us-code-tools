@@ -128,7 +128,7 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
     positiveLaw,
     chapters: collectChapterMetadata(titleNode, parseErrors, xmlPath),
     sections: [],
-    sourceUrlTemplate: buildCanonicalSectionUrl(titleNumber, '{section}'),
+    sourceUrlTemplate: `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}&num=0&edition=prelim`,
   };
 
   let uncodifiedSectionIndex = 0;

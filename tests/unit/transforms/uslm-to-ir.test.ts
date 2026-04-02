@@ -461,7 +461,7 @@ describe('uslm-to-ir parser', () => {
     const result = await parseXmlFixture(readFixtureFrom('title-05', '05-part-chapter-sections.xml'));
 
     expect(result.titleIr.sourceUrlTemplate).toBe(
-      'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section{section}&num=0&edition=prelim',
+      'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5&num=0&edition=prelim',
     );
     expect(result.titleIr.sourceUrlTemplate).toContain('&num=0');
     expect(result.titleIr.sourceUrlTemplate).toContain('&edition=prelim');
