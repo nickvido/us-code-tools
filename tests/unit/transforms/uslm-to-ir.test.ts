@@ -493,6 +493,38 @@ describe('uslm-to-ir parser', () => {
     expect(noteText).not.toContain('DerivationU.S. CodeRevised Statutes andStatutes at Large');
   });
 
+  it('keeps preserved note table rows ahead of explanatory paragraphs in parser output', async () => {
+    const result = await parseXmlFixture(readFixtureFrom('title-05', '05-part-chapter-sections.xml'));
+    const section101 = result.titleIr.sections.find((entry: any) => entry.sectionNumber === '101');
+
+    expect(section101).toBeTruthy();
+
+    const noteText = JSON.stringify({
+      statutoryNotes: section101.statutoryNotes ?? [],
+      editorialNotes: section101.editorialNotes ?? [],
+    });
+
+    const headingIndex = noteText.indexOf('Historical and Revision Notes');
+    const tableHeaderIndex = noteText.indexOf('Derivation');
+    const usCodeIndex = noteText.indexOf('U.S. Code');
+    const statutesAtLargeIndex = noteText.indexOf('Revised Statutes and Statutes at Large');
+    const tableRowIndex = noteText.indexOf('5 U.S.C. 1');
+    const paragraphIndex = noteText.indexOf('The reference in former section 1 to the application of the provisions of this title');
+    const laterParagraphIndex = noteText.indexOf('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+
+    expect(headingIndex).toBeGreaterThanOrEqual(0);
+    expect(tableHeaderIndex).toBeGreaterThan(headingIndex);
+    expect(usCodeIndex).toBeGreaterThan(tableHeaderIndex);
+    expect(statutesAtLargeIndex).toBeGreaterThan(usCodeIndex);
+    expect(tableRowIndex).toBeGreaterThan(statutesAtLargeIndex);
+    expect(paragraphIndex).toBeGreaterThan(tableRowIndex);
+    expect(laterParagraphIndex).toBeGreaterThan(paragraphIndex);
+    expect(noteText).toContain('5 U.S.C. 1');
+    expect(noteText).toContain('R.S. § 1');
+    expect(noteText).toContain('June 22, 1874, ch. 391, § 1, 18 Stat. 5.');
+    expect(noteText).toContain('title\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+  });
+
   it('keeps embedded Act sections inside note scope instead of promoting them to top-level sections', async () => {
     const result = await parseXmlFixture(buildEmbeddedActInNoteXml());
     const titleIr = result.titleIr;

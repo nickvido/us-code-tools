@@ -552,6 +552,24 @@ describe('markdown renderer', () => {
     expect(markdown).not.toContain('The following definitions apply in this title:\n(1)');
   });
 
+  it('keeps subsection chapeau and sibling blocks as separate paragraphs on consecutive lines', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-10',
+      relativePath: '10-subtitle-part-chapter-sections.xml',
+      sectionNumber: '101',
+    });
+
+    expect(markdown).toContain('(a) Definitions and Construction');
+    expect(markdown).toContain('The following definitions apply in this title:\n\n(1) The term “Secretary concerned”');
+    expect(markdown).toContain('(b) Personnel Generally\nIn this title:');
+    expect(markdown).toContain('In this title:\n\n(1) The term “active duty”');
+    expect(markdown).toContain('(c) Reserve Components\nIn this title:');
+    expect(markdown).toContain('In this title:\n\n(1) The term “reserve component”');
+    expect(markdown).not.toContain('The following definitions apply in this title:\n(1) The term “Secretary concerned”');
+    expect(markdown).not.toContain('In this title:\n(1) The term “active duty”');
+    expect(markdown).not.toContain('In this title:\n(1) The term “reserve component”');
+  });
+
   it('renders multi-paragraph note content and note tables with preserved structure', async () => {
     const markdown = await renderFixtureSection({
       titleDir: 'title-05',
@@ -568,6 +586,31 @@ describe('markdown renderer', () => {
     expect(markdown).toContain('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
     expect(markdown).toMatch(/\|[^\n]*\|[^\n]*\|[^\n]*\|\n\nThe reference in former section 1/u);
     expect(markdown).not.toContain('DerivationU.S. CodeRevised Statutes andStatutes at Large');
+  });
+
+  it('keeps note prose, markdown tables, and following paragraphs in source order with blank-line boundaries', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-05',
+      relativePath: '05-part-chapter-sections.xml',
+      sectionNumber: '101',
+    });
+
+    const headingIndex = markdown.indexOf('Historical and Revision Notes');
+    const tableHeaderIndex = markdown.indexOf('| Derivation | U.S. Code | Revised Statutes and Statutes at Large |');
+    const tableDividerIndex = markdown.indexOf('| --- | --- | --- |');
+    const tableRowIndex = markdown.indexOf('| 5 U.S.C. 1 | R.S. § 1 | June 22, 1874, ch. 391, § 1, 18 Stat. 5. |');
+    const paragraphIndex = markdown.indexOf('The reference in former section 1 to the application of the provisions of this title');
+    const laterParagraphIndex = markdown.indexOf('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+
+    expect(headingIndex).toBeGreaterThanOrEqual(0);
+    expect(tableHeaderIndex).toBeGreaterThan(headingIndex);
+    expect(tableDividerIndex).toBeGreaterThan(tableHeaderIndex);
+    expect(tableRowIndex).toBeGreaterThan(tableDividerIndex);
+    expect(paragraphIndex).toBeGreaterThan(tableRowIndex);
+    expect(laterParagraphIndex).toBeGreaterThan(paragraphIndex);
+    expect(markdown).toContain('Historical and Revision Notes\n\n| Derivation | U.S. Code | Revised Statutes and Statutes at Large |');
+    expect(markdown).toContain('| 5 U.S.C. 1 | R.S. § 1 | June 22, 1874, ch. 391, § 1, 18 Stat. 5. |\n\nThe reference in former section 1 to the application of the provisions of this title');
+    expect(markdown).toContain('this title\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
   });
 });
 
