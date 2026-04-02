@@ -279,7 +279,9 @@ function renderContentNodes(
   const duplicateTextTracker = buildDuplicateTextTracker(nodes);
 
   for (const node of nodes) {
-    const renderedLines = renderContentNodeLines(node, 0, duplicateTextTracker, options);
+    const renderedLines = renderContentNodeLines(node, 0, duplicateTextTracker, options, {
+      inGithubSafeNestedHierarchy: false,
+    });
     if (renderedLines.length === 0) {
       continue;
     }
@@ -313,6 +315,7 @@ function renderContentNodeLines(
   indent: number,
   duplicateTextTracker: Map<string, number>,
   options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+  context: { inGithubSafeNestedHierarchy: boolean },
 ): string[] {
   const runtimeNode = readRuntimeNode(node);
   const nodeType = runtimeNode.type ?? runtimeNode.kind;
@@ -333,18 +336,25 @@ function renderContentNodeLines(
       duplicateTextTracker.delete(key);
     }
 
-    return key ? [`${' '.repeat(indent)}${key}`] : [];
+    const safeIndent = context.inGithubSafeNestedHierarchy ? 0 : indent;
+    return key ? [`${' '.repeat(safeIndent)}${key}`] : [];
   }
 
   const lines: string[] = [];
-  const line = renderStructuredLine(nodeType, label, heading, text, indent, options);
+  const enablesGithubSafeNestedHierarchy =
+    context.inGithubSafeNestedHierarchy || (nodeType === 'subsection' && hasLabeledDescendant(children));
+  const line = renderStructuredLine(nodeType, label, heading, text, indent, options, {
+    inGithubSafeNestedHierarchy: enablesGithubSafeNestedHierarchy,
+  });
   if (line) {
     lines.push(line);
   }
 
-  const childIndent = nodeType === 'subsection' ? indent : indent + 2;
+  const childIndent = enablesGithubSafeNestedHierarchy ? 0 : nodeType === 'subsection' ? indent : indent + 2;
   for (const child of children) {
-    const childLines = renderContentNodeLines(child, childIndent, duplicateTextTracker, options);
+    const childLines = renderContentNodeLines(child, childIndent, duplicateTextTracker, options, {
+      inGithubSafeNestedHierarchy: enablesGithubSafeNestedHierarchy,
+    });
     if (childLines.length === 0) {
       continue;
     }
@@ -376,9 +386,14 @@ function renderStructuredLine(
   text: string,
   indent: number,
   options: { structuredSubsectionHeadings: boolean; emphasizeStructuredHeadings: boolean },
+  context: { inGithubSafeNestedHierarchy: boolean },
 ): string {
-  if (nodeType === 'subsection' && options.structuredSubsectionHeadings) {
+  if (nodeType === 'subsection' && (options.structuredSubsectionHeadings || context.inGithubSafeNestedHierarchy)) {
     return renderSubsectionHeading(label, heading, text);
+  }
+
+  if (context.inGithubSafeNestedHierarchy && nodeType && nodeType !== 'text') {
+    return renderGithubSafeLabeledParagraph(label, heading, text);
   }
 
   return renderLabeledLine(label, heading, text, indent, options);
@@ -411,6 +426,14 @@ function renderLabeledLine(
   return parts.length > 0 ? `${' '.repeat(indent)}${parts.join(' ')}`.trimEnd() : '';
 }
 
+function renderGithubSafeLabeledParagraph(label: string, heading: string, text: string): string {
+  const formattedLabel = formatLabel(label);
+  const headingToken = [formattedLabel, heading].filter(Boolean).join(' ');
+  const labelToken = headingToken ? `**${headingToken}**` : formattedLabel ? `**${formattedLabel}**` : '';
+  const parts = [labelToken, heading ? text : text].filter(Boolean);
+  return parts.join(' ').trimEnd();
+}
+
 function formatHeading(
   heading: string,
   indent: number,
@@ -432,6 +455,22 @@ function buildDuplicateTextTracker(nodes: ContentNode[]): Map<string, number> {
     }
   }
   return counts;
+}
+
+function hasLabeledDescendant(nodes: ContentNode[]): boolean {
+  for (const node of nodes) {
+    const runtimeNode = readRuntimeNode(node);
+    const nodeType = runtimeNode.type ?? runtimeNode.kind;
+    if (nodeType && nodeType !== 'text' && (runtimeNode.label ?? '').trim()) {
+      return true;
+    }
+
+    if (hasLabeledDescendant(runtimeNode.children ?? [])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function collectTextNodeCounts(nodes: ContentNode[], counts: Map<string, number>): void {

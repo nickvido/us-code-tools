@@ -552,10 +552,10 @@ describe('markdown renderer', () => {
       sectionNumber: '101',
     });
 
-    expect(markdown).toContain('The following definitions apply in this title:\n\n(1)');
-    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n(1)');
-    expect(markdown).toContain('\n\n(b) Personnel Generally');
-    expect(markdown).toContain('\n\n(c) Reserve Components');
+    expect(markdown).toContain('**(a) In General.—** The following definitions apply in this title:\n\n**(1)**');
+    expect(markdown).toContain('**(b) Personnel Generally.—** The following definitions relating to military personnel apply in this title:\n\n**(1)**');
+    expect(markdown).toContain('\n\n**(b) Personnel Generally.—**');
+    expect(markdown).toContain('\n\n**(c) Reserve Components.—**');
     expect(markdown).not.toContain('The following definitions apply in this title:\n(1)');
   });
 
@@ -566,12 +566,12 @@ describe('markdown renderer', () => {
       sectionNumber: '101',
     });
 
-    expect(markdown).toContain('(a) In General.— The following definitions apply in this title:');
-    expect(markdown).toContain('The following definitions apply in this title:\n\n(1) The term “United States”');
-    expect(markdown).toContain('(b) Personnel Generally.— The following definitions relating to military personnel apply in this title:');
-    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n(1) The term “officer”');
-    expect(markdown).toContain('(c) Reserve Components.— The following definitions relating to the reserve components apply in this title:');
-    expect(markdown).toContain('The following definitions relating to the reserve components apply in this title:\n\n(1) The term “National Guard”');
+    expect(markdown).toContain('**(a) In General.—** The following definitions apply in this title:');
+    expect(markdown).toContain('The following definitions apply in this title:\n\n**(1)** The term “United States”');
+    expect(markdown).toContain('**(b) Personnel Generally.—** The following definitions relating to military personnel apply in this title:');
+    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n**(1)** The term “officer”');
+    expect(markdown).toContain('**(c) Reserve Components.—** The following definitions relating to the reserve components apply in this title:');
+    expect(markdown).toContain('The following definitions relating to the reserve components apply in this title:\n\n**(1)** The term “National Guard”');
     expect(markdown).not.toContain('The following definitions apply in this title:\n(1) The term “United States”');
     expect(markdown).not.toContain('The following definitions relating to military personnel apply in this title:\n(1) The term “officer”');
     expect(markdown).not.toContain('The following definitions relating to the reserve components apply in this title:\n(1) The term “National Guard”');
