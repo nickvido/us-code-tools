@@ -27,6 +27,25 @@ function pickTitleRenderer(moduleExports: Record<string, unknown>): (titleIr: an
   ]) as (titleIr: any) => string;
 }
 
+function pickEmbeddedRenderer(moduleExports: Record<string, unknown>): (...args: any[]) => string {
+  return pickCallable(moduleExports, [
+    'renderChapterMarkdown',
+    'renderUncategorizedMarkdown',
+    'renderEmbeddedSectionsMarkdown',
+    'renderEmbeddedMarkdown',
+    'renderChapterDocument',
+    'chapterToMarkdown',
+  ]) as (...args: any[]) => string;
+}
+
+function pickCanonicalUrlBuilder(moduleExports: Record<string, unknown>): (titleNumber: number | string, sectionNumber: string) => string {
+  return pickCallable(moduleExports, [
+    'buildCanonicalSectionUrl',
+    'canonicalSectionUrl',
+    'buildSectionUrl',
+  ]) as (titleNumber: number | string, sectionNumber: string) => string;
+}
+
 function pickSectionLinkRenderer(
   moduleExports: Record<string, unknown>,
 ): (from: { titleNumber: number; heading?: string | null }, to: { titleNumber: number; heading?: string | null; sectionNumber: string }) => string {
@@ -467,6 +486,88 @@ describe('markdown renderer', () => {
     expect(markdown).toContain('[section 2473 of Title 42](../title-42-the-public-health-and-welfare/section-02473.md)');
     expect(markdown).not.toContain('../title-18/section-04041.md');
     expect(markdown).not.toContain('../title-42/section-02473.md');
+  });
+
+  it('builds canonical OLRC section URLs with num=0 and edition=prelim', async () => {
+    const modulePath = resolve(process.cwd(), 'src', 'domain', 'normalize.ts');
+    const mod = await safeImport(modulePath);
+    ensureModuleLoaded(modulePath, mod);
+    const buildCanonicalSectionUrl = pickCanonicalUrlBuilder(mod);
+
+    const url = buildCanonicalSectionUrl(4, '8');
+    expect(url).toBe('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title4-section8&num=0&edition=prelim');
+    expect(url).toContain('&num=0');
+    expect(url).toContain('&edition=prelim');
+    expect(url).not.toBe('https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title4-section8');
+  });
+
+  it('renders embedded chapter output with standalone anchors instead of visible {#section-...} suffixes', async () => {
+    const parseModulePath = resolve(process.cwd(), 'src', 'transforms', 'uslm-to-ir.ts');
+    const parseModule = await safeImport(parseModulePath);
+    ensureModuleLoaded(parseModulePath, parseModule);
+    const parseUslmToIr = pickCallable(parseModule, [
+      'parseUslmToIr',
+      'parseUslmToIR',
+      'parseUslmXml',
+      'parseUslmXmlToIr',
+      'parseXmlToIr',
+      'parseTitleXml',
+      'parseTitleXmlToIr',
+      'transformUslmXml',
+    ]) as (xml: string) => Promise<any>;
+
+    const renderModulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
+    const renderModule = await safeImport(renderModulePath);
+    ensureModuleLoaded(renderModulePath, renderModule);
+    const renderEmbeddedMarkdown = pickEmbeddedRenderer(renderModule);
+
+    const parsed = await parseUslmToIr(readFixtureFrom('title-01', '03-chapter-section.xml'));
+    const titleIr = parsed.titleIr ?? parsed.ir ?? parsed.title ?? parsed.result;
+
+    const chapter = titleIr.chapters?.[0];
+    const embeddedSections = titleIr.sections;
+
+    // NOTE: Use the EXISTING embedded/chapter renderer signature — do NOT add a new overload.
+    // If the args below differ, adapt this call to the real production signature.
+    const markdown = renderEmbeddedMarkdown(titleIr, chapter?.number ?? 'I', embeddedSections);
+
+    expect(markdown).toContain('<a id="section-999"></a>');
+    expect(markdown).toContain('## § 999. Chapter-contained section');
+    expect(markdown).not.toContain('{#section-999}');
+    expect(markdown).not.toContain('## § 999. Chapter-contained section {#section-999}');
+    expect(markdown).toMatch(/<a id="section-999"><\/a>\n## § 999\. Chapter-contained section/u);
+  });
+
+  it('separates structured subsection siblings with blank lines in rendered markdown', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-10',
+      relativePath: '10-subtitle-part-chapter-sections.xml',
+      sectionNumber: '101',
+    });
+
+    expect(markdown).toContain('The following definitions apply in this title:\n\n(1)');
+    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n(1)');
+    expect(markdown).toContain('\n\n(b) Personnel Generally');
+    expect(markdown).toContain('\n\n(c) Reserve Components');
+    expect(markdown).not.toContain('The following definitions apply in this title:\n(1)');
+  });
+
+  it('renders multi-paragraph note content and note tables with preserved structure', async () => {
+    const markdown = await renderFixtureSection({
+      titleDir: 'title-05',
+      relativePath: '05-part-chapter-sections.xml',
+      sectionNumber: '101',
+    });
+
+    expect(markdown).toContain('Historical and Revision Notes');
+    expect(markdown).toMatch(/\|\s*Derivation\s*\|\s*U\.S\. Code\s*\|\s*Revised Statutes and\s+Statutes at Large\s*\|/u);
+    expect(markdown).toContain('| --- | --- | --- |');
+    expect(markdown).toContain('5 U.S.C. 1');
+    expect(markdown).toContain('R.S. §');
+    expect(markdown).toContain('The reference in former section 1 to the application of the provisions of this title');
+    expect(markdown).toContain('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+    expect(markdown).toMatch(/\|[^\n]*\|[^\n]*\|[^\n]*\|\n\nThe reference in former section 1/u);
+    expect(markdown).not.toContain('DerivationU.S. CodeRevised Statutes andStatutes at Large');
   });
 });
 

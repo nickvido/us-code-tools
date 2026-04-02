@@ -87,6 +87,47 @@ function buildNumContractXml(options: {
 </uscDoc>`;
 }
 
+function buildEmbeddedActInNoteXml(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<uscDoc xmlns="http://xml.house.gov/schemas/uslm/1.0" xmlns:html="http://www.w3.org/1999/xhtml">
+  <meta>
+    <docNumber>4</docNumber>
+    <docTitle>Flag and Seal, Seat of Government, and the States</docTitle>
+  </meta>
+  <main>
+    <title identifier="/us/usc/t4">
+      <num value="4">Title 4—</num>
+      <heading>FLAG AND SEAL, SEAT OF GOVERNMENT, AND THE STATES</heading>
+      <chapter identifier="/us/usc/t4/ch1">
+        <num value="1">CHAPTER 1—</num>
+        <heading>THE FLAG</heading>
+        <section identifier="/us/usc/t4/s8">
+          <num value="8">§ 8.</num>
+          <heading>Respect for flag</heading>
+          <content><p>No disrespect should be shown to the flag of the United States of America.</p></content>
+          <notes>
+            <note topic="statutoryNotes">
+              <heading>Freedom to Display the American Flag Act of 2005</heading>
+              <p>Pub. L. 109–243 provided that:</p>
+              <section identifier="/us/pl/109/243/s1">
+                <num value="1">§ 1.</num>
+                <heading>Short Title</heading>
+                <content><p>This Act may be cited as the “Freedom to Display the American Flag Act of 2005”.</p></content>
+              </section>
+              <section identifier="/us/pl/109/243/s2">
+                <num value="2">§ 2.</num>
+                <heading>Definitions</heading>
+                <content><p>In this Act, the term “residential real estate management association” has the meaning given that term in section 3.</p></content>
+              </section>
+            </note>
+          </notes>
+        </section>
+      </chapter>
+    </title>
+  </main>
+</uscDoc>`;
+}
+
 describe('uslm-to-ir parser', () => {
   it('parses title, chapters, and section metadata from fixture XML', async () => {
     const result = await parseXmlFixture(readFixture('01-base.xml'));
@@ -414,6 +455,65 @@ describe('uslm-to-ir parser', () => {
     const subsectionWithNestedChildren = section.content.find((node: any) => node.type === 'subsection' && node.label === 'f');
     expect(subsectionWithNestedChildren).toBeTruthy();
     expect(subsectionWithNestedChildren.children.some((node: any) => node.type === 'paragraph' && node.label === '2')).toBe(true);
+  });
+
+  it('uses the canonical OLRC sourceUrlTemplate contract with num=0 and edition=prelim', async () => {
+    const result = await parseXmlFixture(readFixtureFrom('title-05', '05-part-chapter-sections.xml'));
+
+    expect(result.titleIr.sourceUrlTemplate).toBe(
+      'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title5-section{section}&num=0&edition=prelim',
+    );
+    expect(result.titleIr.sourceUrlTemplate).toContain('&num=0');
+    expect(result.titleIr.sourceUrlTemplate).toContain('&edition=prelim');
+
+    const section101 = result.titleIr.sections.find((entry: any) => entry.sectionNumber === '101');
+    expect(section101).toBeTruthy();
+    expect(String(section101.source ?? '')).toContain('&num=0');
+    expect(String(section101.source ?? '')).toContain('&edition=prelim');
+  });
+
+  it('preserves multi-paragraph note boundaries and table structure from real note fixtures', async () => {
+    const result = await parseXmlFixture(readFixtureFrom('title-05', '05-part-chapter-sections.xml'));
+    const section101 = result.titleIr.sections.find((entry: any) => entry.sectionNumber === '101');
+
+    expect(section101).toBeTruthy();
+
+    const noteText = JSON.stringify({
+      statutoryNotes: section101.statutoryNotes ?? [],
+      editorialNotes: section101.editorialNotes ?? [],
+    });
+
+    expect(noteText).toContain('Historical and Revision Notes');
+    expect(noteText).toContain('The reference in former section 1 to the application of the provisions of this title');
+    expect(noteText).toContain('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+    expect(noteText).toContain('\n\n');
+    expect(noteText).toContain('Derivation');
+    expect(noteText).toContain('U.S. Code');
+    expect(noteText).toContain('Revised Statutes');
+    expect(noteText).not.toContain('DerivationU.S. CodeRevised Statutes andStatutes at Large');
+  });
+
+  it('keeps embedded Act sections inside note scope instead of promoting them to top-level sections', async () => {
+    const result = await parseXmlFixture(buildEmbeddedActInNoteXml());
+    const titleIr = result.titleIr;
+
+    expect(titleIr.sections).toHaveLength(1);
+    expect(titleIr.sections.map((section: any) => section.sectionNumber)).toEqual(['8']);
+    expect(titleIr.sections.some((section: any) => section.sectionNumber === '1')).toBe(false);
+    expect(titleIr.sections.some((section: any) => section.sectionNumber === '2')).toBe(false);
+
+    const section8 = titleIr.sections[0];
+    const noteText = JSON.stringify({
+      statutoryNotes: section8.statutoryNotes ?? [],
+      editorialNotes: section8.editorialNotes ?? [],
+    });
+
+    expect(noteText).toContain('Freedom to Display the American Flag Act of 2005');
+    expect(noteText).toContain('§ 1.');
+    expect(noteText).toContain('Short Title');
+    expect(noteText).toContain('§ 2.');
+    expect(noteText).toContain('Definitions');
+    expect(result.parseErrors).toEqual([]);
   });
 });
 
