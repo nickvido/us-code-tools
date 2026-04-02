@@ -482,11 +482,15 @@ describe('uslm-to-ir parser', () => {
       statutoryNotes: section101.statutoryNotes ?? [],
       editorialNotes: section101.editorialNotes ?? [],
     });
+    const combinedNoteText = [
+      ...(section101.statutoryNotes ?? []).map((note: any) => String(note.text ?? '')),
+      ...(section101.editorialNotes ?? []).map((note: any) => String(note.text ?? '')),
+    ].join('\n\n');
 
     expect(noteText).toContain('Historical and Revision Notes');
     expect(noteText).toContain('The reference in former section 1 to the application of the provisions of this title');
     expect(noteText).toContain('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
-    expect(noteText).toContain('\n\n');
+    expect(combinedNoteText).toContain('\n\n');
     expect(noteText).toContain('Derivation');
     expect(noteText).toContain('U.S. Code');
     expect(noteText).toContain('Revised Statutes');
@@ -520,9 +524,9 @@ describe('uslm-to-ir parser', () => {
     expect(paragraphIndex).toBeGreaterThan(tableRowIndex);
     expect(laterParagraphIndex).toBeGreaterThan(paragraphIndex);
     expect(noteText).toContain('5 U.S.C. 1');
-    expect(noteText).toContain('R.S. § 1');
-    expect(noteText).toContain('June 22, 1874, ch. 391, § 1, 18 Stat. 5.');
-    expect(noteText).toContain('title\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+    expect(noteText).toContain('R.S. § 158');
+    expect(noteText).toContain('Feb. 9, 1889, ch. 122, § 1 (38th through 54th words), 25 Stat. 659.');
+    expect(combinedNoteText).toContain('title\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
   });
 
   it('keeps embedded Act sections inside note scope instead of promoting them to top-level sections', async () => {

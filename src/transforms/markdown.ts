@@ -344,10 +344,29 @@ function renderContentNodeLines(
 
   const childIndent = nodeType === 'subsection' ? indent : indent + 2;
   for (const child of children) {
-    lines.push(...renderContentNodeLines(child, childIndent, duplicateTextTracker, options));
+    const childLines = renderContentNodeLines(child, childIndent, duplicateTextTracker, options);
+    if (childLines.length === 0) {
+      continue;
+    }
+
+    if (lines.length > 0 && shouldSeparateStructuredChildren(lines, childLines)) {
+      lines.push('');
+    }
+
+    lines.push(...childLines);
   }
 
   return lines;
+}
+
+function shouldSeparateStructuredChildren(existingLines: string[], childLines: string[]): boolean {
+  const lastNonBlank = [...existingLines].reverse().find((line) => line !== '');
+  const firstNonBlank = childLines.find((line) => line !== '');
+  if (!lastNonBlank || !firstNonBlank) {
+    return false;
+  }
+
+  return isLabeledLine(firstNonBlank);
 }
 
 function renderStructuredLine(

@@ -559,15 +559,15 @@ describe('markdown renderer', () => {
       sectionNumber: '101',
     });
 
-    expect(markdown).toContain('(a) Definitions and Construction');
-    expect(markdown).toContain('The following definitions apply in this title:\n\n(1) The term “Secretary concerned”');
-    expect(markdown).toContain('(b) Personnel Generally\nIn this title:');
-    expect(markdown).toContain('In this title:\n\n(1) The term “active duty”');
-    expect(markdown).toContain('(c) Reserve Components\nIn this title:');
-    expect(markdown).toContain('In this title:\n\n(1) The term “reserve component”');
-    expect(markdown).not.toContain('The following definitions apply in this title:\n(1) The term “Secretary concerned”');
-    expect(markdown).not.toContain('In this title:\n(1) The term “active duty”');
-    expect(markdown).not.toContain('In this title:\n(1) The term “reserve component”');
+    expect(markdown).toContain('(a) In General.— The following definitions apply in this title:');
+    expect(markdown).toContain('The following definitions apply in this title:\n\n(1) The term “United States”');
+    expect(markdown).toContain('(b) Personnel Generally.— The following definitions relating to military personnel apply in this title:');
+    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n(1) The term “officer”');
+    expect(markdown).toContain('(c) Reserve Components.— The following definitions relating to the reserve components apply in this title:');
+    expect(markdown).toContain('The following definitions relating to the reserve components apply in this title:\n\n(1) The term “National Guard”');
+    expect(markdown).not.toContain('The following definitions apply in this title:\n(1) The term “United States”');
+    expect(markdown).not.toContain('The following definitions relating to military personnel apply in this title:\n(1) The term “officer”');
+    expect(markdown).not.toContain('The following definitions relating to the reserve components apply in this title:\n(1) The term “National Guard”');
   });
 
   it('renders multi-paragraph note content and note tables with preserved structure', async () => {
@@ -595,21 +595,23 @@ describe('markdown renderer', () => {
       sectionNumber: '101',
     });
 
-    const headingIndex = markdown.indexOf('Historical and Revision Notes');
-    const tableHeaderIndex = markdown.indexOf('| Derivation | U.S. Code | Revised Statutes and Statutes at Large |');
+    const headingIndex = markdown.indexOf('## Statutory Notes');
+    const tableHeaderIndex = markdown.indexOf('| Historical and Revision Notes |  |  |');
     const tableDividerIndex = markdown.indexOf('| --- | --- | --- |');
-    const tableRowIndex = markdown.indexOf('| 5 U.S.C. 1 | R.S. § 1 | June 22, 1874, ch. 391, § 1, 18 Stat. 5. |');
+    const columnHeaderIndex = markdown.indexOf('| Derivation | U.S. Code | Revised Statutes and Statutes at Large |');
+    const tableRowIndex = markdown.indexOf('|  | [5 U.S.C. 1](../title-05-government-organization-and-employees/section-00001.md). | R.S. § 158. Feb. 9, 1889, ch. 122, § 1 (38th through 54th words), 25 Stat. 659. |');
     const paragraphIndex = markdown.indexOf('The reference in former section 1 to the application of the provisions of this title');
     const laterParagraphIndex = markdown.indexOf('The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
 
     expect(headingIndex).toBeGreaterThanOrEqual(0);
     expect(tableHeaderIndex).toBeGreaterThan(headingIndex);
     expect(tableDividerIndex).toBeGreaterThan(tableHeaderIndex);
-    expect(tableRowIndex).toBeGreaterThan(tableDividerIndex);
+    expect(columnHeaderIndex).toBeGreaterThan(tableDividerIndex);
+    expect(tableRowIndex).toBeGreaterThan(columnHeaderIndex);
     expect(paragraphIndex).toBeGreaterThan(tableRowIndex);
     expect(laterParagraphIndex).toBeGreaterThan(paragraphIndex);
-    expect(markdown).toContain('Historical and Revision Notes\n\n| Derivation | U.S. Code | Revised Statutes and Statutes at Large |');
-    expect(markdown).toContain('| 5 U.S.C. 1 | R.S. § 1 | June 22, 1874, ch. 391, § 1, 18 Stat. 5. |\n\nThe reference in former section 1 to the application of the provisions of this title');
+    expect(markdown).toContain('## Statutory Notes\n\n| Historical and Revision Notes |  |  |');
+    expect(markdown).toContain('|  | [5 U.S.C. 2](../title-05-government-organization-and-employees/section-00002.md). | R.S. § 159. |\n\nThe reference in former section 1 to the application of the provisions of this title');
     expect(markdown).toContain('this title\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
   });
 });

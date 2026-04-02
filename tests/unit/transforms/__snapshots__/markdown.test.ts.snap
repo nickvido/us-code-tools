@@ -13,7 +13,8 @@ source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-sec
   Inline cross-reference to 10 U.S.C. § 101.
 
 ## Notes
-- Historical and legal note retained.
+
+Historical and legal note retained.
 "
 `;
 
@@ -40,9 +41,13 @@ source: 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title1-sec
 ---
 # § 1. Words denoting number, gender, and so forth
 (a) Definitions
+
 (1) The word "person" means all living persons.
+
   (A) An individual natural person.
+
     (i) This is the nested clause.
+
       (I) Legal note: this branch stays stable.
 "
 `;

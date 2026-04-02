@@ -788,7 +788,7 @@ function parseOrderedTableRows(children: OrderedEntry[]): string[][] {
     if (tag === 'tr') {
       const row = value
         .filter((child) => ['th', 'td'].includes(orderedEntryTag(child) ?? ''))
-        .map((cell) => normalizeWhitespace(readOrderedRawText(orderedChildArray(cell, orderedEntryTag(cell) ?? ''))))
+        .map((cell) => readOrderedTableCellText(orderedChildArray(cell, orderedEntryTag(cell) ?? '')))
         .filter((cell, index, array) => !(cell === '' && array.every((entryText) => entryText === '')) || array.length === 1);
       if (row.length > 0) {
         rows.push(row);
@@ -800,6 +800,48 @@ function parseOrderedTableRows(children: OrderedEntry[]): string[][] {
   }
 
   return rows;
+}
+
+function readOrderedTableCellText(children: OrderedEntry[]): string {
+  const parts: string[] = [];
+
+  for (const entry of children) {
+    const tag = orderedEntryTag(entry);
+    if (!tag) {
+      continue;
+    }
+
+    if (tag === '#text') {
+      const value = entry[tag];
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        const text = normalizeWhitespace(String(value));
+        if (text) {
+          parts.push(text);
+        }
+      }
+      continue;
+    }
+
+    const value = orderedChildArray(entry, tag);
+    if (value.length === 0) {
+      continue;
+    }
+
+    if (tag === 'p') {
+      const paragraph = normalizeWhitespace(readOrderedRawText(value));
+      if (paragraph) {
+        parts.push(paragraph);
+      }
+      continue;
+    }
+
+    const nested = readOrderedTableCellText(value);
+    if (nested) {
+      parts.push(nested);
+    }
+  }
+
+  return normalizeWhitespace(parts.join(' '));
 }
 
 function escapeMarkdownTableCell(value: string): string {
