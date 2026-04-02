@@ -145,7 +145,7 @@ function renderSectionBody(
 ): string {
   const lines: string[] = [];
 
-  lines.push(renderSectionHeading(section, options.sectionHeadingLevel, options.anchor));
+  lines.push(...renderSectionHeading(section, options.sectionHeadingLevel, options.anchor));
 
   const contentLines = renderContentNodes(section.content, {
     structuredSubsectionHeadings: options.structuredSubsectionHeadings,
@@ -169,17 +169,17 @@ function renderSectionBody(
   if (section.editorialNotes && section.editorialNotes.length > 0) {
     lines.push('', `${'#'.repeat(options.editorialNotesLevel)} Notes`);
     for (const note of section.editorialNotes) {
-      lines.push(`- ${renderNote(note)}`);
+      lines.push('', ...renderNoteBlocks(note));
     }
   }
 
   return compactLines(lines);
 }
 
-function renderSectionHeading(section: SectionIR, level: number, anchor?: string): string {
+function renderSectionHeading(section: SectionIR, level: number, anchor?: string): string[] {
   const prefix = '#'.repeat(level);
   const heading = section.heading ? `${prefix} § ${section.sectionNumber}. ${section.heading}` : `${prefix} § ${section.sectionNumber}.`;
-  return anchor ? `${heading} {#${anchor}}` : heading;
+  return anchor ? [`<a id="${anchor}"></a>`, heading] : [heading];
 }
 
 function rewriteChapterModeLinks(
@@ -301,11 +301,11 @@ function shouldSeparateWithBlankLine(existingLines: string[], nextLines: string[
     return false;
   }
 
-  return !isLabeledLine(lastNonBlank) && isLabeledLine(firstNonBlank);
+  return isLabeledLine(firstNonBlank) && !/^#+\s/u.test(lastNonBlank) && !/^<a id=/u.test(lastNonBlank);
 }
 
 function isLabeledLine(line: string): boolean {
-  return /^\s*\([^)]+\)/u.test(line);
+  return /^\s*(?:\*\*)?\([^)]+\)/u.test(line);
 }
 
 function renderContentNodeLines(
@@ -344,10 +344,29 @@ function renderContentNodeLines(
 
   const childIndent = nodeType === 'subsection' ? indent : indent + 2;
   for (const child of children) {
-    lines.push(...renderContentNodeLines(child, childIndent, duplicateTextTracker, options));
+    const childLines = renderContentNodeLines(child, childIndent, duplicateTextTracker, options);
+    if (childLines.length === 0) {
+      continue;
+    }
+
+    if (lines.length > 0 && shouldSeparateStructuredChildren(lines, childLines)) {
+      lines.push('');
+    }
+
+    lines.push(...childLines);
   }
 
   return lines;
+}
+
+function shouldSeparateStructuredChildren(existingLines: string[], childLines: string[]): boolean {
+  const lastNonBlank = [...existingLines].reverse().find((line) => line !== '');
+  const firstNonBlank = childLines.find((line) => line !== '');
+  if (!lastNonBlank || !firstNonBlank) {
+    return false;
+  }
+
+  return isLabeledLine(firstNonBlank);
 }
 
 function renderStructuredLine(
@@ -469,13 +488,23 @@ function renderStatutoryNote(note: StatutoryNoteIR, headingLevel: number): strin
     lines.push(`${'#'.repeat(headingLevel)} ${note.heading}`);
   }
   if (note.text) {
-    lines.push(note.text);
+    lines.push(...renderTextBlocks(note.text));
   }
   return lines;
 }
 
-function renderNote(note: NoteIR): string {
-  return note.text;
+function renderNoteBlocks(note: NoteIR): string[] {
+  return renderTextBlocks(note.text);
+}
+
+function renderTextBlocks(text: string): string[] {
+  return text.split('\n').reduce<string[]>((lines, line, index, source) => {
+    lines.push(line);
+    if (index < source.length - 1 && line === '' && source[index + 1] === '') {
+      return lines;
+    }
+    return lines;
+  }, []);
 }
 
 function stripCanonicalRefFragments(markdown: string): string {

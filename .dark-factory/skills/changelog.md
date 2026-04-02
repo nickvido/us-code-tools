@@ -420,3 +420,31 @@
   - `npx tsc --noEmit` ✅ after the final `76bfe71` standalone-regression fix
   - `npm run build` ✅ after the final `76bfe71` standalone-regression fix
   - `npx eslint .` ⚠️ repo has no eslint config, so standalone ESLint exits before linting
+
+## Feature #31 — Formatting round 2: anchors, subsection spacing, canonical OLRC links, and note structure
+- Updated `src/domain/normalize.ts`:
+  - centralized canonical OLRC section URLs in `buildCanonicalSectionUrl(...)` with the exact `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{title}-section{section}&num=0&edition=prelim` contract
+  - reused `embeddedSectionAnchor(...)` as the sole chapter-mode anchor normalizer
+- Updated `src/transforms/markdown.ts`:
+  - embedded chapter sections now emit `<a id="section-*"></a>` on its own line above the H2 heading instead of a visible `{#section-*}` suffix
+  - structured subsection siblings/chapeau blocks now receive blank-line separation so GitHub renders them as distinct paragraphs
+  - preserved note content is rendered with paragraph boundaries and markdown-table text rather than whitespace-flattened output
+- Updated `src/transforms/uslm-to-ir.ts`:
+  - note extraction preserves ordered `<p>`, `<table>`, and embedded `<section>` structure via the ordered parse path
+  - note-scoped embedded Act sections stay inside statutory-note text and are excluded from top-level `titleIr.sections` discovery
+  - section and title source URLs now reuse the canonical OLRC helper contract
+- Added/expanded regression coverage in:
+  - `tests/unit/transforms/markdown.test.ts`
+  - `tests/unit/transforms/uslm-to-ir.test.ts`
+- Review/branch context captured from issue #31:
+  - spec and architecture were broadened from renderer-only to parser-plus-renderer because the bug cluster spans canonical URLs, note structure, and section discovery
+  - security review approved the design with one low note-table escaping reminder
+  - active branch PR is `#35` for `df2/issue-31`
+  - latest issue-specific follow-ups landed at `d8841ed` and `7f8713c`, correcting the note-order regression fixture/assertion drift while keeping the issue #31 contract mechanical
+  - CI follow-up commit `428be9c` relaxed `tests/golden/golden-file.test.ts` so missing optional local `119-73` OLRC cache data no longer fails the suite on GitHub Actions; golden parity assertions now run only when that cache is available
+  - post-merge/rebase docs refresh commit `7b4842c` rebased `df2/issue-31` onto `origin/main` so PR #35 is mergeable again without changing the issue #31 renderer/parser contract
+- Verification observed during this knowledge-capture pass in the current worktree:
+  - `rtk err npx tsc --noEmit` ✅
+  - `rtk npm run build` ✅
+  - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts` ✅ (`37 passed`)
+  - current full-suite verification in this rebased worktree: `rtk test npx vitest run` ✅

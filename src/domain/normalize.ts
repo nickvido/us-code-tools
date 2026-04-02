@@ -219,7 +219,7 @@ export function embeddedSectionAnchor(sectionNumber: string): string {
 }
 
 export function buildCanonicalSectionUrl(titleNumber: number, sectionNumber: string): string {
-  return `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section${sectionNumber}`;
+  return `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title${titleNumber}-section${sectionNumber}&num=0&edition=prelim`;
 }
 
 export function sortSections<T extends { sectionNumber: string }>(sections: T[]): T[] {
