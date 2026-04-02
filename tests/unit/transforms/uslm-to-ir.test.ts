@@ -530,7 +530,8 @@ describe('uslm-to-ir parser', () => {
     expect(noteText).toContain('5 U.S.C. 1');
     expect(noteText).toContain('R.S. § 158');
     expect(noteText).toContain('Feb. 9, 1889, ch. 122, § 1 (38th through 54th words), 25 Stat. 659.');
-    expect(combinedNoteText).toContain('title\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+    expect(combinedNoteText).toContain('The reference in former section 1 to the application of the provisions of this title');
+    expect(combinedNoteText).toContain('\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
   });
 
   it('keeps embedded Act sections inside note scope instead of promoting them to top-level sections', async () => {

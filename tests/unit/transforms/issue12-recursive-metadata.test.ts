@@ -17,7 +17,43 @@ function readFixture(relativePath: string): string {
 }
 
 function fixtureSectionCount(xml: string): number {
-  return (xml.match(/<section\b/gu) ?? []).length;
+  const document = parser.parse(xml);
+  const titleNode = document?.uscDoc?.main?.title ?? document?.uslm?.title;
+
+  function countCodifiedSections(node: unknown, insideNoteScope = false, parentKey: string | null = null): number {
+    if (!node || typeof node !== 'object') {
+      return 0;
+    }
+
+    if (Array.isArray(node)) {
+      return node.reduce((total, entry) => total + countCodifiedSections(entry, insideNoteScope, parentKey), 0);
+    }
+
+    const record = node as Record<string, unknown>;
+    const nextInsideNoteScope = insideNoteScope || parentKey === 'note' || parentKey === 'notes';
+    let total = 0;
+
+    const identifier = typeof record['@_identifier'] === 'string'
+      ? record['@_identifier']
+      : typeof record.identifier === 'string'
+        ? record.identifier
+        : null;
+
+    if (parentKey === 'section' && !insideNoteScope && typeof identifier === 'string' && identifier.startsWith('/us/usc/')) {
+      total += 1;
+    }
+
+    for (const [key, value] of Object.entries(record)) {
+      if (key === 'identifier' || key.startsWith('@_')) {
+        continue;
+      }
+      total += countCodifiedSections(value, nextInsideNoteScope, key);
+    }
+
+    return total;
+  }
+
+  return countCodifiedSections(titleNode);
 }
 
 function normalizeParseResult(result: unknown): { titleIr?: any; parseErrors?: unknown[] } {

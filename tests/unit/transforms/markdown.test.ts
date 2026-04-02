@@ -612,8 +612,8 @@ describe('markdown renderer', () => {
     expect(laterParagraphIndex).toBeGreaterThan(paragraphIndex);
     expect(markdown).toContain('## Statutory Notes\n\n| Historical and Revision Notes |  |  |');
     expect(markdown).toContain('|  | [5 U.S.C. 2](../title-05-government-organization-and-employees/section-00002.md). | R.S. § 159. |\n\nThe reference in former section 1 to the application of the provisions of this title');
-    expect(markdown).toContain('this title.\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
-    expect(markdown).not.toContain('this title. The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+    expect(markdown).toContain('the application of those provisions is stated in the text.\n\nThe statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
+    expect(markdown).not.toContain('the application of those provisions is stated in the text. The statement in former section 2 that the use of the word “department” means one of the Executive departments named in former section 1 is omitted as unnecessary');
   });
 });
 

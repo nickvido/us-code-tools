@@ -605,10 +605,10 @@ describe('issue #29 — markdown chapter rendering correctness', () => {
 
     const markdown = renderChapterMarkdown(title as never, '4' as never, sections as never);
 
-    expect(markdown).toContain('{#section-411}');
-    expect(markdown).toContain('{#section-125d}');
-    expect(markdown).toContain('{#section-301-1}');
-    expect(markdown).toContain('{#section-125-d}');
+    expect(markdown).toContain('<a id="section-411"></a>');
+    expect(markdown).toContain('<a id="section-125d"></a>');
+    expect(markdown).toContain('<a id="section-301-1"></a>');
+    expect(markdown).toContain('<a id="section-125-d"></a>');
   });
 
   it('preserves section headings across equivalent ordered and non-ordered parse paths and returns empty string when heading is absent', () => {
