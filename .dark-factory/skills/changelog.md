@@ -440,7 +440,7 @@
   - spec and architecture were broadened from renderer-only to parser-plus-renderer because the bug cluster spans canonical URLs, note structure, and section discovery
   - security review approved the design with one low note-table escaping reminder
   - active branch PR is `#35` for `df2/issue-31`
-  - dev handoff in issue context reported full Vitest / `tsc --noEmit` success at commit `04c454c`
+  - latest test follow-ups in issue context landed at `d8841ed` and `7f8713c`, correcting the note-order regression fixture/assertion drift while keeping the issue #31 contract mechanical
 - Verification observed during this knowledge-capture pass in the current worktree:
   - `rtk err npx tsc --noEmit` ✅
-  - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts` ❌ (2 failing note-structure assertions remain red in this checkout)
+  - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts` ✅ (`37 passed`)

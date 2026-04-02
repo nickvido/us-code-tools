@@ -178,5 +178,5 @@
 - Fastest focused verification for issue #31 in the current worktree:
   - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts`
   - `rtk err npx tsc --noEmit`
-  - Current branch head during knowledge capture: `04c454c`
-  - Current observed status in this worktree: `tsc --noEmit` passes, but two issue-#31 note-structure assertions are still red in the focused Vitest run (`renders multi-paragraph note content and note tables with preserved structure` and `preserves multi-paragraph note boundaries and table structure from real note fixtures`).
+  - Current branch head during knowledge capture: `7f8713c`
+  - Current observed status in this worktree: both focused issue-#31 suites pass (`37 passed`) and `tsc --noEmit` is green.
