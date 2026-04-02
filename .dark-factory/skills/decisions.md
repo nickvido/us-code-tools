@@ -375,3 +375,10 @@
 - **Decision:** `src/transforms/uslm-to-ir.ts` preserves note paragraph/table/embedded-section structure via the ordered parse path (`parseNotesOrdered(...)`, `readOrderedMixedNoteText(...)`, `renderMarkdownTableFromOrderedEntry(...)`) and excludes note-scoped `<section>` nodes from top-level section discovery; `src/transforms/markdown.ts` then emits the preserved note text with blank-line paragraph boundaries instead of whitespace-joined runs.
 - **Consequence:** Future agents must treat note structure as a first-class transform contract, not a lossy text-normalization surface. Table output must remain markdown-escaped, and note-contained Acts must stay inside their parent note blocks.
 - **Feature:** #31 Formatting round 2: anchor tags visible, subsections not separated
+
+### ADR-053: Nested labeled descendants use GitHub-safe bold paragraph rendering, not indentation
+- **Status:** Active
+- **Context:** Issue #36 showed that deeper labeled descendants (`(A)`, `(i)`, `(I)`, etc.) were rendered by indentation depth, and GitHub interpreted four-space-indented lines as code blocks.
+- **Decision:** `src/transforms/markdown.ts` now activates a dedicated nested rendering path only when a subsection subtree has deeper labeled descendants. In that path, descendants render through `renderGithubSafeLabeledParagraph(...)` with bold labels at column 0, and continuation/body text nodes also render without four-space indentation.
+- **Consequence:** GitHub-safe nested output is now a renderer contract. Future agents must preserve the narrow compatibility gate that keeps flat sections and top-level-subsection-only sections byte-stable while preventing `\n    (i)`-style regressions in affected hierarchies.
+- **Feature:** #36 Sub-subsection indentation renders as code blocks on GitHub

@@ -100,7 +100,7 @@ describe('markdown renderer', () => {
     expect(parsed.content).toContain('# § 1. Words denoting number, gender, and so forth');
   });
 
-  it('renders markdown hierarchy indentation by node type', async () => {
+  it('renders nested labeled descendants as bold GitHub-safe paragraphs without code-block indentation', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'transforms', 'markdown.ts');
     const mod = await safeImport(modulePath);
     ensureModuleLoaded(modulePath, mod);
@@ -150,10 +150,13 @@ describe('markdown renderer', () => {
       ],
     });
 
-    expect(markdown).toContain('(1) First paragraph.');
-    expect(markdown).toContain('  (A) Lettered child.');
-    expect(markdown).toContain('    (i) Clause text.');
-    expect(markdown).toContain('      (I) Quad-indented item text.');
+    expect(markdown).toContain('**(a) Nested**');
+    expect(markdown).toContain('\n\n**(1)** First paragraph.');
+    expect(markdown).toContain('\n\n**(A)** Lettered child.');
+    expect(markdown).toContain('\n\n**(i)** Clause text.');
+    expect(markdown).toContain('\n\n**(I)** Quad-indented item text.');
+    expect(markdown).not.toContain('\n    (i)');
+    expect(markdown).not.toContain('\n      (I)');
   });
 
   it('renders title metadata markdown with required keys', async () => {
@@ -429,7 +432,7 @@ describe('markdown renderer', () => {
     expect(renderedTwice).toBe(markdown);
   });
 
-  it('renders deep hierarchy content in source order, including continuation text after nested children', async () => {
+  it('renders deep hierarchy content in source order with bold nested labels and GitHub-safe continuation lines', async () => {
     const markdown = await renderFixtureSection({
       titleDir: 'title-26',
       relativePath: '26-deep-hierarchy-sections.xml',
@@ -437,19 +440,22 @@ describe('markdown renderer', () => {
     });
 
     expect(markdown).toContain('# § 2. Definitions and special rules');
-    expect(markdown).toContain('(b) Definition of head of household');
-    expect(markdown).toContain('(1) In general For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
-    expect(markdown).toContain('  (A) maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
-    expect(markdown).toContain('    (i) a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
-    expect(markdown).toContain('      (I) is married at the close of the taxpayer’s taxable year, and');
-    expect(markdown).toContain('      (II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
+    expect(markdown).toContain('**(b) Definition of head of household**');
+    expect(markdown).toContain('**(1) In general** For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
+    expect(markdown).toContain('\n\n**(A)** maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
+    expect(markdown).toContain('\n\n**(i)** a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
+    expect(markdown).toContain('\n\n**(I)** is married at the close of the taxpayer’s taxable year, and');
+    expect(markdown).toContain('\n\n**(II)** is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
     expect(markdown).toContain('For purposes of this paragraph, an individual shall be considered as maintaining a household only if over half of the cost of maintaining the household during the taxable year is furnished by such individual.');
+    expect(markdown).not.toContain('\n    (i)');
+    expect(markdown).not.toContain('\n      (I)');
+    expect(markdown).not.toMatch(/\n {4,}For purposes of this paragraph/);
 
     const orderChecks = [
-      '(A) maintains as his home a household',
-      '(i) a qualifying child of the individual',
-      '(I) is married at the close of the taxpayer’s taxable year, and',
-      '(II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or',
+      '**(A)** maintains as his home a household',
+      '**(i)** a qualifying child of the individual',
+      '**(I)** is married at the close of the taxpayer’s taxable year, and',
+      '**(II)** is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or',
       'For purposes of this paragraph, an individual shall be considered as maintaining a household only if over half of the cost of maintaining the household during the taxable year is furnished by such individual.',
     ];
 
@@ -458,7 +464,7 @@ describe('markdown renderer', () => {
     expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
   });
 
-  it('keeps standalone subsection lines as body content and preserves deep nested indentation', async () => {
+  it('keeps top-level subsection output inline while promoting deeper descendants to bold paragraph blocks', async () => {
     const markdown = await renderFixtureSection({
       titleDir: 'title-26',
       relativePath: '26-deep-hierarchy-sections.xml',
@@ -466,13 +472,14 @@ describe('markdown renderer', () => {
     });
 
     const lines = markdown.split('\n');
-    expect(lines).toContain('(b) Definition of head of household');
-    expect(lines).toContain('(1) In general For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
-    expect(lines).toContain('  (A) maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
-    expect(lines).toContain('    (i) a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
-    expect(lines).toContain('      (I) is married at the close of the taxpayer’s taxable year, and');
-    expect(lines).toContain('      (II) is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
+    expect(lines).toContain('**(b) Definition of head of household**');
+    expect(lines).toContain('**(1) In general** For purposes of this subtitle, an individual shall be considered a head of a household if, and only if, such individual is not married at the close of his taxable year, is not a surviving spouse (as defined in subsection (a)), and either—');
+    expect(lines).toContain('**(A)** maintains as his home a household which constitutes for more than one-half of such taxable year the principal place of abode, as a member of such household, of—');
+    expect(lines).toContain('**(i)** a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
+    expect(lines).toContain('**(I)** is married at the close of the taxpayer’s taxable year, and');
+    expect(lines).toContain('**(II)** is not a dependent of such individual by reason of section 152(b)(2) or 152(b)(3), or both, or');
     expect(lines).not.toContain('## (b) Definition of head of household');
+    expect(lines).not.toContain('    (i) a qualifying child of the individual (as defined in section 152(c), determined without regard to section 152(e)), but not if such child—');
   });
 
   it('renders cross-title references from parsed USLM fixtures with slugged target directories on the real parser-to-markdown path', async () => {
@@ -545,10 +552,10 @@ describe('markdown renderer', () => {
       sectionNumber: '101',
     });
 
-    expect(markdown).toContain('The following definitions apply in this title:\n\n(1)');
-    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n(1)');
-    expect(markdown).toContain('\n\n(b) Personnel Generally');
-    expect(markdown).toContain('\n\n(c) Reserve Components');
+    expect(markdown).toContain('**(a) In General.—** The following definitions apply in this title:\n\n**(1)**');
+    expect(markdown).toContain('**(b) Personnel Generally.—** The following definitions relating to military personnel apply in this title:\n\n**(1)**');
+    expect(markdown).toContain('\n\n**(b) Personnel Generally.—**');
+    expect(markdown).toContain('\n\n**(c) Reserve Components.—**');
     expect(markdown).not.toContain('The following definitions apply in this title:\n(1)');
   });
 
@@ -559,12 +566,12 @@ describe('markdown renderer', () => {
       sectionNumber: '101',
     });
 
-    expect(markdown).toContain('(a) In General.— The following definitions apply in this title:');
-    expect(markdown).toContain('The following definitions apply in this title:\n\n(1) The term “United States”');
-    expect(markdown).toContain('(b) Personnel Generally.— The following definitions relating to military personnel apply in this title:');
-    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n(1) The term “officer”');
-    expect(markdown).toContain('(c) Reserve Components.— The following definitions relating to the reserve components apply in this title:');
-    expect(markdown).toContain('The following definitions relating to the reserve components apply in this title:\n\n(1) The term “National Guard”');
+    expect(markdown).toContain('**(a) In General.—** The following definitions apply in this title:');
+    expect(markdown).toContain('The following definitions apply in this title:\n\n**(1)** The term “United States”');
+    expect(markdown).toContain('**(b) Personnel Generally.—** The following definitions relating to military personnel apply in this title:');
+    expect(markdown).toContain('The following definitions relating to military personnel apply in this title:\n\n**(1)** The term “officer”');
+    expect(markdown).toContain('**(c) Reserve Components.—** The following definitions relating to the reserve components apply in this title:');
+    expect(markdown).toContain('The following definitions relating to the reserve components apply in this title:\n\n**(1)** The term “National Guard”');
     expect(markdown).not.toContain('The following definitions apply in this title:\n(1) The term “United States”');
     expect(markdown).not.toContain('The following definitions relating to military personnel apply in this title:\n(1) The term “officer”');
     expect(markdown).not.toContain('The following definitions relating to the reserve components apply in this title:\n(1) The term “National Guard”');

@@ -247,3 +247,8 @@
   - embedded chapter anchors are allowlisted raw HTML output: only exact `<a id="section-*"></a>` tags built from `embeddedSectionAnchor(...)` are permitted; visible `{#...}` suffixes and arbitrary HTML passthrough remain forbidden
   - note tables must stay on the markdown-safe escaping boundary (`escapeMarkdownTableCell(...)`) so untrusted XML cannot break table layout or inject arbitrary markdown structure
   - note-scoped embedded Act sections must remain inside note text; promoting them to top-level `SectionIR` records is both a parsing integrity bug and a scope-confusion risk for downstream consumers
+- issue #36 renderer hardening:
+  - GitHub treats four-space-indented lines as code blocks, so nested labeled descendants and standalone continuation/body lines inside an affected hierarchy are now treated as an output-integrity boundary, not a cosmetic formatting choice
+  - `src/transforms/markdown.ts` must keep nested GitHub-safe lines at column 0 in the affected path (`renderGithubSafeLabeledParagraph(...)` for labeled descendants and `safeIndent = 0` for `text` nodes); reintroducing `\n    (i)` / `\n    (ii)` / `\n    continuation text` is a rendering-integrity regression
+  - the compatibility gate is intentionally narrow: renderer changes must not alter flat sections or top-level-subsection-only sections, because byte-stable unaffected output is part of the reviewed contract
+  - labels still derive only from existing IR values plus `formatLabel(...)`; the issue #36 fix must not synthesize, renumber, or normalize hierarchy labels beyond adding missing parentheses for display

@@ -448,3 +448,24 @@
   - `rtk npm run build` ✅
   - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts` ✅ (`37 passed`)
   - current full-suite verification in this rebased worktree: `rtk test npx vitest run` ✅
+
+## Feature #36 — GitHub-safe nested subsection rendering
+- Updated `src/transforms/markdown.ts`:
+  - added a narrow nested-hierarchy gate via `hasLabeledDescendant(...)` and `inGithubSafeNestedHierarchy`
+  - kept top-level subsection rendering inline, but promoted deeper labeled descendants to bold paragraph labels at column 0 through `renderGithubSafeLabeledParagraph(...)`
+  - made continuation/body `text` nodes inside the same affected hierarchy render with `safeIndent = 0` so they do not cross GitHub’s four-space code-block threshold
+  - preserved parent-before-child traversal and exact blank-line separation with the existing separator helpers instead of a post-render cleanup pass
+- Updated regression coverage:
+  - `tests/unit/transforms/markdown.test.ts` now asserts bold nested labels, exact `\n\n**(i)**` boundaries, absence of `\n    (i)` / `\n      (I)`, and GitHub-safe continuation lines on real Title 26 fixture output
+  - `tests/chapter-rendering-qa.test.ts` was updated so standalone/chapter markdown expectations stay aligned with the new nested bold-paragraph contract
+- Branch/review context captured:
+  - canonical spec: `docs/specs/36-spec.md`
+  - architecture: `docs/architecture/36-architecture.md`
+  - security review approved with one low note to keep continuation/body lines below the four-space threshold
+  - active branch PR is `#37` for `df2/issue-36`
+  - dev handoff commit is `35e37d0`
+  - `[adversary-review]` is APPROVED with no findings
+- Verification captured from issue context:
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `npx vitest run` ✅ (`222 passed, 1 skipped`)
