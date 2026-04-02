@@ -1,4 +1,4 @@
-## [spec-writer] — Initial spec drafted
+## [spec-writer] — Spec revised after review
 See `docs/specs/36-spec.md` for the canonical spec.
 
 # GitHub-safe nested subsection rendering for markdown output
@@ -19,7 +19,7 @@ Fix nested subsection rendering so generated markdown never relies on leading wh
 #### 1. Labeled nested-node rendering contract
 - [ ] When `renderSectionMarkdown()` renders any labeled node of type `paragraph`, `subparagraph`, `clause`, `subclause`, `item`, or `subitem`, the emitted markdown line must begin with a bold label token (`**(1)**`, `**(A)**`, `**(i)**`, `**(I)**`, etc.) and must not begin with leading indentation spaces. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
 - [ ] The same bold-label contract must apply when labeled descendants appear under top-level subsections and when they appear nested multiple levels deep, including the exact issue shapes `(G) → (i) → text` and `(A) → (i) → (I) → text`. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
-- [ ] Unlabeled text nodes that are rendered as descendant continuation/body text may still use indentation if needed, but labeled descendant lines must never rely on four-or-more-space prefixes for structure. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
+- [ ] When descendant continuation/body text is emitted as its own markdown line inside a labeled hierarchy, that line must not begin with four or more literal space characters; the renderer must keep those lines below GitHub’s code-block threshold while preserving source order relative to adjacent labeled nodes. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
 
 #### 2. Blank-line separation and ordering
 - [ ] Every labeled node rendered in markdown must be separated from the preceding rendered block by exactly one blank line whenever it follows non-blank body text or another labeled node, so GitHub renders each label block as a normal paragraph rather than merging adjacent labels or treating them as code. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts -->
@@ -28,7 +28,7 @@ Fix nested subsection rendering so generated markdown never relies on leading wh
 
 #### 3. Parser/renderer compatibility
 - [ ] No change may be required to the labeled-node types emitted by `parseUslmToIr()`; the renderer must consume the existing IR node kinds (`subsection`, `paragraph`, `subparagraph`, `clause`, `subclause`, `item`, `subitem`, `text`) without introducing a new persisted schema or altering section discovery behavior. <!-- Touches: src/transforms/uslm-to-ir.ts, src/transforms/markdown.ts, tests/unit/transforms/uslm-to-ir.test.ts -->
-- [ ] Markdown output for sections without nested labeled descendants must remain byte-for-byte compatible except where blank-line normalization is already required by the new GitHub-safe rendering contract. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts, tests/unit/transforms/__snapshots__/markdown.test.ts.snap -->
+- [ ] Markdown output for sections that do not contain any descendant labeled node below the first rendered level (for example, flat single-paragraph sections or sections with only top-level subsections and no nested paragraph/subparagraph/clause/item descendants) must remain byte-for-byte unchanged from current output. <!-- Touches: src/transforms/markdown.ts, tests/unit/transforms/markdown.test.ts, tests/unit/transforms/__snapshots__/markdown.test.ts.snap -->
 
 #### 4. Regression coverage
 - [ ] Unit or snapshot tests must assert that rendered markdown for a nested hierarchy contains bold descendant labels such as `**(A)**`, `**(i)**`, and `**(I)**`, and does not contain the code-block-triggering forms `\n    (i)` or `\n    (ii)` for labeled nodes. <!-- Touches: tests/unit/transforms/markdown.test.ts -->
@@ -55,7 +55,7 @@ Fix nested subsection rendering so generated markdown never relies on leading wh
 
 ## Acceptance Tests (human-readable)
 1. Render a section IR containing `(a)` → `(1)` → `(A)` → `(i)` → `(I)` and verify every labeled line appears as a standalone paragraph beginning with `**(` rather than indentation.
-2. Verify the rendered markdown does not contain a line starting with four spaces followed by a labeled token such as `(i)` or `(ii)`.
+2. Verify the rendered markdown does not contain a line starting with four spaces followed by either a labeled token such as `(i)` / `(ii)` or a standalone continuation/body line within the same nested hierarchy.
 3. Render a case shaped like issue #36 (`(G)` with child clauses `(i)` and `(ii)`) and verify the output contains:
    - `**(G)**`
    - a blank line
@@ -68,7 +68,7 @@ Fix nested subsection rendering so generated markdown never relies on leading wh
 ## Edge Case Catalog
 - Labeled nodes with text, heading-only content, text-only content, or empty child arrays: all labeled outputs must still begin with bold labels and avoid code-block indentation.
 - Mixed nesting depths (`subsection → paragraph`, `subsection → paragraph → subparagraph`, `subsection → paragraph → subparagraph → clause → item`, `subsection → clause` if present in IR): rendering must stay GitHub-safe at every level.
-- Sibling labeled nodes before and after continuation text nodes: blank-line insertion must separate labeled blocks without producing duplicate empty paragraphs.
+- Sibling labeled nodes before and after continuation text nodes: blank-line insertion must separate labeled blocks without producing duplicate empty paragraphs, and continuation/body lines emitted between them must stay below the four-space GitHub code-block threshold.
 - Labels containing arabic numerals, letters, roman numerals, or slash-bearing section text in surrounding content: label emphasis must preserve exact label text from the IR.
 - Malformed/partial IR nodes with missing labels on non-text descendants: unlabeled output may omit the bold label, but labeled descendants that do have labels must still avoid leading indentation.
 - Unicode/emoji/RTL text in node body text or headings: label formatting and blank-line separation must remain correct and independent of text encoding.
@@ -77,7 +77,7 @@ Fix nested subsection rendering so generated markdown never relies on leading wh
 
 ## Verification Strategy
 - **Pure core:** `renderContentNodes()`, `renderContentNodeLines()`, `renderStructuredLine()`, `renderLabeledLine()`, and blank-line separation helpers should remain pure transforms from IR nodes to markdown lines.
-- **Properties:** (1) any rendered labeled descendant line begins with `**(` after optional preceding blank lines, never indentation; (2) no labeled node is emitted with a four-space prefix; (3) source-order traversal is preserved; (4) top-level subsection formatting remains unchanged.
+- **Properties:** (1) any rendered labeled descendant line begins with `**(` after optional preceding blank lines, never indentation; (2) no rendered line inside the affected nested labeled hierarchy is emitted with a four-space prefix; (3) source-order traversal is preserved; (4) flat sections and top-level-subsection-only sections remain byte-for-byte unchanged; (5) top-level subsection formatting remains unchanged.
 - **Purity boundary:** all I/O remains in fixture reads and test execution; parser/renderer code paths must remain side-effect-free.
 
 ## Infrastructure Requirements
