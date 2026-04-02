@@ -179,6 +179,7 @@
 - Fastest focused verification for issue #31 in the current worktree:
   - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts`
   - `rtk err npx tsc --noEmit`
-  - Current branch head during knowledge capture: `428be9c`
-  - Current observed status in this worktree: both focused issue-#31 suites pass (`37 passed`) and `tsc --noEmit` is green.
-  - Full-suite CI follow-up: `tests/golden/golden-file.test.ts` now skips its chapter-markdown parity assertions when the optional local `119-73` OLRC backfill cache is absent, instead of failing `beforeAll()` on GitHub Actions.
+  - `rtk npm run build`
+  - Current branch head during knowledge capture: `7b4842c`
+  - Current observed status in this worktree: both focused issue-#31 suites pass (`37 passed`), `tsc --noEmit` is green, and `npm run build` succeeds.
+  - Full-suite follow-up after the post-CI-fix docs refresh: `rtk test npx vitest run` exits 0 in this worktree, and `tests/golden/golden-file.test.ts` still skips its chapter-markdown parity assertions when the optional local `119-73` OLRC backfill cache is absent instead of failing `beforeAll()`.

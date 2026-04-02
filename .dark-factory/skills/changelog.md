@@ -442,7 +442,9 @@
   - active branch PR is `#35` for `df2/issue-31`
   - latest issue-specific follow-ups landed at `d8841ed` and `7f8713c`, correcting the note-order regression fixture/assertion drift while keeping the issue #31 contract mechanical
   - CI follow-up commit `428be9c` relaxed `tests/golden/golden-file.test.ts` so missing optional local `119-73` OLRC cache data no longer fails the suite on GitHub Actions; golden parity assertions now run only when that cache is available
+  - post-merge/rebase docs refresh commit `7b4842c` rebased `df2/issue-31` onto `origin/main` so PR #35 is mergeable again without changing the issue #31 renderer/parser contract
 - Verification observed during this knowledge-capture pass in the current worktree:
   - `rtk err npx tsc --noEmit` ✅
+  - `rtk npm run build` ✅
   - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts` ✅ (`37 passed`)
-  - latest branch-context verification after the CI follow-up: `npx vitest run` ✅ (`49 files, 222 passed, 1 skipped`)
+  - current full-suite verification in this rebased worktree: `rtk test npx vitest run` ✅
