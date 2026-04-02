@@ -1,15 +1,19 @@
-# Architecture — Issue #31: GitHub-safe section anchors and separated subsection paragraphs
+# Architecture — Issue #31: GitHub-safe anchors, canonical OLRC links, preserved note structure, and embedded-Act containment
 
 ## Scope and intent
 
-Fix two markdown-rendering defects in the existing chapter/embed renderer without changing the repository’s overall architecture:
+Fix all six user-visible markdown/parser regressions covered by `docs/specs/31-spec.md` while preserving the project’s existing architecture as a single-package TypeScript CLI:
 
-1. Embedded section headings must stop emitting literal GitHub-visible ` {#section-...}` suffixes and instead emit a standalone HTML anchor line immediately before each embedded section heading.
-2. Structured subsection headings in embedded markdown must be separated by blank lines so sibling subsections render as distinct paragraphs in GitHub-flavored Markdown.
+1. Embedded section headings must emit standalone HTML anchors instead of literal GitHub-visible `{#section-...}` suffixes.
+2. Structured subsection siblings must be separated by blank lines so GitHub renders them as distinct paragraphs.
+3. Canonical OLRC cross-reference URLs must include `&num=0&edition=prelim` in both fallback links and frontmatter source URLs.
+4. Multi-paragraph statutory/editorial notes must preserve paragraph boundaries instead of collapsing into one whitespace-normalized wall of text.
+5. Embedded Acts appearing inside note content must remain inside note scope and must not produce extra top-level `SectionIR` records.
+6. Historical and Revision Notes tables must preserve row/column structure in markdown instead of flattening into concatenated text.
 
-This remains a **single-package TypeScript CLI**. The work is limited to pure renderer behavior and regression tests. No parser changes, database, HTTP API, queue, cache, or filesystem/network I/O changes are required.
+This remains a **monolithic Node.js/TypeScript CLI**. No database, HTTP API, queue, cache, or separate service is warranted. The change spans renderer and parser behavior, but it stays inside pure transform modules plus regression tests.
 
-`.dark-factory.yml` is not present in this repo snapshot, so architectural constraints come from the live codebase and `package.json`: Node.js, TypeScript, `gray-matter`, `fast-xml-parser`, and Vitest.
+`.dark-factory.yml` is not present in this repo snapshot, so the concrete constraints come from the checked-in code and `package.json`: Node.js, TypeScript, `fast-xml-parser`, `gray-matter`, and Vitest.
 
 ---
 
@@ -17,12 +21,14 @@ This remains a **single-package TypeScript CLI**. The work is limited to pure re
 
 ### 1.1 Persistent storage model
 
-No database or persistent schema changes are required.
+No database or external persistence layer exists in this repo, and none should be added for this issue.
 
-This issue only changes:
-- pure markdown rendering in `src/transforms/markdown.ts`
-- regression coverage in `tests/unit/transforms/markdown.test.ts`
-- possibly markdown snapshots if output fixtures are snapshot-covered
+This issue changes only in-memory IR construction and markdown serialization in:
+- `src/domain/normalize.ts`
+- `src/transforms/uslm-to-ir.ts`
+- `src/transforms/markdown.ts`
+- `tests/unit/transforms/markdown.test.ts`
+- `tests/unit/transforms/uslm-to-ir.test.ts`
 
 Accordingly:
 - **No SQL migrations**
@@ -30,18 +36,32 @@ Accordingly:
 - **No indexes**
 - **No runtime persistence changes**
 
-### 1.2 Runtime IR contracts reused as-is
+### 1.2 Runtime IR contracts
 
-The existing IR remains authoritative.
+The architecture should continue using the existing title/section/content/note IR model as the system of record.
+
+Representative current contracts:
 
 ```ts
+interface TitleIR {
+  titleNumber: number;
+  heading: string;
+  positiveLaw: boolean | null;
+  chapters: Array<{ number: string; heading: string }>;
+  sections: SectionIR[];
+  sourceUrlTemplate: string;
+}
+
 interface SectionIR {
   titleNumber?: number;
   sectionNumber: string;
   heading?: string;
-  content: ContentNode[];
+  source?: string;
+  sourceCredit?: string;
+  hierarchy?: HierarchyIR;
   statutoryNotes?: StatutoryNoteIR[];
   editorialNotes?: NoteIR[];
+  content: ContentNode[];
 }
 
 interface ContentNode {
@@ -52,15 +72,58 @@ interface ContentNode {
   text?: string;
   children?: ContentNode[];
 }
+
+interface StatutoryNoteIR {
+  heading?: string;
+  noteType?: string;
+  topic?: string;
+  text: string;
+}
+
+interface NoteIR {
+  kind: 'editorial' | 'cross-reference' | 'misc';
+  text: string;
+}
 ```
 
-No schema expansion is needed. This issue only tightens renderer semantics for existing fields.
+### 1.3 IR-level decisions for this issue
 
-### 1.3 Renderer output contract
+The spec does **not** require introducing a database-like schema or service layer, but it does require clarifying how notes are represented so renderer behavior remains deterministic and mechanically testable.
+
+#### Decision: keep `SectionIR` ownership unchanged
+
+`TitleIR.sections` must continue to contain only real codified title/body sections.
+
+That means:
+- embedded Act provisions found **inside note XML** must not be promoted to sibling `SectionIR` objects
+- section discovery must be constrained to the true title/body section hierarchy, not arbitrary nested `<section>` descendants under notes or note-like containers
+- fixing this issue must not suppress legitimate codified sections already discovered from the title body
+
+#### Decision: preserve note structure before final rendering
+
+The existing `text: string` note shape can remain if the parser produces a deterministic markdown-ready serialization, but the architecture must treat note extraction as **structure-preserving**, not plain whitespace normalization.
+
+Required structural boundaries:
+- distinct source `<p>` nodes become distinct markdown paragraphs separated by `\n\n`
+- note tables are serialized as distinct markdown table blocks with preserved row order and cell boundaries
+- prose before/after a table remains before/after the table in the same source order, with blank-line separation
+- embedded Act text remains part of the originating note body serialization
+
+If implementation pressure makes a plain string too brittle, the acceptable architectural extension is to introduce an internal note-block representation such as:
+
+```ts
+type NoteBlock =
+  | { kind: 'paragraph'; text: string }
+  | { kind: 'table'; rows: string[][] };
+```
+
+and serialize to `text` only at the outermost renderer boundary. The key architectural rule is that paragraph/table boundaries are preserved until final markdown emission.
+
+### 1.4 Renderer output contracts
 
 #### Standalone section mode
 
-`renderSectionMarkdown(section)` must continue to emit:
+`renderSectionMarkdown(section)` must continue to emit a normal top-level markdown heading:
 
 ```md
 # § 8. Respect for flag
@@ -68,12 +131,12 @@ No schema expansion is needed. This issue only tightens renderer semantics for e
 
 Rules:
 - no prepended HTML anchor line
-- no trailing ` {#...}` suffix
-- existing frontmatter contract remains unchanged
+- no trailing `{#...}` suffix
+- existing standalone frontmatter semantics remain unchanged except for corrected source URLs when they originate from normalized canonical URLs
 
 #### Embedded/chapter mode
 
-When embedded rendering is invoked with an anchor derived from `embeddedSectionAnchor(section.sectionNumber)`, output must become:
+Embedded rendering must emit a standalone anchor line immediately before each section heading:
 
 ```md
 <a id="section-8"></a>
@@ -81,56 +144,70 @@ When embedded rendering is invoked with an anchor derived from `embeddedSectionA
 ```
 
 Rules:
-- anchor line is on its own line immediately before the section heading
-- anchor format is exactly `<a id="section-<normalized-id>"></a>`
-- no embedded heading may contain literal ` {#...}` text
-- if no anchor option is supplied, no HTML anchor line is emitted
+- exact emitted shape: `<a id="section-<normalized-id>"></a>`
+- anchor line is on its own line immediately before the heading
+- anchor IDs come **only** from `embeddedSectionAnchor()`
+- embedded output must never contain literal `{#section-...}` text
 
-#### Structured subsection paragraph separation
+#### Structured subsection paragraphing
 
-For structured subsection headings in embedded/chapter mode, sibling subsection blocks must be separated by exactly one blank line in compacted output.
-
-Required shape:
+Structured subsection siblings must render as separate markdown paragraphs in compacted output:
 
 ```md
-Chapeau text.
+No disrespect should be shown to the flag...
 
-**(a)** First subsection text.
+**(a)** The flag should never be displayed...
 
-**(b)** Second subsection text.
+**(b)** The flag should never touch...
 ```
 
 Rules:
-- blank-line separation applies whether the previous block is chapeau text or another subsection block
-- existing bold label/heading forms remain unchanged:
-  - `**(a)** body text`
-  - `**(a) Heading** body text`
+- blank-line separation is required when a subsection block follows chapeau/body text or another subsection block
+- existing inline bold formats remain unchanged:
+  - `**(a)** body`
+  - `**(a) Heading** body`
   - `**(a) Heading**`
-- nested child ordering and indentation remain unchanged
+- nested paragraph/subparagraph/clause/item ordering and indentation remain unchanged
 
-### 1.4 Invariants
+#### Canonical OLRC URL contract
+
+The normalized canonical section URL is:
+
+```text
+https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{title}-section{section}&num=0&edition=prelim
+```
+
+This exact contract must be used in:
+- `buildCanonicalSectionUrl(titleNumber, sectionNumber)`
+- chapter-mode fallback link rewriting
+- per-section default `source`
+- `TitleIR.sourceUrlTemplate` / chapter frontmatter / uncategorized frontmatter where a source URL is emitted
+
+### 1.5 Invariants
 
 The implementation must preserve these invariants:
 
 - standalone section markdown still starts with `# § ...`
-- standalone output never gains an HTML anchor line
+- standalone section markdown never gains embedded HTML anchor lines
 - embedded output never contains literal `{#section-...}` fragments
-- embedded output uses the existing `embeddedSectionAnchor()` normalization helper unchanged
-- every structured subsection block is isolated as its own markdown paragraph in compacted output
-- child node ordering remains parent before children, in original source order
-- renderer functions remain pure string/array transforms with no I/O
+- anchor IDs are always produced by `embeddedSectionAnchor()` and never by ad hoc normalization
+- canonical OLRC links always include both `num=0` and `edition=prelim`
+- note paragraph boundaries correspond to source paragraph boundaries
+- note tables preserve row/column ordering in their serialized markdown form
+- embedded Act content never appears as additional top-level `SectionIR` records
+- parser/renderer modules remain deterministic, in-process transforms with no new I/O side effects
 
 ---
 
 ## 2. API contract
 
-This repository exposes no HTTP API. The external contract for this issue is the CLI-generated markdown files and the renderer function behavior exercised through tests.
+This repository exposes no HTTP API. The external contract for this issue is the generated markdown plus the parser/renderer function behavior verified in tests.
 
-### 2.1 CLI surface
+### 2.1 CLI contract
 
 No CLI grammar changes are required.
 
-Existing usage remains:
+Existing usage remains unchanged:
 
 ```bash
 us-code-tools transform --title <number> --output <dir> [--group-by chapter]
@@ -138,49 +215,71 @@ us-code-tools transform --title <number> --output <dir> [--group-by chapter]
 
 ### 2.2 Generated markdown contract
 
-#### Standalone section output
+#### Embedded section anchor contract
 
-```md
-# § 8. Respect for flag
-```
-
-Must not become:
-
-```md
-<a id="section-8"></a>
-# § 8. Respect for flag
-```
-
-#### Embedded section output
-
-Must become:
+Required embedded output:
 
 ```md
 <a id="section-8"></a>
 ## § 8. Respect for flag
 ```
 
-Must not contain:
+Forbidden embedded output:
 
 ```md
 ## § 8. Respect for flag {#section-8}
 ```
 
-#### Structured subsection output
+#### Subsection paragraph contract
 
-Example required output:
+Required shape:
 
 ```md
-The following rules apply.
+Lead-in paragraph.
 
-**(a)** The flag should never be displayed with the union down.
+**(a)** First subsection.
 
-**(b)** The flag should never touch anything beneath it.
+**(b)** Second subsection.
+```
+
+#### Canonical link contract
+
+Required fallback link shape:
+
+```md
+[section 8](https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title4-section8&num=0&edition=prelim)
+```
+
+#### Note paragraph contract
+
+Required multi-paragraph note shape:
+
+```md
+First note paragraph.
+
+Second note paragraph.
+
+Third note paragraph.
+```
+
+Single-paragraph notes must remain single-paragraph output with no extra leading/trailing blank lines.
+
+#### Note table contract
+
+Required representation: plain GitHub-flavored markdown table syntax, for example:
+
+```md
+| Revised Section | Source (U.S. Code) | Source (Statutes at Large) |
+| --- | --- | --- |
+| 1 | R.S. § 123 | June 1, 1900, ch. 1, 31 Stat. 1 |
 ```
 
 Rules:
-- subsection formatting stays inline-bold, not promoted to markdown headings
-- paragraph separation must be GitHub-safe and require no custom markdown extensions
+- preserve header/body reading order
+- preserve row boundaries
+- preserve cell boundaries
+- preserve surrounding prose before/after the table with blank-line separation
+- do not introduce custom markdown extensions, raw table HTML passthrough, or client-side rendering assumptions
 
 ### 2.3 Auth, rate limits, pagination
 
@@ -192,77 +291,114 @@ Not applicable. No network API or service is introduced.
 
 ### 3.1 Architectural style
 
-Keep the implementation inside the current monolithic CLI. No service split is justified because:
-- the problem is pure markdown rendering behavior
-- there is no independent scaling or deployment concern
-- correctness is best enforced in renderer-level tests
+Keep the implementation inside the existing monolithic CLI.
+
+No service split is justified because:
+- the problem is deterministic XML-to-IR and IR-to-markdown transformation
+- there is no independent scaling boundary
+- introducing services would add operational complexity without addressing the failure mode
+- correctness is best enforced through pure-function tests against fixtures
 
 ### 3.2 Module ownership
 
-#### `src/transforms/markdown.ts`
+#### `src/domain/normalize.ts`
 
-Owns:
-- section heading rendering
-- embedded/chapter body assembly
-- structured content node rendering
-- subsection line formatting
+Owns canonical normalization helpers.
 
 Required changes:
-- change embedded heading rendering so anchor markup is emitted as a separate line before the heading instead of as a trailing ` {#...}` suffix
-- preserve standalone section heading behavior
-- ensure blank-line separation is inserted before every structured subsection block when rendering embedded/chapter output
-- preserve existing nested child indentation and ordering
+- update `buildCanonicalSectionUrl(titleNumber, sectionNumber)` to append `&num=0&edition=prelim`
+- leave `embeddedSectionAnchor()` unchanged and authoritative for embedded anchor IDs
 
-Recommended helper contract:
+Design rule:
+- URL normalization and anchor normalization stay separate; section-number URL segments must keep their real section text, while embedded anchor IDs may keep normalized/sluggified form
+
+#### `src/transforms/markdown.ts`
+
+Owns final markdown emission.
+
+Required changes:
+- separate embedded anchor emission from section-heading rendering
+- keep standalone heading rendering free of embedded anchor lines
+- ensure structured subsection blocks are paragraph-separated
+- continue rewriting chapter-mode local links, but canonical fallback targets must use the updated OLRC URL contract
+- render note content in a way that preserves paragraph and table boundaries already carried by the parser
+- ensure frontmatter `source` values in chapter/uncategorized output use the corrected canonical URL contract
+
+Recommended helper boundaries:
 
 ```ts
 function renderSectionHeading(section: SectionIR, level: number): string;
 function renderSectionAnchor(anchor?: string): string[];
 function renderContentNodes(...): string[];
 function shouldSeparateWithBlankLine(existingLines: string[], nextLines: string[]): boolean;
-function renderSubsectionHeading(label: string, heading: string, text: string): string;
+function renderStatutoryNote(note: StatutoryNoteIR, headingLevel: number): string[];
+function renderNote(note: NoteIR): string | string[];
+function renderMarkdownTable(rows: string[][]): string[];
 ```
 
 Design rule:
-- `renderSectionHeading()` should return only the markdown heading line
-- anchor emission should be handled separately so standalone and embedded modes can share heading logic without reintroducing GitHub-visible suffixes
+- heading generation returns only the heading line
+- anchor generation is its own step
+- note/table rendering must never accept arbitrary raw HTML passthrough
 
-#### `src/domain/normalize.ts`
+#### `src/transforms/uslm-to-ir.ts`
 
-Owns:
-- `embeddedSectionAnchor()` normalization
+Owns XML parsing and IR extraction.
 
 Required changes:
-- none expected for normalization behavior
-- renderer must keep using this helper as the sole source of embedded anchor IDs
+- update `titleIr.sourceUrlTemplate` and default section source URLs to the corrected canonical OLRC URL shape
+- preserve note paragraph structure instead of flattening all note prose through generic whitespace normalization
+- preserve note table structure in source order
+- ensure note parsing keeps embedded Act content attached to notes instead of enabling top-level section leakage
+- tighten section-discovery logic so only actual title/body sections populate `titleIr.sections`
+
+Architectural rules:
+- do not treat all descendant `<section>` nodes as codified sections
+- note-scoped content must be parsed according to note context, not section-body context
+- preserve document order when extracting mixed prose/table content
 
 #### `tests/unit/transforms/markdown.test.ts`
 
-Owns:
-- regression verification for renderer behavior
+Owns renderer regressions.
 
 Required additions:
-- assert embedded markdown contains `<a id="section-8"></a>` immediately before `## § 8. ...`
-- assert embedded markdown does not contain `{#section-8}`
-- assert standalone section markdown still lacks prepended anchor markup
-- assert sibling structured subsections render with `\n\n**(a)` and `\n\n**(b)` paragraph boundaries
-- assert nested child ordering/indentation remains stable
+- embedded markdown contains `<a id="section-..."></a>`
+- embedded markdown does not contain `{#section-...}`
+- standalone markdown still lacks embedded anchors
+- sibling structured subsections are separated by blank lines
+- rewritten canonical links include `num=0` and `edition=prelim`
+- rendered notes preserve `\n\n` paragraph boundaries
+- rendered note tables preserve structural separators rather than flattened text
+
+#### `tests/unit/transforms/uslm-to-ir.test.ts`
+
+Owns parser regressions.
+
+Required additions:
+- `TitleIR.sourceUrlTemplate` uses the corrected canonical OLRC contract
+- multi-`<p>` note extraction preserves paragraph boundaries in source order
+- embedded Act fixtures do not create extra top-level `SectionIR` entries
+- embedded Act text remains attached to the parent note
+- note table extraction preserves row/column ordering
 
 ### 3.3 Dependency direction
 
 ```text
 src/index.ts
   -> src/transforms/uslm-to-ir.ts
-  -> src/transforms/write-output.ts
-       -> src/transforms/markdown.ts
        -> src/domain/normalize.ts
        -> src/domain/model.ts
+  -> src/transforms/write-output.ts
+       -> src/transforms/markdown.ts
+            -> src/domain/normalize.ts
+            -> src/domain/model.ts
 ```
 
 Rules:
-- `markdown.ts` remains pure and may consume normalization helpers
-- no renderer logic may introduce filesystem/network/process access
-- parser and writer boundaries remain unchanged
+- `normalize.ts` stays pure and dependency-light
+- `uslm-to-ir.ts` owns XML interpretation into IR
+- `markdown.ts` owns final markdown formatting only
+- no module in this change may introduce filesystem/network/process access beyond existing CLI entrypoints and tests
 
 ### 3.4 Communication pattern
 
@@ -271,7 +407,7 @@ Direct in-process function calls only.
 No:
 - queue
 - event bus
-- worker
+- worker pool
 - RPC
 - background task
 
@@ -281,12 +417,13 @@ No:
 
 ### 4.1 Runtime requirements
 
-For this repo, “production” is a local or CI Node.js process running the CLI.
+For this repo, production is a local or CI Node.js process running the CLI.
 
 Required runtime:
 - Node.js 22+
+- TypeScript 5.8+
 - existing npm dependency set
-- writable local filesystem for transform output (unchanged)
+- local filesystem for reading XML inputs and writing markdown outputs
 
 No additional infrastructure is required.
 
@@ -298,6 +435,7 @@ No additional infrastructure is required.
 - **No object storage**
 - **No queue**
 - **No CDN**
+- **No external OLRC API calls at runtime**; canonical URLs are emitted as text only
 
 ### 4.3 Development and test requirements
 
@@ -309,12 +447,17 @@ npm run build
 npm test
 ```
 
-Recommended verification for this issue:
+Minimum verification for this issue:
 
 ```bash
 npm run build
-npx vitest run tests/unit/transforms/markdown.test.ts
+npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts
 ```
+
+Fixture requirements:
+- use existing XML fixtures under `tests/fixtures/xml/`
+- add fixture coverage only where necessary to capture embedded Acts and note tables
+- avoid synthetic fixtures that do not resemble actual USLM note structures when a representative real fixture already exists
 
 ### 4.4 CI requirements
 
@@ -323,13 +466,15 @@ Existing CI remains sufficient:
 - run TypeScript build
 - run Vitest
 
-No new secrets, containers, or services are required.
+No new secrets, containers, databases, or services are required.
 
 ### 4.5 Rollback plan
 
 Rollback is a normal git revert of:
+- parser changes in `src/transforms/uslm-to-ir.ts`
+- normalization changes in `src/domain/normalize.ts`
 - renderer changes in `src/transforms/markdown.ts`
-- regression tests and snapshots
+- associated tests/snapshots
 
 No migration or data cleanup is required.
 
@@ -337,29 +482,31 @@ No migration or data cleanup is required.
 
 ## 5. Dependency decisions
 
-No new dependencies should be added.
+No new dependencies should be added unless an implementation dead-end proves existing tools insufficient. Current architecture supports the required work.
 
 | Dependency | Version in repo | Role in this issue | Why keep it | License | Maintenance status |
 |---|---:|---|---|---|---|
-| `typescript` | `^5.8.0` | typed renderer changes | existing repo standard; no need for new tooling | Apache-2.0 | actively maintained |
-| `vitest` | `^3.0.0` | regression coverage | already used for unit and snapshot verification | MIT | actively maintained |
-| `gray-matter` | `^4.0.3` | unchanged frontmatter rendering | already part of markdown pipeline | MIT | mature/stable |
-| `fast-xml-parser` | `^4.5.0` | unaffected parser dependency | no parser replacement needed | MIT | actively maintained |
-| `yauzl` | `^3.1.0` | unrelated ZIP input path | unchanged for this issue | MIT | mature/stable |
-| `@types/node` | `^22.0.0` | Node typings | existing repo dependency | MIT | maintained |
+| `typescript` | `^5.8.0` | typed parser/renderer changes | existing project standard; sufficient for pure transform refactors | Apache-2.0 | actively maintained |
+| `vitest` | `^3.0.0` | regression coverage | already used for unit/snapshot verification | MIT | actively maintained |
+| `fast-xml-parser` | `^4.5.0` | XML parsing, including `preserveOrder` mode already in use | existing parser already supports the ordered extraction needed for paragraph/table preservation | MIT | actively maintained |
+| `gray-matter` | `^4.0.3` | frontmatter serialization | existing markdown pipeline dependency | MIT | mature/stable |
+| `yauzl` | `^3.1.0` | unrelated ZIP input support | unaffected by this issue | MIT | mature/stable |
+| `@types/node` | `^22.0.0` | Node typings | existing dev dependency | MIT | maintained |
 
 ### 5.1 Explicit non-decisions
 
-- **No markdown AST library** (`remark`, `mdast`, etc.)
-  - the required change is small and deterministic
-  - string/line-based rendering is already sufficient
+- **No markdown AST framework** (`remark`, `mdast`, etc.)
+  - current output needs are deterministic and bounded
+  - plain string/line emission remains simpler and less risky for this repo
 
-- **No anchor-normalization package**
-  - the repo already has `embeddedSectionAnchor()`
-  - adding another slug/anchor dependency would create drift risk
+- **No alternate XML parser**
+  - `fast-xml-parser` already supports ordered traversal needed for mixed prose/table note content
 
-- **No parser changes**
-  - the issue is purely renderer formatting behavior
+- **No raw HTML passthrough for notes/tables**
+  - the only allowed raw HTML for this issue is the constrained anchor tag above embedded section headings
+
+- **No IR-wide persistence or schema layer**
+  - this is still a transform-only CLI concern
 
 ---
 
@@ -367,128 +514,167 @@ No new dependencies should be added.
 
 ### 6.1 Existing integration points reused
 
+#### XML -> IR
+`src/transforms/uslm-to-ir.ts`
+
+Responsibilities for this issue:
+- parse ordered XML content faithfully enough to distinguish paragraphs, prose/table boundaries, and note-contained embedded Act text
+- limit top-level section discovery to real title/body sections
+
 #### IR -> markdown
-`src/transforms/uslm-to-ir.ts` -> `src/transforms/markdown.ts`
+`src/transforms/markdown.ts`
 
-Unchanged boundary. The renderer continues consuming `SectionIR` and `ContentNode[]` exactly as today.
+Responsibilities for this issue:
+- emit GitHub-safe embedded anchors
+- preserve subsection paragraph boundaries
+- serialize note prose/tables in the exact preserved order
+- emit corrected canonical links and frontmatter source URLs
 
-#### Anchor normalization
-`src/transforms/markdown.ts` -> `src/domain/normalize.ts`
+#### Canonical normalization
+`src/domain/normalize.ts`
 
-Unchanged contract:
-- embedded/chapter rendering derives anchor IDs through `embeddedSectionAnchor(section.sectionNumber)`
-- normalization rules for values like `36B` and `2/3` remain unchanged
-
-#### Markdown tests
-`tests/unit/transforms/markdown.test.ts`
-
-Expanded contract:
-- verify GitHub-safe embedded anchor markup
-- verify paragraph-separated subsection output
-- ensure existing standalone and nested-order behavior still passes
+Responsibilities for this issue:
+- centralize OLRC URL shape
+- keep anchor ID normalization authoritative and unchanged
 
 ### 6.2 Data flow
 
 ```text
-SectionIR
-  -> renderSectionBody(section, options)
-       -> renderSectionAnchor(options.anchor)
-       -> renderSectionHeading(section, level)
-       -> renderContentNodes(content, options)
-            -> renderStructuredLine(...)
-                 -> renderSubsectionHeading(...) or renderLabeledLine(...)
-       -> compactLines(...)
-  -> final markdown string
+USLM XML
+  -> fast-xml-parser (standard + preserveOrder)
+  -> parseUslmToIr()
+       -> collect real title/body sections
+       -> parse section content
+       -> parse note content with preserved paragraph/table boundaries
+       -> build TitleIR / SectionIR
+  -> renderSectionMarkdown() / renderChapterMarkdown() / renderUncategorizedMarkdown()
+       -> emit corrected frontmatter source URLs
+       -> emit optional embedded anchor line
+       -> render headings/content/notes/tables deterministically
+  -> final markdown files
 ```
 
-Key rule:
-- embedded anchor emission must happen before heading insertion in the line array, not as an inline heading suffix
+### 6.3 Section-discovery containment rule
 
-### 6.3 Blank-line separation logic
+The key parser boundary for this issue is:
 
-The separator decision must recognize structured subsection blocks as paragraph starts even when they follow:
-- unlabeled chapeau text
-- another structured subsection block
-- mixed paragraph/subsection/paragraph sequences
+- `collectSectionNodes*()` may only contribute **codified title/body sections** to `titleIr.sections`
+- nested note content that happens to contain `<section>`-like constructs or embedded Act headings must not cross that boundary
 
-Recommended rule:
-- if the next rendered block is a structured subsection block, insert a blank line whenever there is already prior rendered content and the immediately preceding block is not already separated
-- compacting should still reduce duplicate blank lines to one
+Acceptable implementation approaches:
+1. restrict recursion so note/note-like containers are excluded from section discovery, or
+2. allow traversal but filter discovered sections by ancestry/context so note-descended sections are discarded
 
-This keeps exact markdown semantics simple and deterministic.
+Preferred approach: **ancestor-aware exclusion during section discovery**, because it prevents incorrect IR creation rather than trying to repair it afterward.
+
+### 6.4 Note serialization order rule
+
+For both statutory and editorial notes, extraction/rendering must preserve source order of mixed content:
+
+```text
+paragraph
+paragraph
+markdown table
+paragraph
+```
+
+must remain exactly:
+
+```md
+Paragraph one.
+
+Paragraph two.
+
+| ...table... |
+| --- | --- |
+| ... |
+
+Paragraph three.
+```
+
+No reordering by type is allowed.
 
 ---
 
 ## 7. Security considerations
 
-### 7.1 HTML output allowlist
+### 7.1 Raw HTML allowlist
 
-This issue introduces or formalizes embedded raw HTML output in markdown. The allowed HTML must be narrowly constrained to:
+This issue formalizes raw HTML usage in markdown. The allowed HTML must be narrowly constrained to:
 
 ```html
 <a id="section-..."></a>
 ```
 
 Controls:
-- only `id` attribute is emitted
-- anchor value comes only from the existing normalization helper
-- no dynamic tag names, event handlers, scripts, styles, or arbitrary HTML fragments
+- only the `a` tag is allowed for this issue
+- only the `id` attribute is emitted
+- the `id` value comes only from `embeddedSectionAnchor()`
+- no arbitrary HTML from XML note content may be passed through
+- note tables must render as markdown tables, not raw HTML tables
 
-### 7.2 Input and output safety
+### 7.2 Input validation and normalization
 
 Risks:
-- malformed or unexpected section numbers could lead to malformed anchor markup if normalization is bypassed
-- ad hoc string concatenation could reintroduce literal `{#...}` fragments or duplicate blank lines
+- malformed section numbers could produce invalid anchors or broken links if normalization is bypassed
+- generic whitespace normalization can erase legally meaningful structure inside notes
+- over-broad section discovery can turn note text into false codified sections
 
 Controls:
-- use `embeddedSectionAnchor()` as the sole anchor ID source
-- emit anchor markup only when a non-empty anchor string is supplied
-- keep line compaction centralized so duplicate separators collapse predictably
+- use `embeddedSectionAnchor()` as the sole source of embedded anchor IDs
+- use `buildCanonicalSectionUrl()` as the sole source of fallback OLRC link construction
+- preserve note structure using ordered parsing rather than flattening everything through `normalizeWhitespace()`
+- explicitly distinguish note context from title-body section context during parsing
 
-### 7.3 Determinism as a safety property
+### 7.3 Determinism and testability
 
-Deterministic output matters because renderer regressions are caught through exact text assertions and snapshots.
+Deterministic output is a safety property for this repository because regression control depends on exact text assertions.
 
 Required controls:
-- exact anchor line placement before the heading
-- no mode-dependent normalization drift
-- exact one-blank-line paragraph separation in compacted output
-- stable child ordering and indentation
+- exact anchor placement before embedded headings
+- exact canonical URL shape including `num=0` and `edition=prelim`
+- exact `\n\n` paragraph separators between note paragraphs and subsection siblings
+- stable note table row/column ordering
+- stable top-level section counts for fixtures containing embedded Acts
 
 ### 7.4 Sensitive data, auth, encryption, CORS, rate limiting
 
-Not applicable. No secrets, PII, network API, or browser-side capability changes are introduced.
+Not applicable. This change introduces no secrets, PII handling, network API, browser execution environment, or remote write path.
 
 ---
 
 ## 8. Concrete implementation plan
 
-### 8.1 `src/transforms/markdown.ts`
+### 8.1 `src/domain/normalize.ts`
 
-1. Separate anchor-line emission from `renderSectionHeading()`.
-2. Update embedded rendering so line assembly becomes:
-   - optional anchor line
-   - section heading line
-   - content lines
-3. Preserve standalone section rendering with no anchor line.
-4. Update subsection separation logic so each structured subsection block is preceded by a blank line when it is not the first rendered block.
-5. Keep `renderSubsectionHeading()` output format unchanged except for paragraph separation behavior around it.
+1. Update `buildCanonicalSectionUrl()` to append `&num=0&edition=prelim`.
+2. Keep `embeddedSectionAnchor()` unchanged.
+3. Ensure any default source URL builders reuse the same canonical helper or identical contract.
 
-### 8.2 `tests/unit/transforms/markdown.test.ts`
+### 8.2 `src/transforms/uslm-to-ir.ts`
 
-1. Add a chapter/embed rendering test for anchor-line output.
-2. Assert absence of `{#section-...}` in embedded markdown.
-3. Add a structured subsection regression with sibling `(a)` and `(b)` subsection nodes.
-4. Assert `\n\n**(a)` and `\n\n**(b)` boundaries.
-5. Assert standalone section output still begins with `# § ...` and has no prepended anchor line.
+1. Update `titleIr.sourceUrlTemplate` and `defaultSectionSource()` to use the corrected canonical OLRC URL shape.
+2. Change note extraction away from flat whitespace-joined text for multi-`<p>` notes.
+3. Preserve note content in source order when prose and tables are interleaved.
+4. Detect/serialize note tables into a markdown-safe structural representation.
+5. Restrict section discovery so note-contained embedded Acts do not create additional top-level `SectionIR` records.
+6. Keep legitimate codified section discovery unchanged.
 
-### 8.3 Snapshot updates
+### 8.3 `src/transforms/markdown.ts`
 
-If snapshot-covered outputs change, update only snapshots directly affected by:
-- embedded anchor formatting
-- subsection paragraph separation
+1. Separate anchor emission from `renderSectionHeading()`.
+2. Emit anchor line only in embedded/chapter/uncategorized rendering paths.
+3. Tighten blank-line separator logic so structured subsection siblings are distinct paragraphs.
+4. Render notes using preserved paragraph/table structure without flattening.
+5. Keep note table output in plain markdown tables.
+6. Ensure chapter-mode fallback links and frontmatter sources use the corrected canonical URLs.
 
-No unrelated snapshot churn is acceptable.
+### 8.4 Tests
+
+1. Extend `tests/unit/transforms/markdown.test.ts` for anchors, subsection spacing, canonical URLs, note paragraphing, and table rendering.
+2. Extend `tests/unit/transforms/uslm-to-ir.test.ts` for canonical source templates, note paragraph preservation, embedded Act containment, and note table structure.
+3. Update snapshots only where outputs changed for these six regressions.
+4. Reject unrelated snapshot churn.
 
 ---
 
@@ -496,13 +682,15 @@ No unrelated snapshot churn is acceptable.
 
 | Spec requirement | Architectural decision |
 |---|---|
-| Embedded headings must stop showing `{#...}` | emit standalone `<a id="section-..."></a>` line before embedded heading |
-| Standalone section markdown must remain unchanged | keep anchor emission outside standalone rendering path |
-| Structured subsections must render as distinct paragraphs | treat every structured subsection block as paragraph-separated content |
-| Bold subsection label/heading format must remain | keep `renderSubsectionHeading()` text shape unchanged |
-| Child ordering/indentation must remain stable | only adjust separator logic, not recursive child rendering |
-| Tests must cover both regressions | add targeted unit assertions and update affected snapshots only |
-| No new I/O in renderer | keep all changes inside pure string/array transform helpers |
+| Embedded headings must stop showing `{#...}` | emit standalone `<a id="section-..."></a>` lines before embedded headings |
+| Standalone section headings must remain plain markdown | keep anchor emission outside standalone rendering path |
+| Structured subsections must become distinct paragraphs | classify subsection blocks as paragraph-separated content in renderer compaction logic |
+| Canonical OLRC URLs must include `num=0` and `edition=prelim` | centralize corrected URL shape in normalization and reuse it for fallback links and frontmatter/source fields |
+| Multi-paragraph notes must preserve boundaries | parse note paragraphs in order and serialize them with `\n\n` separators |
+| Embedded Acts must stay inside notes | restrict top-level section discovery to codified title/body sections only |
+| Historical and Revision Notes tables must preserve structure | model note tables as ordered row/cell data and render with plain markdown tables |
+| No arbitrary raw HTML may be introduced | allow only `<a id="section-..."></a>` generated from normalized section anchors |
+| Tests must cover all six regressions | add parser and renderer regression tests against representative fixtures |
 
 ---
 
@@ -510,18 +698,23 @@ No unrelated snapshot churn is acceptable.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Anchor markup accidentally appears in standalone section output | High | separate anchor emission from heading rendering and gate it on embedded mode only |
-| Blank-line logic inserts too many separators | Medium | rely on central `compactLines()` to collapse duplicates and assert exact output in tests |
-| Consecutive subsection nodes still collapse in GitHub | High | explicitly classify subsection blocks as paragraph starts and add sibling subsection regression coverage |
-| Nested child indentation/order regresses | Medium | do not change recursive child traversal; add ordering assertions around subsection tests |
-| Anchor normalization drifts for `36B` or `2/3` | Medium | continue using existing `embeddedSectionAnchor()` helper without modification |
+| Anchor markup leaks into standalone section output | High | keep anchor generation as a separate embedded-only step |
+| Canonical URLs are corrected in one path but not others | High | centralize URL construction and assert full URL shape in both parser and renderer tests |
+| Generic whitespace normalization still flattens note paragraphs | High | preserve note content in ordered block form until final markdown serialization |
+| Embedded Act sections are still discovered recursively from note descendants | High | make section discovery ancestor-aware and exclude note-scoped descendants |
+| Table extraction preserves text but loses cell boundaries | High | parse note tables into row/cell arrays and render explicit markdown table rows |
+| Subsection separator logic inserts extra blank lines | Medium | keep centralized blank-line compaction and assert exact output |
+| Legitimate codified sections are accidentally filtered out with note containment fix | High | verify section counts against fixtures containing real title-body sections plus embedded note Acts |
+| Raw HTML surface expands beyond anchors | Medium | explicitly prohibit raw HTML passthrough in note/table rendering |
 
 ---
 
 ## 11. Decision summary
 
-1. **Keep the architecture monolithic and additive.** This is a small renderer correctness fix, not a systems change.
-2. **Emit embedded anchors as standalone HTML lines, not markdown heading suffixes.** That is the GitHub-compatible fix with the least churn.
-3. **Keep standalone section rendering unchanged.** The anchor behavior belongs only to embedded/chapter mode.
-4. **Solve subsection rendering through separator logic, not a new node model.** The IR is already sufficient.
-5. **Enforce behavior through focused renderer tests.** Exact text assertions are the right guardrail for this class of regression.
+1. **Broaden the architecture from renderer-only to parser-plus-renderer.** The approved spec explicitly includes note extraction, canonical source URLs, embedded Act containment, and table structure preservation.
+2. **Keep the system monolithic and pure.** These are deterministic transform fixes, not distributed-systems concerns.
+3. **Emit embedded anchors as standalone constrained HTML lines.** This is the smallest GitHub-safe fix.
+4. **Centralize the canonical OLRC URL contract.** Every emitted source/fallback URL must use the same working `edition=prelim&num=0` shape.
+5. **Preserve note structure until final markdown emission.** Paragraphs and tables are semantic structure, not whitespace trivia.
+6. **Constrain top-level section discovery to actual title/body sections.** Embedded Acts belong to notes unless the XML context proves they are codified sections.
+7. **Enforce all six regressions through fixture-backed unit tests.** Exact, mechanically testable output is the right guardrail for this CLI.
