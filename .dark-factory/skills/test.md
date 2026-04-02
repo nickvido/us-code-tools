@@ -30,6 +30,7 @@
 - `tests/integration/issue12-transform-cli.test.ts` — fixture-backed CLI coverage for titles 5/10/26, slash-separated USC ref links, and zero-padded filesystem output ordering.
 - `tests/integration/issue16-transform-cli.test.ts` — chapter-mode CLI coverage for `--group-by` validation, fewer-files-than-section-mode output, required chapter frontmatter/order, normalized chapter filename collision rejection, and non-zero exit on partial chapter write failures.
 - `tests/chapter-rendering-qa.test.ts` — issue #29 regression suite for chapter-mode heading levels, canonical chapter/title `source` URLs, mapped vs unmapped xref rewriting, slash-bearing parse-output link recovery, deterministic embedded anchors, nested labeled-content formatting, `_title.md` section-list removal, and Title 51-style heading preservation.
+- `tests/golden/golden-file.test.ts` — optional golden-output parity for chapter markdown backfill fixtures; builds `dist/index.js`, runs `backfill --phase olrc --vintages 119-73`, and only asserts fixture parity when the local `119-73` OLRC cache is actually present.
 - `tests/integration/backfill-constitution.test.ts` — fresh repo, idempotent rerun, contiguous-prefix resume, empty-dir bootstrap, dirty-repo rejection, populated-non-git rejection, unrelated-history rejection.
 - `tests/adversary-round1-issue3.test.ts` — configured remote without upstream must still push current branch explicitly.
 - `tests/adversary-round1-issue5.test.ts` … `tests/adversary-round9-issue5.test.ts` — issue #5 regressions across fetch, cache, manifest, GovInfo/Congress behavior, and legislators crosswalk cleanup.
@@ -178,5 +179,6 @@
 - Fastest focused verification for issue #31 in the current worktree:
   - `rtk test npx vitest run tests/unit/transforms/markdown.test.ts tests/unit/transforms/uslm-to-ir.test.ts`
   - `rtk err npx tsc --noEmit`
-  - Current branch head during knowledge capture: `7f8713c`
+  - Current branch head during knowledge capture: `428be9c`
   - Current observed status in this worktree: both focused issue-#31 suites pass (`37 passed`) and `tsc --noEmit` is green.
+  - Full-suite CI follow-up: `tests/golden/golden-file.test.ts` now skips its chapter-markdown parity assertions when the optional local `119-73` OLRC backfill cache is absent, instead of failing `beforeAll()` on GitHub Actions.
