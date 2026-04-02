@@ -507,6 +507,10 @@ describe('uslm-to-ir parser', () => {
       statutoryNotes: section101.statutoryNotes ?? [],
       editorialNotes: section101.editorialNotes ?? [],
     });
+    const combinedNoteText = [
+      ...(section101.statutoryNotes ?? []).map((note: any) => String(note.text ?? '')),
+      ...(section101.editorialNotes ?? []).map((note: any) => String(note.text ?? '')),
+    ].join('\n\n');
 
     const headingIndex = noteText.indexOf('Historical and Revision Notes');
     const tableHeaderIndex = noteText.indexOf('Derivation');
