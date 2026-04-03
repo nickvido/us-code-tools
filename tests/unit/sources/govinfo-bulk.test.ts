@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import * as manifestModule from '../../../src/utils/manifest.js';
 import { readManifest, writeManifest } from '../../../src/utils/manifest.js';
 import { fetchGovInfoBulkSource } from '../../../src/sources/govinfo-bulk.js';
 import { parseGovInfoBulkListing, resolveGovInfoBulkUrl } from '../../../src/utils/govinfo-bulk-listing.js';
@@ -25,6 +26,10 @@ function createZipBytes(fileName: string, contents: string): Buffer {
 }
 
 describe('govinfo bulk utilities', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('parses XML directory listings and resolves directory/file entries', () => {
     const entries = parseGovInfoBulkListing(
       `<?xml version="1.0"?><directory><entry><name>119</name><href>119/</href></entry><entry><name>BILLSTATUS-119hr.xml.zip</name><href>119/hr/BILLSTATUS-119hr.xml.zip</href></entry></directory>`,
@@ -242,15 +247,33 @@ describe('govinfo bulk utilities', () => {
     }
   });
 
-  it('keeps the first completed artifact when overlapping runs target the same file', async () => {
-    const dataDirectory = mkdtempSync(join(tmpdir(), 'govinfo-bulk-overlap-'));
+  it('skips overwrite when another writer has already created the final cache path before manifest completion is recorded', async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), 'govinfo-bulk-final-path-race-'));
     const firstXml = '<?xml version="1.0"?><summary><writer>first</writer></summary>';
     const secondXml = '<?xml version="1.0"?><summary><writer>second</writer></summary>';
-    let releaseFirstDownload: (() => void) | null = null;
-    const firstDownloadReady = new Promise<void>((resolveReady) => {
-      releaseFirstDownload = resolveReady;
-    });
+    const targetPath = resolve(dataDirectory, 'cache/govinfo-bulk/BILLSUM/119/summaries.xml');
     let fileRequestCount = 0;
+    let releaseCompletedManifestWrite: (() => void) | null = null;
+    const completedManifestWriteBlocked = new Promise<void>((resolveBlocked) => {
+      releaseCompletedManifestWrite = resolveBlocked;
+    });
+    let firstCompletedWriteIntercepted = false;
+
+    const originalWriteManifest = manifestModule.writeManifest;
+    vi.spyOn(manifestModule, 'writeManifest').mockImplementation(async (manifest, targetDataDirectory) => {
+      const bulkState = (manifest.sources as typeof manifest.sources & {
+        'govinfo-bulk': { files: Record<string, { completed_at: string | null; relative_cache_path: string }> };
+      })['govinfo-bulk'];
+      const summariesEntry = Object.values(bulkState.files).find((entry) => entry.relative_cache_path === 'BILLSUM/119/summaries.xml');
+
+      if (!firstCompletedWriteIntercepted && summariesEntry?.completed_at) {
+        firstCompletedWriteIntercepted = true;
+        expect(existsSync(targetPath)).toBe(true);
+        await completedManifestWriteBlocked;
+      }
+
+      return originalWriteManifest(manifest, targetDataDirectory);
+    });
 
     const fetchImpl: typeof fetch = async (input) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -262,27 +285,29 @@ describe('govinfo bulk utilities', () => {
       }
       if (url === 'https://www.govinfo.gov/bulkdata/BILLSUM/119/summaries.xml') {
         fileRequestCount += 1;
-        if (fileRequestCount === 1) {
-          await firstDownloadReady;
-          return response(firstXml, 'application/xml');
-        }
-        return response(secondXml, 'application/xml');
+        return response(fileRequestCount === 1 ? firstXml : secondXml, 'application/xml');
       }
       throw new Error(`Unexpected URL: ${url}`);
     };
 
     try {
       const firstRun = fetchGovInfoBulkSource({ force: false, congress: 119, collection: 'BILLSUM', dataDirectory, fetchImpl });
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-      const secondRun = fetchGovInfoBulkSource({ force: false, congress: 119, collection: 'BILLSUM', dataDirectory, fetchImpl });
-      releaseFirstDownload?.();
 
-      const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+      await vi.waitFor(() => {
+        expect(firstCompletedWriteIntercepted).toBe(true);
+      });
+
+      const secondRun = fetchGovInfoBulkSource({ force: false, congress: 119, collection: 'BILLSUM', dataDirectory, fetchImpl });
+      const secondResult = await secondRun;
+      releaseCompletedManifestWrite?.();
+      const firstResult = await firstRun;
+
       expect(firstResult.ok).toBe(true);
       expect(secondResult.ok).toBe(true);
-
-      const finalPath = resolve(dataDirectory, 'cache/govinfo-bulk/BILLSUM/119/summaries.xml');
-      expect(readFileSync(finalPath, 'utf8')).toContain('<writer>first</writer>');
+      expect(secondResult.files_skipped).toBe(1);
+      expect(secondResult.files_downloaded).toBe(0);
+      expect(readFileSync(targetPath, 'utf8')).toContain('<writer>first</writer>');
+      expect(fileRequestCount).toBe(2);
 
       const manifest = await readManifest(dataDirectory);
       const state = (manifest.sources as typeof manifest.sources & {
@@ -290,8 +315,8 @@ describe('govinfo bulk utilities', () => {
       })['govinfo-bulk'];
       expect(Object.values(state.files)).toHaveLength(1);
       expect(Object.values(state.files)[0].completed_at).not.toBeNull();
-      expect(fileRequestCount).toBe(2);
     } finally {
+      releaseCompletedManifestWrite?.();
       rmSync(dataDirectory, { recursive: true, force: true });
     }
   });
