@@ -77,7 +77,7 @@ describe('fetch CLI contract', () => {
     }
   });
 
-  it('prints one manifest-backed status object covering all five sources', () => {
+  it('prints one manifest-backed status object covering all six sources including govinfo-bulk', () => {
     const result = runFetch(['--status']);
 
     try {
@@ -89,12 +89,71 @@ describe('fetch CLI contract', () => {
         'olrc',
         'congress',
         'govinfo',
+        'govinfo-bulk',
         'voteview',
         'legislators',
       ]);
       expect(payload.sources?.olrc).toHaveProperty('last_success_at');
       expect(payload.sources?.congress).toHaveProperty('last_failure');
+      expect(payload.sources?.['govinfo-bulk']).toHaveProperty('last_success_at');
+      expect(payload.sources?.['govinfo-bulk']).toHaveProperty('last_failure');
       expect(existsSync(join(result.tempRoot, 'data', 'manifest.json'))).toBe(false);
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('rejects --collection without --source=govinfo-bulk using invalid_arguments', () => {
+    const result = runFetch(['--collection=BILLSTATUS']);
+
+    try {
+      expect(result.status).toBe(2);
+      const payload = JSON.parse(result.stderr.trim()) as { error?: { code?: string; message?: string } };
+      expect(payload.error?.code).toBe('invalid_arguments');
+      expect(payload.error?.message).toContain('--collection');
+      expect(payload.error?.message).toContain('govinfo-bulk');
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('rejects invalid or repeated --collection selectors for govinfo-bulk', () => {
+    const invalidCollection = runFetch(['--source=govinfo-bulk', '--collection=NOPE']);
+    const repeatedCollection = runFetch(['--source=govinfo-bulk', '--collection=BILLSTATUS', '--collection=PLAW']);
+
+    try {
+      expect(invalidCollection.status).toBe(2);
+      const invalidPayload = JSON.parse(invalidCollection.stderr.trim()) as {
+        error?: { code?: string; message?: string };
+      };
+      expect(invalidPayload.error?.code).toBe('invalid_arguments');
+      expect(invalidPayload.error?.message).toContain('BILLSTATUS');
+      expect(invalidPayload.error?.message).toContain('PLAW');
+
+      expect(repeatedCollection.status).toBe(2);
+      const repeatedPayload = JSON.parse(repeatedCollection.stderr.trim()) as {
+        error?: { code?: string; message?: string };
+      };
+      expect(repeatedPayload.error?.code).toBe('invalid_arguments');
+      expect(repeatedPayload.error?.message).toContain('--collection');
+      expect(repeatedPayload.error?.message).toContain('once');
+    } finally {
+      invalidCollection.cleanup();
+      repeatedCollection.cleanup();
+    }
+  });
+
+  it('accepts govinfo-bulk without API_DATA_GOV_KEY and reaches the bulk source contract', () => {
+    const result = runFetch(['--source=govinfo-bulk', '--collection=BILLSTATUS', '--congress=119'], {
+      API_DATA_GOV_KEY: '',
+      LIVE_FETCH_TESTS: '0',
+    });
+
+    try {
+      expect(result.status).not.toBe(2);
+      expect(result.stdout.trim() || result.stderr.trim()).toContain('govinfo-bulk');
+      expect(result.stdout.trim() || result.stderr.trim()).not.toContain("Unknown source 'govinfo-bulk'");
+      expect(result.stdout.trim() || result.stderr.trim()).not.toContain('API_DATA_GOV_KEY');
     } finally {
       result.cleanup();
     }
