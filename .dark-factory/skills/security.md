@@ -40,6 +40,15 @@
 - `src/sources/unitedstates.ts`
   - skips cross-reference unless the latest Congress snapshot is complete and fresh
   - deletes stale `bioguide-crosswalk.json` on skip paths so manifest state and disk state cannot disagree
+- `src/utils/govinfo-bulk-listing.ts`
+  - resolves only `https://www.govinfo.gov/bulkdata/...` URLs and rejects redirects/origins outside that prefix
+  - treats HTML listings as invalid XML payloads instead of silently traversing them
+- `src/sources/govinfo-bulk.ts`
+  - streams GovInfo bulk responses to temp files instead of buffering whole artifacts in memory
+  - validates XML payloads and ZIP extraction before completion, with `BILLSTATUS` requiring parseable extracted XML
+  - re-checks refreshed manifest state plus final artifact/extraction-root existence immediately before final rename so overlap losers skip instead of overwriting a completed writer
+- `src/utils/manifest.ts`
+  - merges incoming `sources["govinfo-bulk"]` state with the on-disk manifest before rename so stale snapshots do not drop another writer's completed file records
 
 ### Backfill Target Safety
 - `src/backfill/target-repo.ts`
@@ -138,6 +147,8 @@
 - **Issue #16 warning classification is part of the public contract:** uncategorized sections surface via `TransformWarning` / `warnings[]`, not `ParseError`, so successful runs can still report zero `parse_errors`.
 - **Issue #21 historical OLRC fetches must remain discovery-driven:** once the listing is parsed, `selectVintagePlan()` must reuse the discovered per-vintage title URL map rather than synthesizing `resolveTitleUrl(title, vintage)` for titles that were never advertised.
 - **Issue #21 listing mode is intentionally side-effect free:** `listOlrcVintages()` may perform OLRC discovery but must not persist manifest state, cache artifacts, or cookie material.
+- **Issue #40 GovInfo bulk is an anonymous historical backfill path:** `fetch --source=govinfo-bulk` must not require `API_DATA_GOV_KEY`, and its network surface is constrained to the GovInfo bulk repository instead of the api.data.gov path.
+- **Issue #40 streaming download + loser-skip overlap checks are the reviewed DoS/race controls:** future agents should preserve the streamed temp-file write path and the pre-rename refreshed-manifest/final-path re-check rather than reverting to `arrayBuffer()` or blind rename-overwrite behavior.
 - **Issue #29 chapter-mode links are allowlisted outputs, not best-effort guesses:** renderer output may only use writer-derived relative chapter targets or exact `https://uscode.house.gov/` canonical fallbacks; emitting `section-*.md`, arbitrary domains, or guessed chapter filenames is a contract violation.
 - **Issue #29 canonical slash-bearing refs are integrity-sensitive:** parse-output links may use filename-safe hrefs, but chapter-mode rewriting must preserve canonical ids like `125/d` for both map lookup keys and fallback URLs; collapsing them to `125d` or `125-d` changes the legal reference target.
 - **Issue #29 heading extraction must fail closed to empty string:** `readSectionHeading(...)` may read only real `<heading>` content; substituting descendant paragraph text into `SectionIR.heading` would be an integrity bug, not a resilience feature.
@@ -150,6 +161,8 @@
 - `git fast-import` is intentional for historical author/date control; do not replace it casually with ordinary `git commit` without revalidating exact-history guarantees.
 - Congress and GovInfo no longer keep separate module-local limiter instances; both sources now import the shared singleton from `src/utils/rate-limit.ts`, so future agents should treat duplicate per-source limiter state as obsolete branch knowledge.
 - Congress and GovInfo parse upstream `Retry-After` and preserve the parsed numeric `nextRequestAt` until `normalizeError()` serializes the public `next_request_at` field; future changes should keep that boundary intact.
+- GovInfo bulk is intentionally a no-key path; treating missing `API_DATA_GOV_KEY` as a govinfo-bulk failure is incorrect.
+- GovInfo bulk overlap handling is intentionally merge-on-write + loser-skip, not a global lock manager; the branch contract is to avoid duplicate completion/overwrite, not to serialize all fetch activity.
 - OLRC cookie bootstrap and `download.shtml` discovery are required production behavior, not temporary test scaffolding.
 - Title 53 `reserved_empty` manifest entries are expected machine-readable skip states, not generic fetch failures and not cache artifacts.
 - VoteView indexing is currently in-memory only; lack of on-disk index files is an implementation choice, not accidental data loss.
@@ -230,6 +243,7 @@
   - issue #20 path-integrity hardening: one shared title-directory normalization boundary, filesystem-safe heading slugification, exact fallback to legacy `title-{NN}`, and shared-link enforcement across writer and parser surfaces
   - issue #21 historical OLRC hardening: duplicate/malformed `--vintage` rejection before discovery, in-memory-only cookie reuse across list/latest/single/all-vintages modes, additive manifest normalization for old OLRC state, and discovery-driven sparse-vintage handling
   - issue #29 output-integrity hardening: centralized embedded-anchor normalization, exact canonical fallback URL generation, title-directory-safe cross-title chapter links, section-heading parity across ordered/non-ordered parsing, and elimination of broken local `section-*.md` chapter-mode refs
+  - issue #40 GovInfo bulk hardening: origin/path-allowlisted XML listing traversal, streamed temp-file downloads, ZIP/XML validation before completion, merge-on-write manifest persistence for bulk state, and final-path loser checks to avoid overlap overwrites
 - What's intentionally deferred:
   - signed-commit enforcement
   - remote authenticity verification beyond operator-configured git remotes

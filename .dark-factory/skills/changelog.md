@@ -469,3 +469,33 @@
   - `npx tsc --noEmit` ✅
   - `npm run build` ✅
   - `npx vitest run` ✅ (`222 passed, 1 skipped`)
+
+## Feature #40 — GovInfo bulk repository fetch source
+- Updated `src/commands/fetch.ts`:
+  - registered `govinfo-bulk` as a first-class fetch source
+  - added `--collection=<BILLSTATUS|BILLS|BILLSUM|PLAW>` parsing/validation
+  - kept `govinfo-bulk` out of `fetch --all`
+  - allowed anonymous entry into the bulk path without `API_DATA_GOV_KEY`
+- Added GovInfo bulk discovery/download implementation:
+  - `src/utils/govinfo-bulk-listing.ts` parses GovInfo XML directory listings, resolves relative links, and enforces the `https://www.govinfo.gov/bulkdata/` allowlist
+  - `src/sources/govinfo-bulk.ts` recursively discovers congress/type files, streams artifact downloads to temp files, validates XML/ZIP payloads, extracts ZIPs under sibling `extracted/` directories, and records per-file resume state
+- Updated `src/utils/manifest.ts`:
+  - normalized new `sources["govinfo-bulk"]` state
+  - merged incoming bulk state with on-disk manifest contents before write so stale snapshots preserve other writers' completed file records
+- Added/expanded coverage in:
+  - `tests/cli/fetch.test.ts`
+  - `tests/unit/sources/govinfo-bulk.test.ts`
+- Runbook/docs status:
+  - `docs/DATA-ACQUISITION-RUNBOOK.md` now documents bulk usage, filters, cache layout, resume behavior, and collection priority
+- Review/fix history captured from issue #40:
+  - `8d430f7` — main `govinfo-bulk` implementation
+  - `ea8bfde` / `332aa62` — QA and adversary regression coverage
+  - `73d3954` — manifest-merge hardening for stale-snapshot writes
+  - `b29a149` — final-path overlap loser guard before overwrite
+  - active PR is `#41` for branch `df2/issue-40`
+  - `[adversary-review]` is APPROVED with no findings
+- Verification captured from issue context:
+  - `npx tsc --noEmit` ✅
+  - `npm run build` ✅
+  - `npx vitest run tests/unit/sources/govinfo-bulk.test.ts` ✅
+  - `npx vitest run` ⚠️ two unrelated pre-existing OLRC failures remained at the dev handoff

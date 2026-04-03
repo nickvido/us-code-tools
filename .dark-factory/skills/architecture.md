@@ -29,6 +29,8 @@
 - `src/sources/congress.ts` — Congress.gov bulk fetch orchestration, shared-rate-limit use, member snapshot reuse, congress checkpoint updates.
 - `src/sources/congress-member-snapshot.ts` — freshness evaluation for the reusable Congress global-member snapshot.
 - `src/sources/govinfo.ts` — GovInfo PLAW walk, checkpointed resume state, retained-package summary/granule finalization.
+- `src/sources/govinfo-bulk.ts` — GovInfo Bulk Data Repository discovery/download orchestration, streaming ZIP/XML writes, extraction/validation, overlap loser checks, and manifest-backed resume state.
+- `src/utils/govinfo-bulk-listing.ts` — GovInfo bulk XML directory-listing parser, URL resolution, and origin/path allowlisting.
 - `src/sources/voteview.ts` — static CSV download plus in-memory indexes for congress/member lookups.
 - `src/sources/unitedstates.ts` — YAML download, lightweight parsing, Congress-snapshot-based bioguide crosswalk generation/skip handling.
 - `src/utils/cache.ts` — raw response cache keying, TTL reads, atomic body/metadata writes.
@@ -154,6 +156,7 @@
   - OLRC additive discovery metadata under `sources.olrc.available_vintages`
   - Congress `bulk_scope`, `member_snapshot`, `congress_runs`, `bulk_history_checkpoint`
   - GovInfo `query_scopes` and `checkpoints`
+  - GovInfo bulk state under `sources["govinfo-bulk"]` with per-request checkpoints, per-collection/per-congress run state, and per-artifact file records (`download_status`, `validation_status`, `file_kind`, `relative_cache_path`, `extraction_root`)
   - legislators `cross_reference` state with explicit skip statuses
 - Congress global-member snapshot is intentionally separate from per-congress bill/committee runs. `src/sources/unitedstates.ts` may use it only when the latest snapshot is both `status: 'complete'` and still fresh per `evaluateCongressMemberSnapshotFreshness()`.
 - `fetch --all` runs sources serially in fixed order: `olrc`, `congress`, `govinfo`, `voteview`, `legislators`.
@@ -175,6 +178,10 @@
   - legislators skip states must not leave a stale `data/cache/legislators/bioguide-crosswalk.json` on disk
   - Congress and GovInfo now both consult the shared in-process limiter singleton from `src/utils/rate-limit.ts`, so one process no longer keeps separate per-source budgets for the same `API_DATA_GOV_KEY`
   - Congress/GovInfo `429` handling now keeps `nextRequestAt` numeric through the throw path and converts it to ISO only in `normalizeError()`, preserving the public `next_request_at` summary
+  - GovInfo bulk listing and file URLs are constrained to `https://www.govinfo.gov/bulkdata/` via `src/utils/govinfo-bulk-listing.ts`
+  - GovInfo bulk downloads now stream response bodies directly to temp files before validation/extraction; they do not materialize whole ZIPs in memory
+  - GovInfo bulk overlap handling is intentionally loser-check-based rather than full locking: immediately before final rename, `downloadBulkArtifact()` re-reads manifest state and final on-disk artifact/extraction-root existence to avoid clobbering another writer that already completed the same file
+  - manifest writes now merge `sources["govinfo-bulk"]` file/collection/congress state with on-disk manifest contents so stale snapshots do not drop another writer's completed file records
   - OLRC cookie state is memory-only inside `src/sources/olrc.ts`; it must never be persisted in manifest/cache metadata/output
   - OLRC releasepoint discovery is `download.shtml`-first and only Title 53 may be downgraded to `reserved_empty`
   - OLRC ZIP extraction now tolerates current large-title payloads via the 128 MiB large-entry ceiling while keeping bounded extraction caps
@@ -283,6 +290,12 @@
     - `fetch --source=olrc --all-vintages` discovers once, iterates every vintage in descending order, keeps successful earlier vintages on disk when later ones fail, and reports per-vintage results
     - manifest normalization is additive only: old manifests load with `vintages: {}` and `available_vintages: null`
     - latest-mode compatibility remains intentional: plain `fetch --source=olrc` still fetches only the newest vintage and mirrors that state to top-level `selected_vintage` + `titles`
+  - issue #40 GovInfo bulk backfill layer:
+    - `fetch --source=govinfo-bulk [--collection=<BILLSTATUS|BILLS|BILLSUM|PLAW>] [--congress=<n>]` is an explicit historical backfill path and is intentionally excluded from `fetch --all`
+    - discovery walks GovInfo XML directory listings recursively per collection/congress and preserves remote layout under `data/cache/govinfo-bulk/{collection}/{congress}/...`
+    - ZIP/XML artifacts are validated before manifest completion; `BILLSTATUS` ZIPs additionally require parseable extracted XML
+    - resume state lives under `sources["govinfo-bulk"]` with request checkpoints, per-collection/per-congress counters, and per-file completion metadata
+    - local download concurrency is bounded at 2, downloads stream to disk, and overlapping writers must skip instead of overwriting when a final cache path already exists before manifest completion is persisted
   - issue #29 chapter-rendering correctness layer:
     - standalone section markdown remains H1, but embedded chapter-mode sections render as `## § ... {#section-...}` with statutory notes at `###` / `####` and editorial notes at `###`
     - chapter frontmatter `source` is now the concrete title URL `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{title}` while section frontmatter still uses section-specific canonical URLs

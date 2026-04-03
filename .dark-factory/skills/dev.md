@@ -47,6 +47,7 @@
 - Run fetch after build:
   - `node dist/index.js fetch --status`
   - `node dist/index.js fetch --source=congress --congress=119`
+  - `node dist/index.js fetch --source=govinfo-bulk --collection=BILLSTATUS --congress=119`
   - `node dist/index.js fetch --all --congress=119`
 - Public CLI entry in `package.json`: `us-code-tools -> ./dist/index.js`
 - CI/build note: integration/CLI tests shell out to `dist/index.js`, so `npm run build` must happen before Vitest when validating compiled CLI behavior.
@@ -77,9 +78,10 @@
 - `src/sources/congress.ts` — Congress fetch orchestration
 - `src/sources/congress-member-snapshot.ts` — member snapshot freshness contract
 - `src/sources/govinfo.ts` — GovInfo collection walk/checkpointing
+- `src/sources/govinfo-bulk.ts` — GovInfo bulk listing walk, streaming download/extract, resume, and overlap-guard logic
 - `src/sources/voteview.ts` — VoteView file download/index helpers
 - `src/sources/unitedstates.ts` — legislators download/parsing/crosswalk
-- `src/utils/cache.ts`, `manifest.ts`, `fetch-config.ts`, `logger.ts`, `rate-limit.ts`, `retry.ts` — acquisition infrastructure
+- `src/utils/cache.ts`, `manifest.ts`, `fetch-config.ts`, `govinfo-bulk-listing.ts`, `logger.ts`, `rate-limit.ts`, `retry.ts` — acquisition infrastructure
 - `tests/cli/` — fetch CLI contract coverage
 - `tests/unit/` — pure-module coverage
 - `tests/integration/` — built CLI end-to-end coverage
@@ -94,6 +96,7 @@
 - `src/sources/congress.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts`, `src/sources/congress-member-snapshot.ts` (this source uses `getSharedApiDataGovLimiter()` and throws numeric `nextRequestAt` values that `normalizeError()` serializes into the public `next_request_at` field)
 - `src/sources/congress-member-snapshot.ts` → `src/utils/manifest.ts` (freshness derives from manifest snapshot metadata + artifact existence)
 - `src/sources/govinfo.ts` → `src/utils/cache.ts`, `src/utils/manifest.ts`, `src/utils/rate-limit.ts`, `src/utils/retry.ts`, `src/utils/logger.ts` (this source also uses `getSharedApiDataGovLimiter()` and preserves numeric `nextRequestAt` through `normalizeError()`)
+- `src/sources/govinfo-bulk.ts` → `src/utils/govinfo-bulk-listing.ts`, `src/utils/manifest.ts`, `src/utils/logger.ts`, `fast-xml-parser`, `yauzl`, Node streams/fs (this module owns recursive bulk discovery, streaming file writes, ZIP/XML validation, per-file resume checks, and overlap loser checks before final rename)
 - `src/sources/unitedstates.ts` → `src/utils/manifest.ts`, `src/sources/congress-member-snapshot.ts`, current Congress cache layout in `src/sources/congress.ts`
 - `src/sources/voteview.ts` → `src/utils/manifest.ts` and its in-memory index cache (`inMemoryIndexes`)
 - `src/sources/olrc.ts` → `src/domain/model.ts`, `src/domain/normalize.ts`, `src/types/yauzl.d.ts`, `src/utils/manifest.ts`, `src/utils/logger.ts` (issue #8/#21: this module owns OLRC homepage bootstrap, in-memory cookie forwarding, `download.shtml` parsing, descending/deduped vintage discovery, discovered per-vintage title URL maps, Title 53 `reserved_empty` classification, the 128 MiB large-title entry cap, aggregate `--all-vintages` execution, and `resolveCachedOlrcTitleZipPath()`)
@@ -149,6 +152,16 @@ src/index.ts (main)
           → isRateLimitExhausted() / markRateLimitUse()
           → parseRetryAfter() on HTTP 429, then throw numeric `nextRequestAt` for `normalizeError()` to serialize
         → writeManifest()
+      → fetchGovInfoBulkSource()
+        → fetchListing()
+          → parseGovInfoBulkListing()
+          → resolveGovInfoBulkUrl() / isAllowedGovInfoBulkUrl()
+        → discoverFilesForCongress()
+        → downloadBulkArtifact()
+          → streamResponseToDisk()
+          → validateXmlPayload() | extractZipSafely()
+          → wasArtifactCompletedByAnotherWriter()
+        → writeManifest()
       → fetchVoteViewSource()
         → fetchWithTimeout()
         → writeManifest()
@@ -182,6 +195,8 @@ src/index.ts (main)
 - `OlrcTitleState` / `OlrcTitleReservedEmptyState` in `src/utils/manifest.ts` — per-title OLRC cache/result contract for issues #8/#21
 - `OlrcVintageState` / `OlrcAvailableVintagesState` / `OlrcManifestState` in `src/utils/manifest.ts` — historical OLRC manifest contract and latest-mode compatibility mirror
 - `CongressMemberSnapshotState` / `CongressRunState` / `GovInfoCheckpointState` / `LegislatorsCrossReferenceState` in `src/utils/manifest.ts` — per-source manifest contracts
+- `GovInfoBulkManifestState` / `GovInfoBulkCollectionState` / `GovInfoBulkCongressState` / `GovInfoBulkFileState` in `src/sources/govinfo-bulk.ts` — bulk repository manifest contracts merged by `src/utils/manifest.ts`
+- `GovInfoBulkCollection` / `GovInfoBulkListingEntry` in `src/utils/govinfo-bulk-listing.ts` — bulk listing parser and allowed-collection contract
 - `CurrentCongressResolution` in `src/utils/fetch-config.ts` — `override`/`live`/`fallback` current-congress contract
 - `RawResponseCacheMetadata` in `src/utils/cache.ts` — raw API response cache metadata contract
 - `RateLimitState` / `RateLimitExhaustion` in `src/utils/rate-limit.ts` — shared limiter contract
@@ -205,7 +220,11 @@ src/index.ts (main)
 - The implementation uses `git fast-import` for historical commits, then `git reset --hard HEAD` to restore a clean working tree.
 - Fetch-path conventions:
   - `src/commands/fetch.ts` owns CLI validation and top-level fail-open source ordering
+  - `govinfo-bulk` is an explicit source only; keep it out of `fetch --all` unless spec/architecture change because it can trigger multi-GB historical downloads
   - `src/utils/manifest.ts` is permissive on read/normalize but all writers should emit the canonical shape
+  - GovInfo bulk manifest writes intentionally merge on-disk `sources["govinfo-bulk"]` state before rename so stale snapshots do not delete another writer's completed file entries
+  - GovInfo bulk downloads must stream `response.body` to disk; do not reintroduce `response.arrayBuffer()` for multi-GB artifacts
+  - GovInfo bulk overlap safety depends on the pre-rename `wasArtifactCompletedByAnotherWriter(...)` re-check of refreshed manifest state plus final artifact/extraction-root existence; preserve that loser-skip seam if you touch rename/extraction flow
   - Congress/GovInfo raw API caching goes through `src/utils/cache.ts`; cache keys normalize away `api_key`
   - Congress and GovInfo both call `getSharedApiDataGovLimiter()` / `resetSharedApiDataGovLimiter()` from `src/utils/rate-limit.ts`; update tests and any mocks at that shared-module seam rather than assuming per-source limiter state
   - `src/utils/rate-limit.ts` owns `parseRetryAfter()`, and both `src/sources/congress.ts` and `src/sources/govinfo.ts` now keep the parsed retry horizon numeric until `normalizeError()` converts it into the public ISO `next_request_at` field
@@ -373,6 +392,11 @@ src/index.ts
     - chapter-level xrefs never point to `section-*.md`; they resolve through writer-built `sectionTargetsByRef` entries or exact `uscode.house.gov` section URLs
     - `_title.md` intentionally keeps only title/chapter navigation, while nested labeled content now renders as multiple indented lines with parent-before-child ordering
     - ordered and non-ordered parse paths must agree on `SectionIR.heading`; the shared helper seam is `readSectionHeading(...)`
+  - issue #40 GovInfo bulk fetch work:
+    - CLI adds `--source=govinfo-bulk` and `--collection=<BILLSTATUS|BILLS|BILLSUM|PLAW>`; `--collection` is invalid for every other source
+    - the production path is XML-listing-driven: recurse from `https://www.govinfo.gov/bulkdata/{collection}/`, filter optional `--congress`, then download file entries only
+    - file cache paths preserve remote layout under `data/cache/govinfo-bulk/{collection}/{congress}/...`; ZIPs keep the downloaded archive plus a sibling `extracted/` directory
+    - manifest merge/overlap behavior is part of the contract, not an implementation detail: stale snapshots must preserve other writers' completed file keys, and overlap losers must skip once the final cache path already exists before manifest completion lands
 - What's intentionally deferred:
 - What's intentionally deferred:
   - additional backfill phases
