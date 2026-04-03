@@ -382,3 +382,24 @@
 - **Decision:** `src/transforms/markdown.ts` now activates a dedicated nested rendering path only when a subsection subtree has deeper labeled descendants. In that path, descendants render through `renderGithubSafeLabeledParagraph(...)` with bold labels at column 0, and continuation/body text nodes also render without four-space indentation.
 - **Consequence:** GitHub-safe nested output is now a renderer contract. Future agents must preserve the narrow compatibility gate that keeps flat sections and top-level-subsection-only sections byte-stable while preventing `\n    (i)`-style regressions in affected hierarchies.
 - **Feature:** #36 Sub-subsection indentation renders as code blocks on GitHub
+
+### ADR-054: GovInfo bulk is an additive explicit fetch source with manifest-backed bulk state
+- **Status:** Active
+- **Context:** Historical GovInfo backfill via the API is too slow and rate-limited; the bulk repository exposes equivalent anonymous ZIP/XML artifacts with a different directory-listing model.
+- **Decision:** Add `fetch --source=govinfo-bulk` as a separate source in `src/commands/fetch.ts`, keep it excluded from `fetch --all`, constrain optional `--collection` to `BILLSTATUS | BILLS | BILLSUM | PLAW`, and persist canonical progress under `sources["govinfo-bulk"]` in `data/manifest.json`.
+- **Consequence:** Future agents should extend the dedicated bulk-source path instead of overloading the API-based `govinfo` client or inventing sidecar state files.
+- **Feature:** #40 Add bulk download from GovInfo Bulk Data Repository
+
+### ADR-055: GovInfo bulk downloads stream to temp files and validate before completion
+- **Status:** Active
+- **Context:** Bulk repository artifacts can be large enough that buffering entire ZIPs in memory would violate the architecture’s resource-usage controls and make concurrent downloads fragile.
+- **Decision:** `src/sources/govinfo-bulk.ts` streams `response.body` directly to a temp file, derives byte counts from streamed bytes or `content-length`, validates XML/ZIP payloads before rename, and requires parseable extracted XML for `BILLSTATUS` ZIPs.
+- **Consequence:** Future agents must preserve the streamed temp-file path and should treat a return to `response.arrayBuffer()` as a resource/safety regression.
+- **Feature:** #40 Add bulk download from GovInfo Bulk Data Repository
+
+### ADR-056: GovInfo bulk overlap safety is merge-on-write plus loser-skip checks, not blind rename
+- **Status:** Active
+- **Context:** Overlapping local bulk-fetch processes can race on both `data/manifest.json` and the final cache path for the same artifact.
+- **Decision:** `src/utils/manifest.ts` merges incoming `sources["govinfo-bulk"]` state with the on-disk manifest before rename, and `downloadBulkArtifact()` re-reads manifest state plus final artifact/extraction-root existence immediately before destructive rename so a loser skips once another writer already completed the file.
+- **Consequence:** Future agents should preserve these stale-snapshot merge and final-path re-check seams when changing bulk persistence; last-writer-wins manifest rewrites and overwrite-on-rename behavior are now explicitly rejected branch designs.
+- **Feature:** #40 Add bulk download from GovInfo Bulk Data Repository

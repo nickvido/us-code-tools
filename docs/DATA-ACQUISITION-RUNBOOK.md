@@ -8,13 +8,14 @@ How to acquire, transform, and load all upstream data for the US Code as Git pro
 
 | Phase | Source | Auth | Rate Limit | Est. Time | Blocking? |
 |-------|--------|------|------------|-----------|-----------|
-| 1 | OLRC (US Code XML) | None (cookies required) | None | ~20 min | No |
-| 2 | VoteView (CSV) | None | None | ~10 min | No |
-| 3 | Legislators (YAML) | None | None | ~10 sec | No |
-| 4 | GovInfo (Public Laws) | `API_DATA_GOV_KEY` | 5,000 req/hr (shared) | Hours–days | Yes |
-| 5 | Congress.gov (Bills/Members) | `API_DATA_GOV_KEY` | 5,000 req/hr (shared) | Days–weeks | Yes |
+| 1 | GovInfo Bulk Data (historical ZIP/XML) | None | None (bounded locally to 2 downloads) | Hours | No |
+| 2 | OLRC (US Code XML) | None (cookies required) | None | ~20 min | No |
+| 3 | VoteView (CSV) | None | None | ~10 min | No |
+| 4 | Legislators (YAML) | None | None | ~10 sec | No |
+| 5 | GovInfo API (Public Laws incremental) | `API_DATA_GOV_KEY` | 5,000 req/hr (shared) | Hours–days | Yes |
+| 6 | Congress.gov (Bills/Members incremental) | `API_DATA_GOV_KEY` | 5,000 req/hr (shared) | Days–weeks | Yes |
 
-Phases 1–3 can run immediately with no credentials. Phases 4–5 share a single API key and rate budget.
+Phases 1–4 can run immediately with no credentials. Phases 5–6 share a single API key and rate budget.
 
 ---
 
@@ -33,7 +34,69 @@ Storage: `data/` is gitignored. All cached artifacts land in `data/cache/{source
 
 ---
 
-## Phase 1: OLRC — US Code USLM XML
+## Phase 1: GovInfo Bulk Data Repository
+
+**What:** Historical backfill path for GovInfo collections using anonymous bulk ZIP/XML downloads instead of API crawling.
+
+**Source URL:** `https://www.govinfo.gov/bulkdata/`
+
+**CLI:**
+```bash
+# Default: all supported collections
+node dist/index.js fetch --source=govinfo-bulk
+
+# Recommended first pass: BILLSTATUS only
+node dist/index.js fetch --source=govinfo-bulk --collection=BILLSTATUS
+
+# Narrow to one congress
+node dist/index.js fetch --source=govinfo-bulk --collection=BILLSTATUS --congress=119
+
+# Re-download a scope from scratch
+node dist/index.js fetch --source=govinfo-bulk --collection=PLAW --force
+```
+
+### Supported collections
+- `BILLSTATUS` — bill lifecycle/status XML (highest priority)
+- `PLAW` — public/private law XML
+- `BILLS` — full bill text XML (large)
+- `BILLSUM` — bill summaries
+
+### Behavior
+- Walks GovInfo XML directory listings under `/bulkdata/`
+- Preserves remote directory structure under `data/cache/govinfo-bulk/{collection}/{congress}/...`
+- Downloads anonymously; **no API key required**
+- Bounds local download concurrency at 2
+- Uses manifest-backed resume semantics and skips already validated/extracted artifacts
+- Validates XML payloads and rejects HTML/error bodies
+- Validates ZIPs before marking them complete; `BILLSTATUS` requires parseable extracted XML
+
+### Recommended acquisition order
+1. `BILLSTATUS`
+2. `PLAW`
+3. `BILLSUM`
+4. `BILLS`
+
+### Cache layout
+```text
+data/cache/govinfo-bulk/
+├── BILLSTATUS/
+│   └── 119/hr/
+│       ├── BILLSTATUS-119hr.xml.zip
+│       └── extracted/
+├── PLAW/
+├── BILLS/
+└── BILLSUM/
+```
+
+### Resume / status notes
+- Resume state is tracked in `data/manifest.json` under `sources["govinfo-bulk"]`
+- Completed artifacts are skipped when the file still exists, sizes still match when known, and required extraction directories are present
+- Use `--force` to clear manifest state for the selected `--collection` / `--congress` scope and re-fetch it
+- `fetch --all` intentionally does **not** include `govinfo-bulk`; bulk fetch remains an explicit operator action
+
+---
+
+## Phase 2: OLRC — US Code USLM XML
 
 **What:** Download all USC titles as USLM XML from the Office of the Law Revision Counsel.
 

@@ -2,7 +2,9 @@ import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-export type SourceName = 'olrc' | 'congress' | 'govinfo' | 'voteview' | 'legislators';
+import { normalizeGovInfoBulkManifestState, type GovInfoBulkManifestState } from '../sources/govinfo-bulk.js';
+
+export type SourceName = 'olrc' | 'congress' | 'govinfo' | 'govinfo-bulk' | 'voteview' | 'legislators';
 
 export interface FailureSummary {
   code: string;
@@ -162,6 +164,7 @@ export interface FetchManifest {
     olrc: OlrcManifestState;
     congress: CongressManifestState;
     govinfo: GovInfoManifestState;
+    'govinfo-bulk': GovInfoBulkManifestState;
     voteview: SourceStatusSummary & { files?: Record<string, unknown>; indexes?: unknown[] };
     legislators: LegislatorsManifestState;
   };
@@ -197,6 +200,7 @@ export function createEmptyManifest(): FetchManifest {
         query_scopes: {},
         checkpoints: {},
       },
+      'govinfo-bulk': normalizeGovInfoBulkManifestState(null),
       voteview: { last_success_at: null, last_failure: null, files: {}, indexes: [] },
       legislators: {
         last_success_at: null,
@@ -253,10 +257,105 @@ export async function readManifest(dataDirectory = getDataDirectory()): Promise<
 export async function writeManifest(manifest: FetchManifest, dataDirectory = getDataDirectory()): Promise<void> {
   const manifestPath = getManifestPath(dataDirectory);
   await mkdir(dirname(manifestPath), { recursive: true });
-  const payload = JSON.stringify({ ...manifest, updated_at: new Date().toISOString() }, null, 2);
+  const mergedManifest = await mergeManifestForWrite(manifest, dataDirectory);
+  const payload = JSON.stringify({ ...mergedManifest, updated_at: new Date().toISOString() }, null, 2);
   const temporaryPath = `${manifestPath}.tmp-${process.pid}-${Date.now()}`;
   await writeFile(temporaryPath, `${payload}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(temporaryPath, manifestPath);
+}
+
+async function mergeManifestForWrite(manifest: FetchManifest, dataDirectory: string): Promise<FetchManifest> {
+  const existingManifest = await readExistingManifestForMerge(dataDirectory);
+  if (existingManifest === null) {
+    return manifest;
+  }
+
+  const incomingGovInfoBulk = manifest.sources['govinfo-bulk'];
+  const existingGovInfoBulk = existingManifest.sources['govinfo-bulk'];
+
+  return {
+    ...existingManifest,
+    ...manifest,
+    sources: {
+      ...existingManifest.sources,
+      ...manifest.sources,
+      'govinfo-bulk': mergeGovInfoBulkManifestState(existingGovInfoBulk, incomingGovInfoBulk),
+    },
+    runs: Array.isArray(manifest.runs) ? manifest.runs : existingManifest.runs,
+  };
+}
+
+async function readExistingManifestForMerge(dataDirectory: string): Promise<FetchManifest | null> {
+  try {
+    const raw = await readFile(getManifestPath(dataDirectory), 'utf8');
+    return normalizeManifest(parseManifestJson(raw));
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function mergeGovInfoBulkManifestState(existing: GovInfoBulkManifestState, incoming: GovInfoBulkManifestState): GovInfoBulkManifestState {
+  const mergedCollections: GovInfoBulkManifestState['collections'] = { ...existing.collections };
+  for (const collection of Object.keys(incoming.collections) as Array<keyof GovInfoBulkManifestState['collections']>) {
+    const incomingCollection = incoming.collections[collection];
+    if (!incomingCollection) {
+      continue;
+    }
+    const existingCollection = mergedCollections[collection];
+    mergedCollections[collection] = existingCollection
+      ? {
+          ...existingCollection,
+          ...incomingCollection,
+          discovered_congresses: [...new Set([...existingCollection.discovered_congresses, ...incomingCollection.discovered_congresses])].sort((left, right) => left - right),
+          congress_runs: mergeGovInfoBulkCongressRuns(existingCollection.congress_runs, incomingCollection.congress_runs),
+        }
+      : incomingCollection;
+  }
+
+  return {
+    last_success_at: selectLatestTimestamp(existing.last_success_at, incoming.last_success_at),
+    last_failure: incoming.last_failure ?? existing.last_failure,
+    checkpoints: { ...existing.checkpoints, ...incoming.checkpoints },
+    collections: mergedCollections,
+    files: { ...existing.files, ...incoming.files },
+  };
+}
+
+function mergeGovInfoBulkCongressRuns(
+  existing: NonNullable<GovInfoBulkManifestState['collections'][keyof GovInfoBulkManifestState['collections']]>['congress_runs'],
+  incoming: NonNullable<GovInfoBulkManifestState['collections'][keyof GovInfoBulkManifestState['collections']]>['congress_runs'],
+): NonNullable<GovInfoBulkManifestState['collections'][keyof GovInfoBulkManifestState['collections']]>['congress_runs'] {
+  const merged = { ...existing };
+  for (const [key, incomingRun] of Object.entries(incoming)) {
+    const existingRun = merged[key];
+    merged[key] = existingRun
+      ? {
+          ...existingRun,
+          ...incomingRun,
+          completed_at: selectLatestTimestamp(existingRun.completed_at, incomingRun.completed_at),
+          file_keys: [...new Set([...existingRun.file_keys, ...incomingRun.file_keys])],
+          directories_visited: Math.max(existingRun.directories_visited, incomingRun.directories_visited),
+          files_discovered: Math.max(existingRun.files_discovered, incomingRun.files_discovered),
+          files_downloaded: Math.max(existingRun.files_downloaded, incomingRun.files_downloaded),
+          files_skipped: Math.max(existingRun.files_skipped, incomingRun.files_skipped),
+          files_failed: Math.max(existingRun.files_failed, incomingRun.files_failed),
+        }
+      : incomingRun;
+  }
+  return merged;
+}
+
+function selectLatestTimestamp(left: string | null, right: string | null): string | null {
+  if (left === null) {
+    return right;
+  }
+  if (right === null) {
+    return left;
+  }
+  return left >= right ? left : right;
 }
 
 function parseManifestJson(raw: string): Partial<FetchManifest> {
@@ -280,6 +379,7 @@ function normalizeManifest(parsed: Partial<FetchManifest>): FetchManifest {
       olrc: normalizeOlrcState(parsed.sources.olrc),
       congress: normalizeCongressState(parsed.sources.congress),
       govinfo: normalizeGovInfoState(parsed.sources.govinfo),
+      'govinfo-bulk': normalizeGovInfoBulkManifestState((parsed.sources as Record<string, unknown>)['govinfo-bulk']),
       voteview: normalizeVoteviewState(parsed.sources.voteview),
       legislators: normalizeLegislatorsState(parsed.sources.legislators),
     },
