@@ -53,14 +53,17 @@ export function parseGovInfoBulkListing(xml: string, baseUrl: string): GovInfoBu
       name,
       href,
       url: url.toString(),
-      kind: classifyListingEntry({ name, href, url: url.toString() }),
+      kind: classifyListingEntry({ name, href, url: url.toString() }, entry),
     });
   }
 
   return dedupeEntries(entries);
 }
 
-export function classifyListingEntry(entry: Pick<GovInfoBulkListingEntry, 'name' | 'href' | 'url'>): 'directory' | 'file' {
+export function classifyListingEntry(entry: Pick<GovInfoBulkListingEntry, 'name' | 'href' | 'url'>, rawEntry?: Record<string, unknown>): 'directory' | 'file' {
+  if (rawEntry?.folder === true || rawEntry?.folder === 'true') {
+    return 'directory';
+  }
   if (entry.href.endsWith('/') || entry.name.endsWith('/') || new URL(entry.url).pathname.endsWith('/')) {
     return 'directory';
   }
@@ -82,6 +85,12 @@ export function isAllowedGovInfoBulkUrl(url: URL): boolean {
 function findEntriesRoot(parsed: unknown): unknown {
   if (!isRecord(parsed)) {
     throw new Error('invalid_listing_payload: listing XML did not parse into an object');
+  }
+
+  // GovInfo XML: <data><files><file>...</file></files></data>
+  const data = parsed.data;
+  if (isRecord(data) && data.files) {
+    return data.files;
   }
 
   return parsed.directory ?? parsed.listing ?? parsed.files ?? parsed;
@@ -119,6 +128,9 @@ function readStringField(entry: Record<string, unknown>, fields: string[]): stri
     const value = entry[field];
     if (typeof value === 'string' && value.trim().length > 0) {
       return value.trim();
+    }
+    if (typeof value === 'number') {
+      return String(value);
     }
   }
   return null;
