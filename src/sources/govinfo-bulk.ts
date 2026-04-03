@@ -1,8 +1,10 @@
 import { createWriteStream } from 'node:fs';
-import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { Readable, Transform } from 'node:stream';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { pipeline } from 'node:stream/promises';
 import { XMLParser } from 'fast-xml-parser';
 import yauzl, { type Entry as YauzlEntry, type ZipFile as YauzlZipFile } from 'yauzl';
@@ -320,10 +322,11 @@ async function downloadBulkArtifact(options: {
   const response = await fetchFile(options.entry.url, options.fetchImpl);
   const temporaryPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
   await mkdir(dirname(targetPath), { recursive: true });
+  let temporaryExtractionRoot: string | null = null;
   try {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await writeFile(temporaryPath, buffer, { mode: 0o640 });
-    const byteSize = Number.parseInt(response.headers.get('content-length') ?? String(buffer.byteLength), 10);
+    const streamedByteCount = await streamResponseToDisk(response, temporaryPath);
+    const headerByteCount = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+    const byteSize = Number.isFinite(headerByteCount) && headerByteCount > 0 ? headerByteCount : streamedByteCount;
     const fileKind = detectFileKind(options.entry.url);
     const extractionRoot = fileKind === 'zip' ? resolve(dirname(targetPath), 'extracted') : null;
 
@@ -331,28 +334,39 @@ async function downloadBulkArtifact(options: {
       const xml = await readFile(temporaryPath, 'utf8');
       validateXmlPayload(xml);
     } else if (fileKind === 'zip') {
-      const tempExtractionRoot = await mkdtemp(resolve(dirname(targetPath), '.extract-'));
-      try {
-        await extractZipSafely(temporaryPath, tempExtractionRoot);
-        const xmlFiles = await collectXmlFiles(tempExtractionRoot);
-        if (xmlFiles.length === 0) {
-          throw new Error('invalid_payload: ZIP file contained no XML artifacts');
-        }
-        if (options.collection === 'BILLSTATUS') {
-          const sampleXml = await readFile(xmlFiles[0], 'utf8');
-          validateXmlPayload(sampleXml);
-        }
-        if (extractionRoot !== null) {
-          await rm(extractionRoot, { recursive: true, force: true });
-          await rename(tempExtractionRoot, extractionRoot);
-        }
-      } catch (error) {
-        await rm(tempExtractionRoot, { recursive: true, force: true });
-        throw error;
+      temporaryExtractionRoot = await mkdtemp(resolve(dirname(targetPath), '.extract-'));
+      await extractZipSafely(temporaryPath, temporaryExtractionRoot);
+      const xmlFiles = await collectXmlFiles(temporaryExtractionRoot);
+      if (xmlFiles.length === 0) {
+        throw new Error('invalid_payload: ZIP file contained no XML artifacts');
+      }
+      if (options.collection === 'BILLSTATUS') {
+        const sampleXml = await readFile(xmlFiles[0], 'utf8');
+        validateXmlPayload(sampleXml);
       }
     } else {
       const payload = await readFile(temporaryPath, 'utf8');
       validateXmlPayload(payload);
+    }
+
+    if (!options.force && await wasArtifactCompletedByAnotherWriter(options.fileKey, options.dataDirectory)) {
+      await rm(temporaryPath, { force: true });
+      if (temporaryExtractionRoot !== null) {
+        await rm(temporaryExtractionRoot, { recursive: true, force: true });
+      }
+      const refreshedManifest = await readManifest(options.dataDirectory);
+      const refreshedState = ensureGovInfoBulkState(refreshedManifest);
+      const refreshedEntry = refreshedState.files[options.fileKey];
+      if (refreshedEntry) {
+        options.state.files[options.fileKey] = refreshedEntry;
+      }
+      return 'skipped';
+    }
+
+    if (temporaryExtractionRoot !== null && extractionRoot !== null) {
+      await rm(extractionRoot, { recursive: true, force: true });
+      await rename(temporaryExtractionRoot, extractionRoot);
+      temporaryExtractionRoot = null;
     }
 
     await rename(temporaryPath, targetPath);
@@ -376,6 +390,9 @@ async function downloadBulkArtifact(options: {
     return 'downloaded';
   } catch (error) {
     await rm(temporaryPath, { force: true });
+    if (temporaryExtractionRoot !== null) {
+      await rm(temporaryExtractionRoot, { recursive: true, force: true });
+    }
     options.state.files[options.fileKey] = {
       ...initialState,
       source_url: options.entry.url,
@@ -390,6 +407,33 @@ async function downloadBulkArtifact(options: {
     await persistGovInfoBulkState(options.manifest, options.dataDirectory, options.state);
     return 'failed';
   }
+}
+
+async function streamResponseToDisk(response: Response, destinationPath: string): Promise<number> {
+  if (response.body === null) {
+    throw new Error('upstream_request_failed: GovInfo bulk file response had no readable body');
+  }
+
+  let byteCount = 0;
+  const countBytes = new Transform({
+    transform(chunk, _encoding, callback) {
+      byteCount += Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk));
+      callback(null, chunk);
+    },
+  });
+
+  await pipeline(Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), countBytes, createWriteStream(destinationPath, { mode: 0o640 }));
+  return byteCount;
+}
+
+async function wasArtifactCompletedByAnotherWriter(fileKey: string, dataDirectory: string): Promise<boolean> {
+  const refreshedManifest = await readManifest(dataDirectory);
+  const refreshedState = ensureGovInfoBulkState(refreshedManifest);
+  const refreshedEntry = refreshedState.files[fileKey];
+  if (!refreshedEntry) {
+    return false;
+  }
+  return isResumeComplete(refreshedEntry, dataDirectory);
 }
 
 async function fetchListing(url: string, fetchImpl: typeof fetch): Promise<GovInfoBulkListingEntry[]> {

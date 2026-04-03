@@ -282,7 +282,7 @@ describe('govinfo bulk utilities', () => {
       expect(secondResult.ok).toBe(true);
 
       const finalPath = resolve(dataDirectory, 'cache/govinfo-bulk/BILLSUM/119/summaries.xml');
-      expect(readFileSync(finalPath, 'utf8')).toContain('<writer>second</writer>');
+      expect(readFileSync(finalPath, 'utf8')).toContain('<writer>first</writer>');
 
       const manifest = await readManifest(dataDirectory);
       const state = (manifest.sources as typeof manifest.sources & {
