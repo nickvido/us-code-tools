@@ -501,7 +501,7 @@ async function fetchText(url: string, fetchImpl: typeof fetch, source: string): 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(url, { signal: controller.signal, redirect: 'follow' });
+    const response = await fetchImpl(url, { signal: controller.signal, redirect: 'follow', headers: { 'Accept': 'application/xml' } });
     const body = await response.text();
     logNetworkEvent({ level: response.ok ? 'info' : 'error', event: 'network.request', source, method: 'GET', url, attempt: 1, cache_status: 'miss', duration_ms: Date.now() - startedAt, status_code: response.status });
     if (!response.ok) {
