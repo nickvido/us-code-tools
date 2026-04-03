@@ -251,27 +251,44 @@ async function discoverFilesForCongress(options: {
   result: GovInfoBulkResult;
   requestCheckpoint: GovInfoBulkCheckpointState;
 }): Promise<QueueFile[]> {
-  const queue: Array<{ entry: GovInfoBulkListingEntry; listingPath: string[] }> = [{ entry: options.directoryEntry, listingPath: [] }];
   const files: QueueFile[] = [];
 
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) {
+  // First level: list bill-type subdirectories (hr, s, hjres, etc.)
+  options.result.directories_visited += 1;
+  const typeEntries = await fetchListing(options.directoryEntry.url, options.fetchImpl);
+
+  for (const typeEntry of typeEntries) {
+    if (typeEntry.kind !== 'directory') {
       continue;
     }
+
+    // List files in each bill-type directory
     options.result.directories_visited += 1;
-    options.requestCheckpoint.pending_directory_urls = queue.map((item) => item.entry.url);
-    const listing = await fetchListing(current.entry.url, options.fetchImpl);
-    for (const entry of listing) {
+    const billTypeListing = await fetchListing(typeEntry.url, options.fetchImpl);
+
+    // Prefer the bulk ZIP if available (e.g. BILLSTATUS-119-hr.zip)
+    const zipEntry = billTypeListing.find((entry) => entry.kind === 'file' && entry.name.toLowerCase().endsWith('.zip'));
+    if (zipEntry) {
+      files.push({
+        entry: zipEntry,
+        collection: options.collection,
+        congress: options.congress,
+        listingPath: [typeEntry.name],
+      });
+      options.result.files_discovered += 1;
+      continue;
+    }
+
+    // Fallback: collect individual XML files
+    for (const entry of billTypeListing) {
       if (entry.kind === 'directory') {
-        queue.push({ entry, listingPath: [...current.listingPath, entry.name] });
         continue;
       }
       files.push({
         entry,
         collection: options.collection,
         congress: options.congress,
-        listingPath: current.listingPath,
+        listingPath: [typeEntry.name],
       });
       options.result.files_discovered += 1;
     }
