@@ -2,7 +2,9 @@ import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-export type SourceName = 'olrc' | 'congress' | 'govinfo' | 'voteview' | 'legislators';
+import { normalizeGovInfoBulkManifestState, type GovInfoBulkManifestState } from '../sources/govinfo-bulk.js';
+
+export type SourceName = 'olrc' | 'congress' | 'govinfo' | 'govinfo-bulk' | 'voteview' | 'legislators';
 
 export interface FailureSummary {
   code: string;
@@ -162,6 +164,7 @@ export interface FetchManifest {
     olrc: OlrcManifestState;
     congress: CongressManifestState;
     govinfo: GovInfoManifestState;
+    'govinfo-bulk': GovInfoBulkManifestState;
     voteview: SourceStatusSummary & { files?: Record<string, unknown>; indexes?: unknown[] };
     legislators: LegislatorsManifestState;
   };
@@ -197,6 +200,7 @@ export function createEmptyManifest(): FetchManifest {
         query_scopes: {},
         checkpoints: {},
       },
+      'govinfo-bulk': normalizeGovInfoBulkManifestState(null),
       voteview: { last_success_at: null, last_failure: null, files: {}, indexes: [] },
       legislators: {
         last_success_at: null,
@@ -280,6 +284,7 @@ function normalizeManifest(parsed: Partial<FetchManifest>): FetchManifest {
       olrc: normalizeOlrcState(parsed.sources.olrc),
       congress: normalizeCongressState(parsed.sources.congress),
       govinfo: normalizeGovInfoState(parsed.sources.govinfo),
+      'govinfo-bulk': normalizeGovInfoBulkManifestState((parsed.sources as Record<string, unknown>)['govinfo-bulk']),
       voteview: normalizeVoteviewState(parsed.sources.voteview),
       legislators: normalizeLegislatorsState(parsed.sources.legislators),
     },

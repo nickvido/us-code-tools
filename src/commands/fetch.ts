@@ -11,6 +11,7 @@ import {
 } from '../sources/olrc.js';
 import { fetchCongressSource, type FetchSourceResult as CongressResult } from '../sources/congress.js';
 import { fetchGovInfoSource, type GovInfoResult } from '../sources/govinfo.js';
+import { fetchGovInfoBulkSource, type GovInfoBulkResult } from '../sources/govinfo-bulk.js';
 import { fetchVoteViewSource, type VoteViewResult } from '../sources/voteview.js';
 import { fetchUnitedStatesSource, type UnitedStatesResult } from '../sources/unitedstates.js';
 
@@ -23,6 +24,7 @@ export interface FetchArgs {
   listVintages: boolean;
   vintage: string | null;
   allVintages: boolean;
+  collection: 'BILLSTATUS' | 'BILLS' | 'BILLSUM' | 'PLAW' | null;
 }
 
 interface ValidationError {
@@ -30,7 +32,7 @@ interface ValidationError {
   message: string;
 }
 
-type FetchResult = OlrcFetchResult | OlrcListVintagesResult | OlrcAllVintagesResult | CongressResult | GovInfoResult | VoteViewResult | UnitedStatesResult;
+type FetchResult = OlrcFetchResult | OlrcListVintagesResult | OlrcAllVintagesResult | CongressResult | GovInfoResult | GovInfoBulkResult | VoteViewResult | UnitedStatesResult;
 
 export async function runFetchCommand(argv: string[]): Promise<number> {
   const parsed = parseFetchArgs(argv);
@@ -65,6 +67,7 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
   let listVintages = false;
   let vintage: string | null = null;
   let allVintages = false;
+  let collection: 'BILLSTATUS' | 'BILLS' | 'BILLSUM' | 'PLAW' | null = null;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -118,6 +121,18 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
       continue;
     }
 
+    if (token.startsWith('--collection=')) {
+      const candidate = token.slice('--collection='.length);
+      if (collection !== null) {
+        return invalid('--collection may only be provided once');
+      }
+      if (candidate !== 'BILLSTATUS' && candidate !== 'BILLS' && candidate !== 'BILLSUM' && candidate !== 'PLAW') {
+        return invalid("--collection must be one of BILLSTATUS, BILLS, BILLSUM, or PLAW");
+      }
+      collection = candidate;
+      continue;
+    }
+
     if (token.startsWith('--congress=')) {
       const candidate = token.slice('--congress='.length);
       if (!/^[0-9]+$/.test(candidate)) {
@@ -135,15 +150,19 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
   }
 
   if (status) {
-    if (force || all || source !== null || congress !== null || listVintages || vintage !== null || allVintages) {
+    if (force || all || source !== null || congress !== null || listVintages || vintage !== null || allVintages || collection !== null) {
       return invalid('--status cannot be combined with other fetch selectors or --force');
     }
-    return { ok: true, value: { status, force, all, source, congress, listVintages, vintage, allVintages } };
+    return { ok: true, value: { status, force, all, source, congress, listVintages, vintage, allVintages, collection } };
   }
 
   const hasHistoricalOlrcSelector = listVintages || vintage !== null || allVintages;
   if (hasHistoricalOlrcSelector && source !== 'olrc') {
     return invalid('OLRC historical selectors require --source=olrc');
+  }
+
+  if (collection !== null && source !== 'govinfo-bulk') {
+    return invalid('--collection requires --source=govinfo-bulk');
   }
 
   if (listVintages) {
@@ -172,6 +191,10 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
     return invalid('--all cannot be combined with --source');
   }
 
+  if (all && collection !== null) {
+    return invalid('--all cannot be combined with --collection');
+  }
+
   if (source === 'congress' && congress === null) {
     return invalid('--source=congress requires --congress=<integer>');
   }
@@ -182,7 +205,7 @@ export function parseFetchArgs(argv: string[]): { ok: true; value: FetchArgs } |
 
   return {
     ok: true,
-    value: { status, force, all, source, congress, listVintages, vintage, allVintages },
+    value: { status, force, all, source, congress, listVintages, vintage, allVintages, collection },
   };
 }
 
@@ -193,6 +216,7 @@ async function runAllSources(args: FetchArgs): Promise<FetchResult[]> {
       { source: 'olrc', ok: false, requested_scope: { titles: '1..54' }, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
       { source: 'congress', ok: Boolean(args.congress !== null && process.env.API_DATA_GOV_KEY), requested_scope: { congress: args.congress ?? `93..${bulkScope.congress.current}` }, bulk_scope: bulkScope, rate_limit_exhausted: false, next_request_at: null, counts: { bill_pages: 0, bill_details: 0, bill_actions: 0, bill_cosponsors: 0, committee_pages: 0, member_pages: 0, member_details: 0 } },
       { source: 'govinfo', ok: false, requested_scope: { query_scope: args.congress === null ? 'unfiltered' : `congress=${args.congress}` }, rate_limit_exhausted: false, next_request_at: null, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
+      { source: 'govinfo-bulk', ok: false, collections: ['BILLSTATUS', 'BILLS', 'BILLSUM', 'PLAW'], congress: args.congress, discovered_congresses: [], directories_visited: 0, files_discovered: 0, files_downloaded: 0, files_skipped: 0, files_failed: 0, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
       { source: 'voteview', ok: false, requested_scope: { files: ['HSall_members.csv', 'HSall_votes.csv', 'HSall_rollcalls.csv'] }, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
       { source: 'legislators', ok: false, requested_scope: { files: ['legislators-current.yaml', 'legislators-historical.yaml', 'committees-current.yaml'] }, error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' } },
     ];
@@ -226,6 +250,24 @@ async function runSingleSource(args: FetchArgs): Promise<FetchResult> {
       return fetchCongressSource({ force: args.force, congress: args.congress, mode: 'single' });
     case 'govinfo':
       return fetchGovInfoSource({ force: args.force, congress: args.congress, mode: 'single' });
+    case 'govinfo-bulk':
+      if (shouldUseOfflineCliFixtures()) {
+        return {
+          source: 'govinfo-bulk',
+          ok: false,
+          collection: args.collection ?? undefined,
+          collections: args.collection === null ? ['BILLSTATUS', 'BILLS', 'BILLSUM', 'PLAW'] : [args.collection],
+          congress: args.congress,
+          discovered_congresses: [],
+          directories_visited: 0,
+          files_discovered: 0,
+          files_downloaded: 0,
+          files_skipped: 0,
+          files_failed: 0,
+          error: { code: 'upstream_request_failed', message: 'live fetch disabled in test environment' },
+        };
+      }
+      return fetchGovInfoBulkSource({ force: args.force, congress: args.congress, collection: args.collection });
     case 'voteview':
       return fetchVoteViewSource({ force: args.force });
     case 'legislators':
@@ -246,7 +288,7 @@ function invalid(message: string): { ok: false; error: ValidationError } {
 }
 
 function isSourceName(value: string): value is SourceName {
-  return value === 'olrc' || value === 'congress' || value === 'govinfo' || value === 'voteview' || value === 'legislators';
+  return value === 'olrc' || value === 'congress' || value === 'govinfo' || value === 'govinfo-bulk' || value === 'voteview' || value === 'legislators';
 }
 
 function shouldUseOfflineCliFixtures(): boolean {
