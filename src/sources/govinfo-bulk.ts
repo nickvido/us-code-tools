@@ -349,7 +349,13 @@ async function downloadBulkArtifact(options: {
       validateXmlPayload(payload);
     }
 
-    if (!options.force && await wasArtifactCompletedByAnotherWriter(options.fileKey, options.dataDirectory)) {
+    if (!options.force && await wasArtifactCompletedByAnotherWriter({
+      fileKey: options.fileKey,
+      dataDirectory: options.dataDirectory,
+      targetPath,
+      fileKind,
+      extractionRoot,
+    })) {
       await rm(temporaryPath, { force: true });
       if (temporaryExtractionRoot !== null) {
         await rm(temporaryExtractionRoot, { recursive: true, force: true });
@@ -426,14 +432,43 @@ async function streamResponseToDisk(response: Response, destinationPath: string)
   return byteCount;
 }
 
-async function wasArtifactCompletedByAnotherWriter(fileKey: string, dataDirectory: string): Promise<boolean> {
-  const refreshedManifest = await readManifest(dataDirectory);
+async function wasArtifactCompletedByAnotherWriter(options: {
+  fileKey: string;
+  dataDirectory: string;
+  targetPath: string;
+  fileKind: GovInfoBulkFileState['file_kind'];
+  extractionRoot: string | null;
+}): Promise<boolean> {
+  const refreshedManifest = await readManifest(options.dataDirectory);
   const refreshedState = ensureGovInfoBulkState(refreshedManifest);
-  const refreshedEntry = refreshedState.files[fileKey];
-  if (!refreshedEntry) {
+  const refreshedEntry = refreshedState.files[options.fileKey];
+  if (refreshedEntry && await isResumeComplete(refreshedEntry, options.dataDirectory)) {
+    return true;
+  }
+
+  const hasTargetPath = await pathExists(options.targetPath);
+  if (!hasTargetPath) {
     return false;
   }
-  return isResumeComplete(refreshedEntry, dataDirectory);
+
+  if (options.fileKind !== 'zip') {
+    return true;
+  }
+
+  if (options.extractionRoot === null) {
+    return true;
+  }
+
+  return pathExists(options.extractionRoot);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function fetchListing(url: string, fetchImpl: typeof fetch): Promise<GovInfoBulkListingEntry[]> {
