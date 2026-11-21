@@ -253,7 +253,7 @@ describe('adversary regressions for issue #5 — round 5', () => {
           });
         }
 
-        if (url === 'https://uscode.house.gov/download/download.shtml') {
+        if (url === 'https://uscode.house.gov/download.html') {
           return makeTextResponse(listingHtml, 'text/html');
         }
 
@@ -277,9 +277,9 @@ describe('adversary regressions for issue #5 — round 5', () => {
       });
 
       const nonListingUrls = requestedUrls.filter(
-        (url) => url !== 'https://uscode.house.gov/' && url !== 'https://uscode.house.gov/download/download.shtml',
+        (url) => url !== 'https://uscode.house.gov/' && url !== 'https://uscode.house.gov/download.html',
       );
-      expect(requestedUrls).toContain('https://uscode.house.gov/download/download.shtml');
+      expect(requestedUrls).toContain('https://uscode.house.gov/download.html');
       expect(requestedUrls).not.toContain('https://uscode.house.gov/download/annualtitlefiles.shtml');
       expect(nonListingUrls.length).toBe(53);
       expect(nonListingUrls.every((url) => url.includes(`/releasepoints/us/pl/${latestVintage}/`))).toBe(true);

@@ -25,6 +25,7 @@ VINTAGES=(
   118-82
   118-158
   119-73
+  119-142
 )
 
 TOTAL=${#VINTAGES[@]}
@@ -49,9 +50,9 @@ for i in "${!VINTAGES[@]}"; do
   echo "[$n/$TOTAL] Vintage $v"
   echo "────────────────────────────────────────"
 
-  # Run in a separate process with generous heap (8GB)
+  # Run in a separate process with generous heap (default 6GB; override with BACKFILL_HEAP_MB)
   # The orchestrator's resume logic will skip already-committed vintages
-  if node --max-old-space-size=8192 "$PROJECT_ROOT/dist/index.js" backfill \
+  if node --max-old-space-size=${BACKFILL_HEAP_MB:-6144} "$PROJECT_ROOT/dist/index.js" backfill \
     --phase olrc --target "$TARGET" --vintages "$ACCUMULATED" 2>&1; then
     echo "  ✓ done"
   else
@@ -69,4 +70,4 @@ echo "Inspect with:"
 echo "  cd $TARGET"
 echo "  git log --oneline --decorate"
 echo "  git tag -l"
-echo "  git diff annual/2013..annual/2025 --stat"
+echo "  git diff annual/2013..annual/2026 --stat"

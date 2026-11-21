@@ -5,7 +5,7 @@ describe('OLRC backfill planner', () => {
   it('resolves known vintages by id', () => {
     const entry = resolveVintageEntry('119-73');
     expect(entry).toBeDefined();
-    expect(entry!.year).toBe(2025);
+    expect(entry!.year).toBe(2026);
     expect(entry!.congress).toBe(119);
   });
 
@@ -23,7 +23,7 @@ describe('OLRC backfill planner', () => {
   it('assigns annual tags for each vintage', () => {
     const plan = buildOlrcBackfillPlan(['113-21', '119-73']);
     expect(plan.tags.get('annual/2013')).toBe('113-21');
-    expect(plan.tags.get('annual/2025')).toBe('119-73');
+    expect(plan.tags.get('annual/2026')).toBe('119-73');
   });
 
   it('assigns congress boundary tags', () => {

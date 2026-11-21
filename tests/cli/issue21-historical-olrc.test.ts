@@ -66,7 +66,7 @@ globalThis.fetch = async (input, init) => {
     });
   }
 
-  if (url === 'https://uscode.house.gov/download/download.shtml') {
+  if (url === 'https://uscode.house.gov/download.html') {
     return new Response(htmlForListing(spec.vintages), {
       status: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8' },

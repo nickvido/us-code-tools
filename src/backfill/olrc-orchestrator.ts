@@ -116,8 +116,10 @@ async function transformVintage(
         totalSections += titleIr.sections.length;
         totalFiles += writeResult.filesWritten;
       }
-    } catch {
-      // Skip titles that fail to parse — non-fatal for backfill
+    } catch (error) {
+      // Skip titles that fail to parse — non-fatal for backfill, but never silent
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[backfill]   ✗ title ${target.cacheKey} skipped (${vintage}): ${message}\n`);
       continue;
     }
   }
