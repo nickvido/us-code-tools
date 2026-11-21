@@ -7,6 +7,12 @@ const HIERARCHY_TAGS = ['subtitle', 'part', 'subpart', 'chapter', 'subchapter'] 
 const SECTION_BODY_TAGS = ['subsection', 'paragraph', 'subparagraph', 'clause', 'subclause', 'item', 'subitem'] as const;
 const NOTE_SCOPE_TAGS = new Set(['note', 'notes']);
 const BLOCK_NOTE_TAGS = new Set(['p', 'section', 'table']);
+// Both parsers see the same <section> elements but walk them in different orders (the non-ordered tree
+// groups children by tag, so a chapter's <subchapter> children are visited before its direct <section>
+// children). Each <section> start tag is stamped with its document position so the two views can be
+// paired by identity rather than by list index.
+const SECTION_SEQUENCE_ATTRIBUTE = 'data-us-code-tools-section-seq';
+const SECTION_SEQUENCE_KEY = `@_${SECTION_SEQUENCE_ATTRIBUTE}`;
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -91,7 +97,7 @@ interface XmlNode {
 
 export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult {
   const parseErrors: ParseError[] = [];
-  const strippedXml = stripBom(xml);
+  const strippedXml = stampSectionSequence(stripBom(xml));
 
   let document: { uslm?: { title?: XmlNode }; uscDoc?: { meta?: XmlNode; main?: { title?: XmlNode } } };
   let orderedDocument: OrderedEntry[];
@@ -132,10 +138,12 @@ export function parseUslmToIr(xml: string, xmlPath?: string): ParsedTitleResult 
   };
 
   let uncodifiedSectionIndex = 0;
-  const orderedSections = collectOrderedSectionNodes(orderedTitleNode);
+  const orderedSectionsBySequence = new Map(
+    collectOrderedSectionNodes(orderedTitleNode).map((entry) => [entry.sequence, entry] as const),
+  );
 
-  for (const [sectionIndex, { node: sectionNode, hierarchy }] of collectSectionNodes(titleNode).entries()) {
-    const orderedSectionNode = orderedSections[sectionIndex];
+  for (const { node: sectionNode, hierarchy } of collectSectionNodes(titleNode)) {
+    const orderedSectionNode = orderedSectionsBySequence.get(readSectionSequence(sectionNode));
     const sectionNumber = readCanonicalNumText(parseErrors, sectionNode.num, xmlPath, 'section number');
     const fallbackSectionNumber = sectionNumber || `uncodified-${++uncodifiedSectionIndex}`;
 
@@ -209,8 +217,20 @@ function findOrderedPath(nodes: OrderedEntry[] | undefined, path: string[]): Ord
   return current;
 }
 
-function collectOrderedSectionNodes(titleNode: OrderedEntry[]): Array<{ children: OrderedEntry[]; hierarchy: HierarchyIR }> {
-  const sections: Array<{ children: OrderedEntry[]; hierarchy: HierarchyIR }> = [];
+type OrderedSectionNode = { children: OrderedEntry[]; hierarchy: HierarchyIR; sequence: string | undefined };
+
+function stampSectionSequence(xml: string): string {
+  let sequence = 0;
+  return xml.replace(/<((?:[\w.-]+:)?section)(?=[\s/>])/g, (_match, tag: string) => `<${tag} ${SECTION_SEQUENCE_ATTRIBUTE}="${sequence++}"`);
+}
+
+function readSectionSequence(sectionNode: XmlNode): string | undefined {
+  const value = (sectionNode as Record<string, unknown>)[SECTION_SEQUENCE_KEY];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function collectOrderedSectionNodes(titleNode: OrderedEntry[]): OrderedSectionNode[] {
+  const sections: OrderedSectionNode[] = [];
   collectOrderedSectionNodesRecursive(titleNode, {}, sections, false);
   return sections;
 }
@@ -265,7 +285,7 @@ function collectSectionNodesRecursive(
 function collectOrderedSectionNodesRecursive(
   nodes: OrderedEntry[],
   hierarchy: HierarchyIR,
-  sections: Array<{ children: OrderedEntry[]; hierarchy: HierarchyIR }>,
+  sections: OrderedSectionNode[],
   insideNoteScope: boolean,
 ): void {
   for (const entry of nodes) {
@@ -288,7 +308,7 @@ function collectOrderedSectionNodesRecursive(
 
     if (tag === 'section') {
       if (!insideNoteScope) {
-        sections.push({ children: value, hierarchy });
+        sections.push({ children: value, hierarchy, sequence: orderedAttributes(entry)?.[SECTION_SEQUENCE_KEY] });
       }
       collectOrderedSectionNodesRecursive(value, hierarchy, sections, insideNoteScope);
       continue;
