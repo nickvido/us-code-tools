@@ -265,7 +265,7 @@ describe('OLRC source and cache behavior', () => {
     }
   }, 45000);
 
-  it('defaults OLRC vintage discovery to download.shtml instead of probing annualtitlefiles.shtml first', async () => {
+  it('defaults OLRC vintage discovery to download.html instead of probing annualtitlefiles.shtml first', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
     const mod = await safeImport(modulePath);
     ensureModuleLoaded(modulePath, mod);
@@ -300,7 +300,7 @@ describe('OLRC source and cache behavior', () => {
         });
       }
 
-      if (url === 'https://uscode.house.gov/download/download.shtml') {
+      if (url === 'https://uscode.house.gov/download.html') {
         expect(init?.headers).toBeDefined();
         const headers = new Headers(init?.headers);
         expect(headers.get('cookie') ?? headers.get('Cookie')).toContain('JSESSIONID=current-only');
@@ -330,7 +330,7 @@ describe('OLRC source and cache behavior', () => {
       const result = await fetchOlrcSource({ force: false });
       expect((result as any)?.ok).toBe(true);
       expect(requests).toContain('https://uscode.house.gov/');
-      expect(requests).toContain('https://uscode.house.gov/download/download.shtml');
+      expect(requests).toContain('https://uscode.house.gov/download.html');
       expect(requests).toContain('https://uscode.house.gov/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip');
       expect(requests).not.toContain('https://uscode.house.gov/download/annualtitlefiles.shtml');
     } finally {
@@ -344,7 +344,7 @@ describe('OLRC source and cache behavior', () => {
     }
   });
 
-  it('bootstraps homepage cookies before requesting download.shtml and releasepoint ZIPs', async () => {
+  it('bootstraps homepage cookies before requesting download.html and releasepoint ZIPs', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
     const mod = await safeImport(modulePath);
     ensureModuleLoaded(modulePath, mod);
@@ -377,7 +377,7 @@ describe('OLRC source and cache behavior', () => {
         });
       }
 
-      if (url === 'https://uscode.house.gov/download/download.shtml') {
+      if (url === 'https://uscode.house.gov/download.html') {
         return new Response(`
           <html><body>
             <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">Title 1</a>
@@ -396,7 +396,7 @@ describe('OLRC source and cache behavior', () => {
       const result = await fetchOlrcSource({ force: false, cacheRoot });
       expect((result as any)?.ok).toBe(true);
 
-      const listing = requests.find((request) => request.url === 'https://uscode.house.gov/download/download.shtml');
+      const listing = requests.find((request) => request.url === 'https://uscode.house.gov/download.html');
       const zip = requests.find((request) => request.url.endsWith('xml_usc01@119-73.zip'));
 
       expect(requests[0]?.url).toBe('https://uscode.house.gov/');
@@ -408,7 +408,7 @@ describe('OLRC source and cache behavior', () => {
     }
   });
 
-  it('retries homepage bootstrap after a transient bootstrap failure before touching download.shtml', async () => {
+  it('retries homepage bootstrap after a transient bootstrap failure before touching download.html', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
     const mod = await safeImport(modulePath);
     ensureModuleLoaded(modulePath, mod);
@@ -449,7 +449,7 @@ describe('OLRC source and cache behavior', () => {
         });
       }
 
-      if (url === 'https://uscode.house.gov/download/download.shtml') {
+      if (url === 'https://uscode.house.gov/download.html') {
         expect(headers.get('cookie') ?? headers.get('Cookie')).toContain('JSESSIONID=recovered-session');
         return new Response(`
           <html><body>
@@ -474,14 +474,14 @@ describe('OLRC source and cache behavior', () => {
         'https://uscode.house.gov/',
         'https://uscode.house.gov/',
       ]);
-      expect(requests[2]?.url).toBe('https://uscode.house.gov/download/download.shtml');
+      expect(requests[2]?.url).toBe('https://uscode.house.gov/download.html');
     } finally {
       globalThis.fetch = originalFetch;
       rmSync(cacheRoot, { recursive: true, force: true });
     }
   });
 
-  it('parses download.shtml releasepoint listings by newest numeric vintage and ignores appendix links', async () => {
+  it('parses download.html releasepoint listings by newest numeric vintage and ignores appendix links', async () => {
     const modulePath = resolve(process.cwd(), 'src', 'sources', 'olrc.ts');
     const mod = await safeImport(modulePath);
     ensureModuleLoaded(modulePath, mod);
@@ -500,7 +500,7 @@ describe('OLRC source and cache behavior', () => {
         return new Response('ok', { status: 200, headers: { 'Set-Cookie': 'JSESSIONID=listing-session; Path=/; HttpOnly' } });
       }
 
-      if (url === 'https://uscode.house.gov/download/download.shtml') {
+      if (url === 'https://uscode.house.gov/download.html') {
         return new Response(`
           <html><body>
             <a href="/download/releasepoints/us/pl/118/200/xml_usc01@118-200.zip">older title 1</a>
@@ -578,7 +578,7 @@ describe('OLRC source and cache behavior', () => {
         return new Response('ok', { status: 200, headers: { 'Set-Cookie': 'JSESSIONID=reserved-empty; Path=/; HttpOnly' } });
       }
 
-      if (url === 'https://uscode.house.gov/download/download.shtml') {
+      if (url === 'https://uscode.house.gov/download.html') {
         return new Response(`
           <html><body>
             <a href="/download/releasepoints/us/pl/119/73/xml_usc01@119-73.zip">Title 1</a>

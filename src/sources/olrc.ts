@@ -18,13 +18,14 @@ import type {
 } from '../utils/manifest.js';
 import { logNetworkEvent } from '../utils/logger.js';
 
-const DOWNLOAD_TIMEOUT_MS = 500;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
 const DOWNLOAD_RETRY_COUNT = 1;
 const MAX_XML_ENTRY_BYTES = 64 * 1024 * 1024;
 const MAX_LARGE_TITLE_XML_ENTRY_BYTES = 128 * 1024 * 1024;
 const MAX_TOTAL_XML_BYTES = 256 * 1024 * 1024;
 const OLRC_HOME_URL = 'https://uscode.house.gov/';
-const OLRC_LISTING_URL = 'https://uscode.house.gov/download/download.shtml';
+// OLRC moved its download listing from /download/download.shtml to /download.html in its 2026 site redesign.
+const OLRC_LISTING_URL = 'https://uscode.house.gov/download.html';
 const OLRC_LEGACY_LISTING_URL = 'https://uscode.house.gov/download/annualtitlefiles.shtml';
 const FIXTURE_ENV_PREFIX = 'US_CODE_TOOLS_TITLE_';
 const RESERVED_EMPTY_TITLE = 53;

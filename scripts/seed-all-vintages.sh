@@ -25,6 +25,7 @@ VINTAGES=(
   118-82
   118-158
   119-73
+  119-142
 )
 
 echo "=== Seeding ${#VINTAGES[@]} OLRC vintages ==="
